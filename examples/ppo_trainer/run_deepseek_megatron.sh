@@ -1,6 +1,9 @@
 set -x
 
-python3 -m verl.trainer.main_ppo --config-path=./config --config-name='ppo_megatron_trainer'\
+# the config file used: verl/trainer/main_ppo/config/ppo_megatron_trainer.yaml
+
+python3 -m verl.trainer.main_ppo --config-path=config \
+    --config-name='ppo_megatron_trainer.yaml'\
     data.train_files=$HOME/data/gsm8k/train.parquet \
     data.val_files=$HOME/data/gsm8k/test.parquet \
     data.train_batch_size=1024 \
