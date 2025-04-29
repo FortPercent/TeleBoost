@@ -8,6 +8,7 @@ from megatron.core.models.common.vision_module.vision_module import VisionModule
 from megatron.core.transformer.transformer_config import TransformerConfig
 
 from megatron.core import mpu, tensor_parallel
+from teletron.core.context_parallel.pad import pad_for_context_parallel, remove_pad_for_context_parallel, set_origin_length, set_target_length
 from torch import nn
 
 from diffusers.utils import (
@@ -51,8 +52,8 @@ class HunyuanParams:
     out_channels: int = 16
     num_attention_heads: int = 24
     attention_head_dim: int = 128
-    num_layers: int = 20
-    num_single_layers: int = 40
+    num_layers: int = 3
+    num_single_layers: int = 6
     num_refiner_layers: int = 2
     mlp_ratio: float = 4.0
     patch_size: int = 2
@@ -124,7 +125,6 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         super().__init__(transformer_config)
         self.inner_dim = self.num_attention_heads * self.attention_head_dim
         
-        # print((self.patch_size_t, self.patch_size, self.patch_size))
         # 1. Latent and condition embedders
         self.x_embedder = HunyuanVideoPatchEmbed(
             (self.patch_size_t, self.patch_size, self.patch_size), self.in_channels, self.inner_dim
@@ -339,13 +339,29 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         encoder_hidden_states=encoder_hidden_states.contiguous()
         temb=temb.contiguous()
         # attention_mask=attention_mask.contiguous()
-        if mpu.get_context_parallel_group is not None:
+        if mpu.get_context_parallel_world_size() > 1:
+        
+            from teletron.core.tensor_parallel.mappings import (
+                split_forward_gather_backward,
+                gather_forward_split_backward,
+            )
+            length = hidden_states.shape[1]
+            set_origin_length(length)
+            seq_parallel_world_size = mpu.get_context_parallel_world_size()
+            if length % seq_parallel_world_size != 0:
+                pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
+                length = length + pad_size
+            set_target_length(length)
+            hidden_states = pad_for_context_parallel(hidden_states, 1)
+            freqs_cos = pad_for_context_parallel(freqs_cos, 0)
+            freqs_sin = pad_for_context_parallel(freqs_sin, 0)
+            
             hidden_states = split_forward_gather_backward(
                 hidden_states, 
                 mpu.get_context_parallel_group(),
                 dim=1,
                 grad_scale="down"
-            ) # b s n d
+            ) # b s n ds
             freqs_cos = split_forward_gather_backward(
                 freqs_cos,
                 mpu.get_context_parallel_group(),
@@ -369,6 +385,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 freqs_cos,
                 freqs_sin,
             )
+
             hidden_states, encoder_hidden_states = self._checkpointed_forward(
                 "single_stream",
                 hidden_states,
@@ -394,6 +411,10 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 )
                 if os.environ.get("PROFILE_MEMORY"):
                     profiler.record()
+            if mpu.get_context_parallel_world_size() > 1:
+                hidden_states = remove_pad_for_context_parallel(hidden_states, 1)
+                freqs_cos = remove_pad_for_context_parallel(freqs_cos, 0)
+                freqs_sin = remove_pad_for_context_parallel(freqs_sin, 0)
 
             for block in self.single_transformer_blocks:
                 hidden_states, encoder_hidden_states = block(
@@ -407,15 +428,16 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 if os.environ.get("PROFILE_MEMORY"):
                     profiler.record()
 
-        if mpu.get_context_parallel_group is not None:
+        if mpu.get_context_parallel_world_size() > 1:
             hidden_states = gather_forward_split_backward(
                 hidden_states, 
                 mpu.get_context_parallel_group(),
                 dim=1,
                 grad_scale="up"
             )
-
+            hidden_states = remove_pad_for_context_parallel(hidden_states, 1)
         # 5. Output projection
+
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
 
