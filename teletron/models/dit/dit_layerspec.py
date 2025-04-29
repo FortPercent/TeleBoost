@@ -34,11 +34,11 @@ from megatron.core.transformer.custom_layers.transformer_engine import (
     TENorm,
     TERowParallelLinear,
 )
-from diffusers.models.normalization import (
-    AdaLayerNormContinuous,
-    AdaLayerNormZero,
-    AdaLayerNormZeroSingle,
-)
+# from diffusers.models.normalization import (
+#     AdaLayerNormContinuous,
+#     AdaLayerNormZero,
+#     AdaLayerNormZeroSingle,
+# )
 from megatron.core.transformer.utils import sharded_state_dict_default
 from megatron.core.dist_checkpointing.utils import replace_prefix_for_sharding
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
@@ -58,6 +58,11 @@ from teletron.models.dit.dit_attention import (
     JointSelfAttentionSubmodules,
     JointHunyuanAttention,
     HunyuanSingleAttention,
+)
+
+from teletron.models.dit.dit_adaln import (
+    FusedAdaLayerNormZero,
+    FusedAdaLayerNormZeroSingle
 )
 
 from megatron.core.tensor_parallel.mappings import (
@@ -544,13 +549,15 @@ class HunyuanDiTLayer(TransformerLayer):
         config: TransformerConfig,
         submodules: TransformerLayerSubmodules,
         layer_number: int = 1,
+        memory_efficient: bool = False,
         context_pre_only: bool = False,
     ):
         hidden_size = config.hidden_size
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
 
-        self.norm1 = AdaLayerNormZero(hidden_size, norm_type="layer_norm")
-        self.norm1_context= AdaLayerNormZero(hidden_size, norm_type="layer_norm")
+
+        self.norm1 = FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
+        self.norm1_context= FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         
@@ -806,13 +813,15 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         submodules: TransformerLayerSubmodules,
         layer_number: int = 1,
         mlp_ratio: int = 4,
+        memory_efficient: bool = False,
         n_adaln_chunks: int = 3,
         modulation_bias: bool = True,
     ):
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
         hidden_size = config.hidden_size
 
-        self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
+        self.norm = FusedAdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
+
         self.mlp_hidden_dim=hidden_size*mlp_ratio
         # self.proj_mlp=nn.Linear(hidden_size, self.mlp_hidden_dim)
         self.proj_mlp=TEColumnParallelLinear(
