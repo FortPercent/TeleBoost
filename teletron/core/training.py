@@ -34,10 +34,10 @@ def setup_model_and_optimizer_decorators(setup_model_and_optimizer):
     @wraps(setup_model_and_optimizer)
     def wrapper(
                 model_provider_func,
-                              model_type,
-                              no_wd_decay_cond=None,
-                              scale_lr_cond=None,
-                              lr_mult=1.0
+                model_type,
+                no_wd_decay_cond=None,
+                scale_lr_cond=None,
+                lr_mult=1.0
     ):
         """Setup model and optimizer."""
         args = get_args()
