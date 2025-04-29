@@ -579,7 +579,7 @@ class HunyuanDiTLayer(TransformerLayer):
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
             self.norm1_context(encoder_hidden_states, emb=temb)
         )
-
+        
         # 2. Joint attention
         attn_output, context_attn_output = self.self_attention(
             # hidden_states=norm_hidden_states,
@@ -873,6 +873,7 @@ class HunyuanSingleDiTLayer(TransformerLayer):
             freqs_cos=freqs_cos,
             freqs_sin=freqs_sin,
         )
+
         #sbd -> bsd
         # attn_output = attn_output.transpose(0, 1)
         # context_attn_output = context_attn_output.transpose(0, 1)

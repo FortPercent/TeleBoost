@@ -12,6 +12,7 @@ from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from teletron.core.tensor_parallel.mappings import split_forward_gather_backward, gather_forward_split_backward 
+from teletron.core.context_parallel.pad import pad_for_context_parallel, remove_pad_for_context_parallel, remove_pad_with_encoder_for_context_parallel
 import torch.nn as nn
 @dataclass
 class JointSelfAttentionSubmodules:
@@ -653,7 +654,6 @@ class JointHunyuanAttention(Attention):
         # Get the query, key and value tensors based on the type of attention -
         # self or cross attn.
         # bs, img_seq_len, _, _ = img_q.shape
-
         query, key, value = self.get_query_key_value_tensors(hidden_states) #(b,h,s,d)
         added_query, added_key, added_value = self.get_added_query_key_value_tensors(additional_hidden_states)
         bs, _, img_seq_len, _ = query.shape
@@ -694,7 +694,7 @@ class JointHunyuanAttention(Attention):
                 rotary_pos_emb
             )
         
-        if mpu.get_context_parallel_group() is not None:
+        if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 1, 2)
             key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),key,  1, 2)
@@ -708,11 +708,17 @@ class JointHunyuanAttention(Attention):
             # absolute positional embedding.
             # otherwise, only relative positional embedding takes effect
             # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
+            
+            query, key ,value = map(
+                lambda x: remove_pad_for_context_parallel(x, dim=2),
+                [query, key, value]
+            )
+        encoder_length = added_query.shape[2]
 
         query = torch.cat([query, added_query], dim=2).permute(2, 0, 1, 3).contiguous()  # bhsd -> sbhd
         key = torch.cat([key, added_key], dim=2).permute(2, 0, 1, 3).contiguous()
         value = torch.cat([value, added_value], dim=2).permute(2, 0, 1, 3).contiguous()
-        
+
         # ==================================
         # core attention computation
         # ==================================
@@ -736,12 +742,17 @@ class JointHunyuanAttention(Attention):
             query, key, value = [x.permute(1, 2, 0, 3).contiguous() for x in (query, key, value)] # sbhd -> bhsd
             torch.backends.cuda.enable_cudnn_sdp(False)
             core_attn_out = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
-        
-        hidden_states = core_attn_out[:, :, :img_seq_len * mpu.get_context_parallel_world_size(), :]
-        encoder_hidden_states = core_attn_out[:, :, img_seq_len * mpu.get_context_parallel_world_size():, :]
+
+        # hidden_states = core_attn_out[:, :, :img_seq_len * mpu.get_context_parallel_world_size(), :]
+        # encoder_hidden_states = core_attn_out[:, :, img_seq_len * mpu.get_context_parallel_world_size():, :]
+        hidden_states = core_attn_out[:, :, : -encoder_length, :]
+        encoder_hidden_states = core_attn_out[:, :, -encoder_length : , :]
 
         hidden_states = hidden_states.transpose(1, 2)   # bnsd -> bsnd
         encoder_hidden_states = encoder_hidden_states.transpose(1, 2)   # bnsd -> bsnd
+
+        if mpu.get_context_parallel_world_size() > 1:
+            hidden_states = pad_for_context_parallel(hidden_states, 1)
 
         # if mpu.get_context_parallel_group() is not None:
         if mpu.get_context_parallel_world_size() > 1:
@@ -751,6 +762,7 @@ class JointHunyuanAttention(Attention):
 
         hidden_states = hidden_states.flatten(2, 3).contiguous()
         encoder_hidden_states = encoder_hidden_states.flatten(2, 3).contiguous()
+
         #dropout:p=0.0
         output, bias = self.linear_proj(hidden_states)
         encoder_output, encoder_bias = self.added_linear_proj(encoder_hidden_states)
@@ -908,7 +920,7 @@ class HunyuanSingleAttention(SelfAttention):
         # print(f'megatron q before ln: {query.transpose(0, 1).contiguous()}, {query.transpose(0, 1).contiguous().shape}')
         # print(f'megatron k before ln: {key.transpose(0, 1).contiguous()}, {key.transpose(0, 1).contiguous().shape}')
         # print(f'megatron v before ln: {value.transpose(0, 1).contiguous()}, {value.transpose(0, 1).contiguous().shape}')
-
+        
         if freqs_cos!=None and freqs_sin!=None:
             rotary_pos_emb=(freqs_cos,freqs_sin)
         else:
@@ -940,7 +952,16 @@ class HunyuanSingleAttention(SelfAttention):
         query = torch.cat([query, added_query], dim=2).permute(2, 0, 1, 3).contiguous()  # bhsd -> sbhd
         key = torch.cat([key, added_key], dim=2).permute(2, 0, 1, 3).contiguous()
         value = torch.cat([value, added_value], dim=2).permute(2, 0, 1, 3).contiguous()
+        
+        encoder_length = added_query.shape[2]
+
         del added_query,added_key,added_value
+
+        if mpu.get_context_parallel_world_size() > 1:
+            query, key ,value = map(
+                lambda x: remove_pad_with_encoder_for_context_parallel(x, encoder_length, dim=0),
+                [query, key, value]
+            )
 
         if self.checkpoint_core_attention and self.training:
             core_attn_out = self._checkpointed_attention_forward(
@@ -969,12 +990,15 @@ class HunyuanSingleAttention(SelfAttention):
 
         hidden_states = hidden_states.transpose(1, 2)
         encoder_hidden_states = encoder_hidden_states.transpose(1, 2)
+
         if mpu.get_context_parallel_world_size() > 1:
-            hidden_states=SeqAllToAll4D.apply(mpu.get_context_parallel_group(),hidden_states, 1, 2) # b img_seq sub_n d
-            encoder_hidden_states=gather_forward_split_backward(encoder_hidden_states, mpu.get_context_parallel_group(), 2) # b txt_seq n d
+            hidden_states = pad_for_context_parallel(hidden_states, 1)
+
+            hidden_states = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),hidden_states, 1, 2) # b img_seq sub_n d
+            encoder_hidden_states = gather_forward_split_backward(encoder_hidden_states, mpu.get_context_parallel_group(), 2) # b txt_seq n d
             torch.cuda.empty_cache()
 
         hidden_states = hidden_states.flatten(2, 3).contiguous()
         encoder_hidden_states = encoder_hidden_states.flatten(2, 3).contiguous()
-        
+
         return hidden_states, encoder_hidden_states
