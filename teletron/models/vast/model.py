@@ -73,6 +73,10 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         self.attention_head_dim = hunyuan_config.attention_head_dim
         self.num_layers = hunyuan_config.num_layers
         self.num_single_layers = hunyuan_config.num_single_layers
+        self.memory_efficient = False
+        if os.environ.get("ADALN_EFFICIENT"):
+            memory_efficient = bool(int(os.environ.get("ADALN_EFFICIENT")))
+            self.memory_efficient = memory_efficient
 
         if os.environ.get("NUM_LAYERS"):
             try:
@@ -159,6 +163,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                     config=transformer_config,
                     submodules=get_hunyuan_double_transformer_engine_spec().submodules,
                     layer_number=i,
+                    memory_efficient=self.memory_efficient
                 )
                 for i in range(self.num_layers)
             ]
@@ -171,6 +176,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                     config=transformer_config,
                     submodules=get_hunyuan_single_transformer_engine_spec().submodules,
                     layer_number=i,
+                    memory_efficient=self.memory_efficient
                 )
                 for i in range(self.num_single_layers)
             ]
