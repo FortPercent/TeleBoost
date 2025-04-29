@@ -73,14 +73,22 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         self.attention_head_dim = hunyuan_config.attention_head_dim
         self.num_layers = hunyuan_config.num_layers
         self.num_single_layers = hunyuan_config.num_single_layers
+
         if os.environ.get("NUM_LAYERS"):
-            num_layers = eval(os.environ.get("NUM_LAYERS"))
-            assert isinstance(num_layers, int)
-            self.num_layers = num_layers
+            try:
+                num_layers = int(os.environ.get("NUM_LAYERS"))
+                assert isinstance(num_layers, int)
+                self.num_layers = num_layers
+            except ValueError:
+                raise ValueError(f"Invalid integer value for NUM_LAYERS: {os.environ.get('NUM_LAYERS')}")
+
         if os.environ.get("NUM_SINGLE_LAYERS"):
-            num_single_layers = eval(os.environ.get("NUM_SINGLE_LAYERS"))
-            assert isinstance(num_single_layers, int)
-            self.num_single_layers = num_single_layers
+            try:
+                num_single_layers = int(os.environ.get("NUM_SINGLE_LAYERS"))
+                assert isinstance(num_single_layers, int)
+                self.num_single_layers = num_single_layers
+            except ValueError:
+                raise ValueError(f"Invalid integer value for NUM_SINGLE_LAYERS: {os.environ.get('NUM_SINGLE_LAYERS')}")
         self.num_refiner_layers = hunyuan_config.num_refiner_layers
         self.mlp_ratio = hunyuan_config.mlp_ratio
         self.patch_size = hunyuan_config.patch_size
