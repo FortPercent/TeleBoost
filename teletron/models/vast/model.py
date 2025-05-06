@@ -1,6 +1,4 @@
-import os 
-from dataclasses import dataclass
-from megatron.core.transformer.utils import openai_gelu
+import os
 from typing import Callable,Any, Dict, List, Optional, Tuple, Union
 import torch.nn.functional as F
 import torch
@@ -39,15 +37,8 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 class HunyuanParams:
     hidden_size: int = 3072
     num_attention_heads: int = 24
-    # activation_func: Callable = openai_gelu
     activation_func: Callable = F.gelu
     add_qkv_bias: bool = True
-    # ffn_hidden_size: int = 16384
-    # context_dim: int = 4096
-    # model_channels: int = 256
-    # patch_size: int = 1
-    # guidance_embed: bool = False
-    # vec_in_dim: int = 768
     in_channels: int = 33
     out_channels: int = 16
     num_attention_heads: int = 24
@@ -105,11 +96,9 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         self.guidance_embed = hunyuan_config.guidance_embeds
 
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
-        # self.mlp_hidden_dim = self.hidden_size * self.mlp_ratio
         config.hidden_size =self.hidden_size
-        # config.num_layers = 1
         config.num_attention_heads=self.num_attention_heads
-        # TODO: Assume not use GQA
+
         config.num_query_groups = config.num_attention_heads
         config.use_cpu_initialization = True
         config.activation_func =hunyuan_config.activation_func
@@ -119,20 +108,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         config.add_qkv_bias=hunyuan_config.add_qkv_bias
         config.rotary_interleaved=True
         config.attention_dropout = config.attention_dropout[0] if isinstance(config.attention_dropout, tuple) else config.attention_dropout
-        transformer_config=config
-        # transformer_config = TransformerConfig(
-        #     num_layers=1,
-        #     hidden_size=self.hidden_size,
-        #     num_attention_heads=self.num_attention_heads,
-        #     use_cpu_initialization=True,
-        #     activation_func=hunyuan_config.activation_func,
-        #     hidden_dropout=0,
-        #     attention_dropout=0,
-        #     layernorm_epsilon=1e-6,
-        #     add_qkv_bias=hunyuan_config.add_qkv_bias,
-        #     rotary_interleaved=True,
-        #     # mlp_hidden_dim=self.mlp_hidden_dim
-        # )
+        transformer_config = config
 
         super().__init__(transformer_config)
         self.inner_dim = self.num_attention_heads * self.attention_head_dim
@@ -211,18 +187,13 @@ class HunyuanVideoTransformer3DModel(VisionModule):
             dit_type: str,
             hidden_states: torch.Tensor,
             encoder_hidden_states: torch.Tensor,
-            # img_and_txt: tuple,``
             *args
     ):
         "Forward method with activation checkpointing."
         if dit_type == "double_stream":
-            # num_layers = len(self.transformer_blocks)
             recompute_layers = self.num_layers
-            # print("recompute_layers_double",recompute_layers)
         elif dit_type == "single_stream":
-            # num_layers = len(self.single_transformer_blocks)
             recompute_layers = self.num_single_layers
-            # print("recompute_layers_single",recompute_layers)
         else:
             raise NotImplementedError(f"dit type: {dit_type} is not implemented! ")
         
@@ -253,9 +224,6 @@ class HunyuanVideoTransformer3DModel(VisionModule):
             # Checkpoint the input activation of only a set number of individual
             # Transformer layers and skip the rest.
             # A method fully use the device memory removing redundant re-computation.
-            if os.environ.get("PROFILE_MEMORY"):
-                from my_utils import ProfilerWrapper
-                profiler = ProfilerWrapper(is_st=False, enable_record_cuda_mm=True)
 
             for _layer_num in range(recompute_layers):
                 if _layer_num < recompute_layers:
@@ -269,8 +237,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 else:
                     block = self._get_block(dit_type, _layer_num)
                     hidden_states, encoder_hidden_states = block(*hidden_states, *encoder_hidden_states, *args)
-                if os.environ.get("PROFILE_MEMORY"):
-                    profiler.record()
+
         else:
             raise ValueError(f"Invalid activation recompute method {self.recompute_method}.")
         
@@ -352,13 +319,8 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         hidden_states=hidden_states.contiguous()
         encoder_hidden_states=encoder_hidden_states.contiguous()
         temb=temb.contiguous()
-        # attention_mask=attention_mask.contiguous()
+
         if mpu.get_context_parallel_world_size() > 1:
-        
-            from teletron.core.tensor_parallel.mappings import (
-                split_forward_gather_backward,
-                gather_forward_split_backward,
-            )
             length = hidden_states.shape[1]
             set_origin_length(length)
             seq_parallel_world_size = mpu.get_context_parallel_world_size()
@@ -410,10 +372,6 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 freqs_sin,
             )
         else:
-            if os.environ.get("PROFILE_MEMORY"):
-                from my_utils import ProfilerWrapper
-                profiler = ProfilerWrapper(is_st=False, enable_record_cuda_mm=True)
-            
             for block in self.transformer_blocks:
                 hidden_states, encoder_hidden_states = block(
                     hidden_states,
@@ -423,8 +381,6 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                     freqs_cos,
                     freqs_sin,
                 )
-                if os.environ.get("PROFILE_MEMORY"):
-                    profiler.record()
             if mpu.get_context_parallel_world_size() > 1:
                 hidden_states = remove_pad_for_context_parallel(hidden_states, 1)
                 freqs_cos = remove_pad_for_context_parallel(freqs_cos, 0)
@@ -439,8 +395,6 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                     freqs_cos,
                     freqs_sin,
                 )
-                if os.environ.get("PROFILE_MEMORY"):
-                    profiler.record()
 
         if mpu.get_context_parallel_world_size() > 1:
             hidden_states = gather_forward_split_backward(

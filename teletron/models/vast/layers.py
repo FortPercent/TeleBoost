@@ -1,29 +1,12 @@
-import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor, nn
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import PeftAdapterMixin
-from diffusers.utils import (
-    USE_PEFT_BACKEND,
-    is_torch_version,
-    logging,
-    scale_lora_layers,
-    unscale_lora_layers,
-)
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import Attention, AttentionProcessor
 from diffusers.models.embeddings import (
     CombinedTimestepGuidanceTextProjEmbeddings,
     CombinedTimestepTextProjEmbeddings,
     get_1d_rotary_pos_embed,
-)
-from diffusers.models.modeling_outputs import Transformer2DModelOutput
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import (
-    AdaLayerNormContinuous,
-    AdaLayerNormZero,
-    AdaLayerNormZeroSingle,
 )
 
 class HunyuanVideoPatchEmbed(nn.Module):
