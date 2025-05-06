@@ -23,6 +23,9 @@ from teletron.datasets.fake_dataset import FakeDataset
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
+from teletron.datasets.koala_dataset import FusionDataset
+import yaml
+
 class Config(dict):
     def __init__(self, d=None):
         if d is None:
@@ -61,6 +64,10 @@ def extra_args_provider(parser):
     group.add_argument("--flow-logit-std", type=float, default=1.0)
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
     
+    group.add_argument(
+        "-o", "--opt", type=str, default="./teletron/configs/koala.yml", help="the option file"
+    )
+
     group = parser.add_argument_group(title='debug')
     group.add_argument("--sanity-check", action="store_true")
     return parser
@@ -70,9 +77,12 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     args = get_args()
 
+    with open(args.opt, "r") as f:
+        opt = yaml.safe_load(f)
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
     
-    train_ds = FakeDataset()
+    train_ds = FusionDataset(opt["data"]["test-data"]["args"])
+    # train_ds = FakeDataset()
     valid_ds = None
     test_ds = None
 
