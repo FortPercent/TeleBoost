@@ -1,19 +1,18 @@
 import decord
 from decord import VideoReader
 from decord import cpu, gpu
-import glob
 import os.path as osp
 import numpy as np
 import torch, torchvision
-from tqdm import tqdm
-import cv2
 import ast
 import numpy as np
 import random
 from functools import lru_cache
-
 import random
 import copy
+import yaml
+
+from megatron.training import get_args
 
 random.seed(42)
 
@@ -582,10 +581,16 @@ class SimpleDataset(torch.utils.data.Dataset):
     
 
 class KoalaDataset(torch.utils.data.Dataset):
-    def __init__(self, opt, i2v=True):
+    def __init__(self):
         super().__init__()
-    
-        self.i2v = i2v
+        args = get_args()
+        with open(args.koala_opt, "r") as f:
+            opt = yaml.safe_load(f)["data"]["test-data"]["args"]
+        # overload with megatron args
+        for stype in opt["sample_types"]:
+            opt["sample_types"][stype]['clip_len'] = args.num_frames
+            opt["sample_types"][stype]['fsize_h'] = args.video_resolution[1]
+            opt["sample_types"][stype]['fsize_w'] = args.video_resolution[0] 
         self.video_infos = []
         self.ann_file = opt["anno_file"]
         self.data_prefix = opt["data_prefix"]
@@ -612,16 +617,16 @@ class KoalaDataset(torch.utils.data.Dataset):
         if isinstance(self.ann_file, list):
             self.video_infos = self.ann_file
         else:
-                with open(self.ann_file, "r") as fin:
-                    for line in fin:
-                        line_split = line.strip().split(";")
-                        file_path, prompt, prompt_embeds, clip_text_embed = line_split
-                        prompt_embeds = ast.literal_eval(prompt_embeds)
-                        clip_text_embed = ast.literal_eval(clip_text_embed)
-                        prompt_embeds = torch.tensor(prompt_embeds).float()
-                        clip_text_embed = torch.tensor(clip_text_embed).float()
+            with open(self.ann_file, "r") as fin:
+                for line in fin:
+                    line_split = line.strip().split(";")
+                    file_path, prompt, prompt_embeds, clip_text_embed = line_split
+                    prompt_embeds = ast.literal_eval(prompt_embeds)
+                    clip_text_embed = ast.literal_eval(clip_text_embed)
+                    prompt_embeds = torch.tensor(prompt_embeds).float()
+                    clip_text_embed = torch.tensor(clip_text_embed).float()
 
-                        self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed))
+                    self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed))
 
 
     def refresh_hypers(self):
@@ -667,8 +672,7 @@ class KoalaDataset(torch.utils.data.Dataset):
         res_data["prompt"] = prompt
         res_data["prompt_embeds"] = prompt_embeds
         res_data["clip_text_embed"] = clip_text_embed
-        if self.i2v:
-            res_data["first_ref_image"] = data["fragments"][0].unsqueeze(0)
+        res_data["first_ref_image"] = data["fragments"][0].unsqueeze(0)
         return res_data
     
     def __len__(self):
