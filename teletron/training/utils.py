@@ -25,7 +25,7 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
         batch = {
             'images':data["images"].cuda(non_blocking = True),
-            'first_ref_image': data["first_ref_image"].cuda(non_blocking = True),
+            'first_ref_image': data["first_ref_image"].cuda(non_blocking = True) if "first_ref_image" in data else None,
             'prompt_embeds': data["prompt_embeds"].cuda(non_blocking = True),
             'clip_text_embed': None if "clip_text_embed" not in data else data["clip_text_embed"].cuda(non_blocking = True),
             'prompt_masks':  None if "prompt_masks" not in data else data["prompt_masks"].cuda(non_blocking = True)
@@ -87,7 +87,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         
         batch = {
             'images':data["images"].cuda(non_blocking = True),
-            'first_ref_image': data["first_ref_image"].cuda(non_blocking = True),
+            'first_ref_image': data["first_ref_image"].cuda(non_blocking = True) if "first_ref_image" in data else None,
             'prompt_embeds': data["prompt_embeds"].cuda(non_blocking = True),
             'clip_text_embed': None if "clip_text_embed" not in data else data["clip_text_embed"].cuda(non_blocking = True)
         }

@@ -144,7 +144,7 @@ class HunyuanPipeline(nn.Module):
                     noisy_model_input = torch.cat(
                         [noisy_model_input, conditional_latents], dim=1
                     )
-                if "first_ref_image" in batch_dict:
+                if "first_ref_image" in batch_dict and batch_dict["first_ref_image"] is not None:
                     first_ref_image = batch_dict["first_ref_image"]
                     conditional_latents = (
                         self.forward_vae(first_ref_image) * self.vae.config.scaling_factor
