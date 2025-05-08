@@ -23,7 +23,7 @@ from teletron.datasets.fake_dataset import FakeDataset
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
-from teletron.datasets.koala_dataset import FusionDataset
+from teletron .datasets.build import build_dataset
 import yaml
 
 class Config(dict):
@@ -45,10 +45,11 @@ def get_batch(data_iterator):
 
 def extra_args_provider(parser):
     group = parser.add_argument_group(title='dataset')
-    group.add_argument('--dataset-type', default="FakeDataset")
+    group.add_argument('--dataset-type', default="KoalaDataset")
     group.add_argument("--num-frames", type=int, default=9,
                        help='number of frames to train, must be of 4n+1, example: 45')
     group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720])
+    group.add_argument("--i2v", action="store_true")
 
     group = parser.add_argument_group(title="diffusion")
     group.add_argument("--vae-slicing", action="store_false")
@@ -65,7 +66,7 @@ def extra_args_provider(parser):
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
     
     group.add_argument(
-        "-o", "--opt", type=str, default="./teletron/configs/koala.yml", help="the option file"
+        "-o", "--opt", type=str, default="./teletron/datasets/koala.yml", help="the option file"
     )
 
     group = parser.add_argument_group(title='debug')
@@ -77,12 +78,15 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     args = get_args()
 
-    with open(args.opt, "r") as f:
-        opt = yaml.safe_load(f)
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
+
+    if args.dataset_type == "KoalaDataset":
+        with open(args.opt, "r") as f:
+            opt = yaml.safe_load(f)
+        train_ds = build_dataset(args.dataset_type, opt["data"]["test-data"]["args"], args.i2v)
+    else:
+        train_ds = build_dataset(args.dataset_type)
     
-    train_ds = FusionDataset(opt["data"]["test-data"]["args"])
-    # train_ds = FakeDataset()
     valid_ds = None
     test_ds = None
 

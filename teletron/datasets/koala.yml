@@ -12,7 +12,7 @@ wandb:
 
 data:
     test-data:
-        type: FusionDataset
+        type: KoalaDataset
         args:
             phase: test
             anno_file: ./sample/video_list.txt

@@ -15,8 +15,6 @@ from functools import lru_cache
 import random
 import copy
 
-# import skvideo.io
-
 random.seed(42)
 
 decord.bridge.set_bridge("torch")
@@ -583,13 +581,11 @@ class SimpleDataset(torch.utils.data.Dataset):
         return len(self.video_infos)
     
 
-class FusionDataset(torch.utils.data.Dataset):
-    def __init__(self, opt):
-        ## opt is a dictionary that includes options for video sampling
-        
+class KoalaDataset(torch.utils.data.Dataset):
+    def __init__(self, opt, i2v=True):
         super().__init__()
-        
-        print("-------------------------------------------------------- FuesionDataset  --------------------------------------------------------------")
+    
+        self.i2v = i2v
         self.video_infos = []
         self.ann_file = opt["anno_file"]
         self.data_prefix = opt["data_prefix"]
@@ -608,7 +604,6 @@ class FusionDataset(torch.utils.data.Dataset):
         self.samplers = {}
         for stype, sopt in opt["sample_types"].items():
             if "t_frag" not in sopt:
-                # revised legacy temporal sampling
                 self.samplers[stype] = FragmentSampleFrames(sopt["clip_len"], sopt["num_clips"], sopt["frame_interval"])
             else:
                 self.samplers[stype] = FragmentSampleFrames(sopt["clip_len"] // sopt["t_frag"], sopt["t_frag"], sopt["frame_interval"], sopt["num_clips"])
@@ -617,31 +612,16 @@ class FusionDataset(torch.utils.data.Dataset):
         if isinstance(self.ann_file, list):
             self.video_infos = self.ann_file
         else:
-            # try:
                 with open(self.ann_file, "r") as fin:
                     for line in fin:
                         line_split = line.strip().split(";")
                         file_path, prompt, prompt_embeds, clip_text_embed = line_split
-                        # print(f"{file_path}, {prompt}")
-                        # print("prompt_embeds: ", prompt_embeds)
-                        # print("clip_text_embed: ", clip_text_embed)
                         prompt_embeds = ast.literal_eval(prompt_embeds)
                         clip_text_embed = ast.literal_eval(clip_text_embed)
                         prompt_embeds = torch.tensor(prompt_embeds).float()
                         clip_text_embed = torch.tensor(clip_text_embed).float()
 
-                        # exit(0)
-                        # label = float(label)
-                        # filename = osp.join(self.data_prefix, filename)
                         self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed))
-                        
-            # except:
-            #     #### No Label Testing
-            #     print("error  data get")
-            #     video_filenames = sorted(glob.glob(self.data_prefix+"/*.mp4"))
-            #     print(video_filenames)
-            #     for filename in video_filenames:
-            #         self.video_infos.append(dict(filename=filename, label=-1))
 
 
     def refresh_hypers(self):
@@ -675,145 +655,21 @@ class FusionDataset(torch.utils.data.Dataset):
         prompt_embeds = video_info["prompt_embeds"]
         clip_text_embed = video_info["clip_text_embed"]
         
-
-        ## Read Original Frames
-        ## Process Frames
-        data, frame_inds = get_spatial_and_temporal_samples(file_path, self.sample_types, self.samplers, 
+        data, _ = get_spatial_and_temporal_samples(file_path, self.sample_types, self.samplers, 
                                                             self.phase == "train", self.augment and (self.phase == "train"),
                                                            )
         
         for k, v in data.items():
             data[k] = ((v.permute(1, 2, 3, 0) - self.mean) / self.std).permute(0, 3, 1, 2)
-            print(f"-------------------------------------------------------------------------> {len(data)} {k} {data[k].shape}")
          
         res_data = {}
         res_data["images"] = data["fragments"]
         res_data["prompt"] = prompt
         res_data["prompt_embeds"] = prompt_embeds
         res_data["clip_text_embed"] = clip_text_embed
-        res_data["first_ref_image"] = data["fragments"][0].unsqueeze(0)
-        print(f"-------------------------------------------------------------------------> res_data['images'] : {res_data['images'] .shape}")
-        print(f"-------------------------------------------------------------------------> res_data['prompt'] : {res_data['prompt']}")
-        print(f"-------------------------------------------------------------------------> res_data['prompt_embeds'] : {res_data['prompt_embeds'] .shape}")
-        print(f"-------------------------------------------------------------------------> res_data['clip_text_embed'] : {res_data['clip_text_embed'] .shape}")
-        print(f"-------------------------------------------------------------------------> res_data['first_ref_image'] : {res_data['first_ref_image'] .shape}")
+        if self.i2v:
+            res_data["first_ref_image"] = data["fragments"][0].unsqueeze(0)
         return res_data
     
     def __len__(self):
-        # return len(self.video_infos)
         return 100000
-        
-class VTSS_Dataset(torch.utils.data.Dataset):
-    def __init__(self, opt):
-        ## opt is a dictionary that includes options for video sampling
-        
-        super().__init__()
-        
-        
-        self.video_infos = []
-        self.ann_file = opt["anno_file"]
-        self.data_prefix = opt["data_prefix"]
-        self.opt = opt
-        self.sample_types = opt["sample_types"]
-        self.data_backend = opt.get("data_backend", "disk")
-        self.augment = opt.get("augment", False)
-        if self.data_backend == "petrel":
-            from petrel_client import client
-            self.client = client.Client(enable_mc=True)
-        
-        self.phase = opt["phase"]
-        self.crop = opt.get("random_crop", False)
-        self.mean = torch.FloatTensor([123.675, 116.28, 103.53])
-        self.std = torch.FloatTensor([58.395, 57.12, 57.375])
-        self.samplers = {}
-        for stype, sopt in opt["sample_types"].items():
-            if stype == "fragments":
-                if "t_frag" not in sopt:
-                    # revised legacy temporal sampling
-                    self.samplers[stype] = FragmentSampleFrames(sopt["clip_len"], sopt["num_clips"], sopt["frame_interval"])
-                else:
-                    self.samplers[stype] = FragmentSampleFrames(sopt["clip_len"] // sopt["t_frag"], sopt["t_frag"], sopt["frame_interval"], sopt["num_clips"])
-                
-                print(stype+" branch sampled frames:", self.samplers[stype](240, self.phase == "train"))
-            if stype == "image":
-                self.samplers[stype] = SimpleFrameSampler(
-                    sopt["clip_len"]
-                )
-            if stype == "semantic":
-                self.samplers[stype] = SimpleFrameSampler(
-                    sopt["clip_len"]
-                )
-        if isinstance(self.ann_file, list):
-            self.video_infos = self.ann_file
-        else:
-            # try:
-            if opt["add_feature"] == True: # 添加刷库的特征
-                with open(self.ann_file, "r") as fin:
-                    for line in fin:
-                        line_split = line.strip().split(",")
-                        filename, _, _, label = line_split[:4]
-                        feature = [float(d) for d in line_split[4:]] 
-                        label = float(label)
-                        filename = osp.join(self.data_prefix, filename)
-                        self.video_infos.append(dict(filename=filename, label=label, feature=feature))
-            else:
-                with open(self.ann_file, "r") as fin:
-                    for line in fin:
-                        line_split = line.strip().split(",")
-                        filename, _, _, label = line_split
-                        label = float(label)
-                        filename = osp.join(self.data_prefix, filename)
-                        self.video_infos.append(dict(filename=filename, label=label))
-
-    def refresh_hypers(self):
-        if not hasattr(self, "initial_sample_types"):
-            self.initial_sample_types = copy.deepcopy(self.sample_types)
-        
-        types = self.sample_types
-        
-        if "fragments_up" in types:
-            ubh, ubw = self.initial_sample_types["fragments_up"]["fragments_h"] + 1, self.initial_sample_types["fragments_up"]["fragments_w"] + 1
-            lbh, lbw = self.initial_sample_types["fragments"]["fragments_h"] + 1, self.initial_sample_types["fragments"]["fragments_w"] + 1
-            dh, dw = types["fragments_up"]["fragments_h"], types["fragments_up"]["fragments_w"]
-
-            types["fragments_up"]["fragments_h"] = random.randrange(max(lbh, dh-1), min(ubh, dh+2))
-            types["fragments_up"]["fragments_w"] = random.randrange(max(lbw, dw-1), min(ubw, dw+2))
-            
-        if "resize_up" in types:
-        
-            types["resize_up"]["size_h"] = types["fragments_up"]["fragments_h"] * types["fragments_up"]["fsize_h"]
-            types["resize_up"]["size_w"] = types["fragments_up"]["fragments_w"] * types["fragments_up"]["fsize_w"]
-        
-        self.sample_types.update(types)
-
-        
-    def __getitem__(self, index):
-        video_info = self.video_infos[index]
-        filename = video_info["filename"]
-        label = video_info["label"]
-        if "feature" in video_info:
-            feature = video_info["feature"]
-            
-
-        ## Read Original Frames
-        ## Process Frames
-        data, frame_inds = get_spatial_and_temporal_samples(filename, self.sample_types, self.samplers, 
-                                                            self.phase == "train", self.augment and (self.phase == "train"),
-                                                           )
-        
-        for k, v in data.items():
-            data[k] = ((v.permute(1, 2, 3, 0) - self.mean) / self.std).permute(3, 0, 1, 2)
-         
-        data["num_clips"] = {}
-        for stype, sopt in self.sample_types.items():
-            data["num_clips"][stype] = sopt["num_clips"]
-        data["frame_inds"] = frame_inds
-        data["gt_label"] = label
-        data["name"] = video_info["filename"]
-        if "feature" in video_info:
-            data["feature"] = torch.tensor(feature)
-        
-        return data
-    
-    def __len__(self):
-        return len(self.video_infos)
