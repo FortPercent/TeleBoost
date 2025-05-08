@@ -30,6 +30,8 @@ Teletron features flexible parallel strategy and fused cuda kernels to best faci
 
 ## ⚡️QuickStart
 
+Teletron now supports pretraining, full-finetuning or inference of VAST, which is a work-in-progress on video generation by TeleAI.
+
 ### Installation
 
 ```
@@ -59,9 +61,7 @@ Note that we include a snippet of the [Koala](https://github.com/KwaiVGI/Koala-3
 
 ## 🔥News
 
-- 2025/5/16: Teletron First Release! Supports VAST/HunyuanVideo pretraining and full-tinetune!
-
-
+- 2025/5/16: Teletron First Release! Supports VAST/HunyuanVideo pretraining, finetuning and inference.
 
 ## ✨Features
 
@@ -85,4 +85,6 @@ Note that we include a snippet of the [Koala](https://github.com/KwaiVGI/Koala-3
 * [yunchang](https://github.com/feifeibear/long-context-attention)
 
 ## License
+
+[Apache 2.0 License](https://github.com/AI-Infra-Team/TeleTron/blob/main/LICENSE)
 
