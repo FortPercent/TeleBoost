@@ -47,9 +47,14 @@ def extra_args_provider(parser):
     group = parser.add_argument_group(title='dataset')
     group.add_argument('--dataset-type', default="KoalaDataset")
     group.add_argument("--num-frames", type=int, default=9,
-                       help='number of frames to train, must be of 4n+1, example: 45')
-    group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720])
-    group.add_argument("--i2v", action="store_true")
+                       help='number of frames to train, must be of 4n+1, \
+                        overloads yaml if using koala dataset. example: 45')
+    group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720], 
+                       help='video resolution to train, overloads yaml if using koala dataset. \
+                       width and height should satisfy: (width or height) // 8 % 2 == 0')
+    group.add_argument("--koala-opt", type=str, default="./teletron/datasets/koala.yml", 
+                        help="the koala dataset option file")
+
 
     group = parser.add_argument_group(title="diffusion")
     group.add_argument("--vae-slicing", action="store_false")
@@ -65,10 +70,6 @@ def extra_args_provider(parser):
     group.add_argument("--flow-logit-std", type=float, default=1.0)
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
     
-    group.add_argument(
-        "-o", "--opt", type=str, default="./teletron/datasets/koala.yml", help="the option file"
-    )
-
     group = parser.add_argument_group(title='debug')
     group.add_argument("--sanity-check", action="store_true")
     return parser
@@ -80,13 +81,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
 
-    if args.dataset_type == "KoalaDataset":
-        with open(args.opt, "r") as f:
-            opt = yaml.safe_load(f)
-        train_ds = build_dataset(args.dataset_type, opt["data"]["test-data"]["args"], args.i2v)
-    else:
-        train_ds = build_dataset(args.dataset_type)
-    
+    train_ds = build_dataset(args.dataset_type)
     valid_ds = None
     test_ds = None
 
