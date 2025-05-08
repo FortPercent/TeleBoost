@@ -23,6 +23,9 @@ from teletron.datasets.fake_dataset import FakeDataset
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
+from teletron .datasets.build import build_dataset
+import yaml
+
 class Config(dict):
     def __init__(self, d=None):
         if d is None:
@@ -42,10 +45,16 @@ def get_batch(data_iterator):
 
 def extra_args_provider(parser):
     group = parser.add_argument_group(title='dataset')
-    group.add_argument('--dataset-type', default="FakeDataset")
+    group.add_argument('--dataset-type', default="KoalaDataset")
     group.add_argument("--num-frames", type=int, default=9,
-                       help='number of frames to train, must be of 4n+1, example: 45')
-    group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720])
+                       help='number of frames to train, must be of 4n+1, \
+                        overloads yaml if using koala dataset. example: 45')
+    group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720], 
+                       help='video resolution to train, overloads yaml if using koala dataset. \
+                       width and height should satisfy: (width or height) // 8 % 2 == 0')
+    group.add_argument("--koala-opt", type=str, default="./teletron/datasets/koala.yml", 
+                        help="the koala dataset option file")
+
 
     group = parser.add_argument_group(title="diffusion")
     group.add_argument("--vae-slicing", action="store_false")
@@ -71,8 +80,8 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     args = get_args()
 
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
-    
-    train_ds = FakeDataset()
+
+    train_ds = build_dataset(args.dataset_type)
     valid_ds = None
     test_ds = None
 
