@@ -9,9 +9,9 @@ class FakeDataset():
     def __init__(
         self,
     ) -> None:
-        args = get_args()
-        self.dst_num_frames = args.num_frames
-        self.dst_size = tuple(args.video_resolution)
+        self.args = get_args()
+        self.dst_num_frames = self.args.num_frames
+        self.dst_size = tuple(self.args.video_resolution)
 
     def __len__(self):
         return 10000000
@@ -35,7 +35,8 @@ class FakeDataset():
         random_data = {}
         random_data["prompt"] = ''.join(random.choices(string.ascii_letters + string.digits, k=880))
         random_data["images"] = torch.randn((self.dst_num_frames, 3, self.dst_size[1], self.dst_size[0]))
-        random_data["first_ref_image"] = torch.randn((1, 3, self.dst_size[1], self.dst_size[0]))
+        if self.args.i2v:
+            random_data["first_ref_image"] = torch.randn((1, 3, self.dst_size[1], self.dst_size[0]))
         random_data["prompt_embeds"] = torch.randn(120, 4096) # assume text token length=120
         random_data["clip_text_embed"] = torch.randn(768)
         
