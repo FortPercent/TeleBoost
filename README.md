@@ -56,7 +56,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_un
 ```
 
 - The loss log will be at `test/test_data/tp${TP}cp${CP}_layer36.log`
-- Note that we include a snippet of the [Koala](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
+- Note that we include a snippet of the [Koala-36M](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
 
 ## 🔥News
 
