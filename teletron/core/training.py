@@ -1,28 +1,15 @@
+# Copyright (c) 2025 TeleAI-infra and Nvidia Megatron-LM Team. All rights reserved.
 
 import dataclasses
 from functools import wraps
 
-
 from megatron.training.utils import (
-    calc_params_l2_norm,
-    check_adlr_autoresume_termination,
-    is_last_rank,
     print_rank_0,
-    print_rank_last,
-    report_memory,
     unwrap_model)
 
 from megatron.training.global_vars  import (
     get_args,
-    get_signal_handler,
-    get_timers,
-    get_tensorboard_writer,
-    get_wandb_writer,
-    get_one_logger,
-    get_current_global_batch_size,
-    get_num_microbatches,
-    update_num_microbatches)
-
+    get_timers)
 
 from megatron.core.optimizer import get_megatron_optimizer, OptimizerConfig
 from megatron.training.checkpointing import load_checkpoint

@@ -1,4 +1,5 @@
-# Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2025 TeleAI-infra Team and HuggingFace Inc. All rights reserved.
+
 from dataclasses import dataclass
 from typing import Union
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp

@@ -1,3 +1,5 @@
+# Copyright 2025 TeleAI-infra Team and HuggingFace Inc. All rights reserved.
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor, nn
