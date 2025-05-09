@@ -1,3 +1,4 @@
+// Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 #include <cuda_fp16.h> 
 #include <ATen/ATen.h>
 
