@@ -1,3 +1,5 @@
+# Copyright 2025 TeleAI-infra Team and HuggingFace Inc. All rights reserved.
+
 import os
 from typing import Callable,Any, Dict, List, Optional, Tuple, Union
 import torch.nn.functional as F

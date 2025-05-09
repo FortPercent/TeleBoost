@@ -1,3 +1,27 @@
+# Copyright (c) 2025 TeleAI-infra Team and KwaiVGI Team
+# This project is a modified version of the original project Koala-36M (https://github.com/KwaiVGI/Koala-36M).
+# Modifications include:
+# - Define the reading format of the data files
+# - Redefine the entries of each retrieved data record
+# - Adjust the registration and the loading method of the Koala dataset
+# The original project is licensed under their own license, you may not use this file except in compliance with the License.
+# you may obtain a copy of the license here:
+#
+#     https://github.com/KwaiVGI/Koala-36M/blob/main/LICENSE
+#
+#
+# This project is licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import decord
 from decord import VideoReader
 from decord import cpu, gpu
