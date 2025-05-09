@@ -6,15 +6,15 @@ from typing import Optional
 
 import torch
 
-from .. import parallel_state
-from ..config_logger import has_config_logger_enabled, log_config_to_disk
-from ..fp8_utils import is_float8tensor
-from ..process_groups_config import GradCommProcessGroups, ModelCommProcessGroups
-from ..transformer.cuda_graphs import is_graph_capturing
-from ..transformer.transformer_config import TransformerConfig
-from ..utils import log_single_rank
-from .data_parallel_base import _BaseDataParallel
-from .distributed_data_parallel_config import DistributedDataParallelConfig
+from megatron.core.parallel_state import parallel_state
+from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
+from megatron.core.fp8_utils import is_float8tensor
+from megatron.core.process_groups_config import GradCommProcessGroups, ModelCommProcessGroups
+from megatron.core.transformer.cuda_graphs import is_graph_capturing
+from megatron.core.transformer.transformer_config import TransformerConfig
+from megatron.core.utils import log_single_rank
+from megatron.core.data_parallel_base import _BaseDataParallel
+from megatron.core.distributed.distributed_data_parallel_config import DistributedDataParallelConfig
 from .param_and_grad_buffer import _ParamAndGradBuffer, partition_buckets
 
 logger = logging.getLogger(__name__)

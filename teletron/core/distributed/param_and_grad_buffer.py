@@ -295,12 +295,6 @@ class _ParamAndGradBucketGroup:
                 check_for_large=self.ddp_config.check_for_large_grads,
             )
 
-        # Convert gradients to float32 before reduction
-        for bucket in self.buckets:
-            bucket.grad_data = bucket.grad_data.to(torch.float32)
-            if bucket.gradient_scaling_factor != 1.0:
-                bucket.grad_data *= bucket.gradient_scaling_factor
-
         # Decide reduce_op.
         reduce_op = torch.distributed.ReduceOp.SUM
         if self.ddp_config.average_in_collective:
@@ -341,6 +335,9 @@ class _ParamAndGradBucketGroup:
         # Coalesce communication kernels across buckets in the bucket group.
         with stream_context, _coalescing_manager(communication_group, async_ops=async_op) as cm:
             for bucket in self.buckets:
+                bucket.grad_data = bucket.grad_data.to(torch.float32)
+                if bucket.gradient_scaling_factor != 1.0:
+                    bucket.grad_data *= bucket.gradient_scaling_factor
                 if self.ddp_config.use_distributed_optimizer:
                     local_data_view = shard_buffer(
                         bucket.grad_data, self.intra_distributed_optimizer_instance_size
@@ -356,7 +353,7 @@ class _ParamAndGradBucketGroup:
                     torch.distributed.all_reduce(
                         bucket.grad_data, op=reduce_op, group=communication_group, async_op=async_op
                     )
-                    
+                bucket.grad_data = bucket.grad_data.to(torch.bfloat16)
 
         # With multiple DistOpt instances, we need to all-reduce across instances.
         if (
