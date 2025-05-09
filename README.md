@@ -35,29 +35,26 @@ Teletron now supports pretraining, full-finetuning or inference of VAST, which i
 ### Installation
 
 ```
+# get Teletron
 git clone https://github.com/Tele-AI/Teletron.git
-cd Teletron
-# install fused kernels （optional）
+# Teletron requires megatron-lm
+git clone https://github.com/NVIDIA/Megatron-LM.git
+# install requirements
+pip install -r requirements.txt
+# (optional) install fused kernels 
 bash teletron_op/install.sh
 ```
 
-### Run pretraining
+### Training
 
 ```
-bash examples/vast/run.sh
+export PYTHONPATH=$PYTHONPATH:/path/to/Megatron-LM
+# replace ${TP} and ${CP} with the TP and CP size as you wish
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_unified_sanity_check.sh ${TP} ${CP}
 ```
 
-Note that we include a snippet of the [Koala](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
-
-### Run full-finetune
-
-* Prepare pretrained weights
-* Initiate training with t2i/t2v/i2v
-
-### Inference
-
-* Convert weights to huggingface format
-* Inference as you like
+- The loss log will be at `test/test_data/tp${TP}cp${CP}_layer36.log
+- Note that we include a snippet of the [Koala](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
 
 ## 🔥News
 
