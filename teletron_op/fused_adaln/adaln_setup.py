@@ -1,3 +1,4 @@
+# Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
