@@ -103,9 +103,8 @@ class HunyuanDiTLayer(TransformerLayer):
         hidden_size = config.hidden_size
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
 
-
-        self.norm1 = FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
-        self.norm1_context= FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
+        self.norm1 = FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
+        self.norm1_context= FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         
@@ -128,6 +127,7 @@ class HunyuanDiTLayer(TransformerLayer):
         freqs_sin:  Optional[torch.Tensor] = None,
     ):
         # 1. Input normalization
+        temb = temb.contiguous()
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(
             hidden_states, emb=temb
         )
@@ -264,7 +264,7 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
         hidden_size = config.hidden_size
 
-        self.norm = FusedAdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient)
+        self.norm = FusedAdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
 
         self.mlp_hidden_dim=hidden_size*mlp_ratio
         # self.proj_mlp=nn.Linear(hidden_size, self.mlp_hidden_dim)
@@ -300,6 +300,7 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         freqs_cos: Optional[torch.Tensor] = None,
         freqs_sin:  Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        temb = temb.contiguous()
         text_seq_length = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
 
