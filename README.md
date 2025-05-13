@@ -34,29 +34,40 @@ Teletron now supports pretraining, full-finetuning or inference of VAST, which i
 
 ### Installation
 
-- We recommend using [ncvr](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags)'s 24.10-py3 container image. After starting the docker container, follow the script below to setup Teletron.
+To save efforts on environment setup, it is recommended using [nvcr](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags)'s 24.10-py3 container image. After starting the docker container, follow the script below to setup Teletron.
 
 ```
 # get Teletron
 git clone https://github.com/Tele-AI/Teletron.git
-# Teletron requires megatron-lm
-git clone https://github.com/NVIDIA/Megatron-LM.git
+
+# Teletron requires megatron-lm 能不能直接pip install？
+git clone https://github.com/NVIDIA/Megatron-LM.git 
+
 # install requirements
 pip install -r requirements.txt
+
 # (optional) install Teletron fused kernels 
 bash teletron_op/install.sh
 ```
 
 ### Training
 
+The script below will run a sanity-check training of HunyuanVideo.
+
 ```
 export PYTHONPATH=$PYTHONPATH:/path/to/Megatron-LM
 # replace ${TP} and ${CP} with the TP and CP size as you wish
+
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_unified_sanity_check.sh ${TP} ${CP}
 ```
 
-- The loss log will be at `test/test_data/tp${TP}cp${CP}_layer36.log`
+- The training log will be at `test/test_data/tp${TP}cp${CP}_layer36.log`
 - Note that we include a snippet of the [Koala-36M](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
+
+* single node
+* 2-node training
+
+
 
 ## 🔥News
 
