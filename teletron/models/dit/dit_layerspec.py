@@ -280,15 +280,27 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         
         self.act_mlp=nn.GELU(approximate="tanh")
         # self.proj_out =nn.Linear(hidden_size + self.mlp_hidden_dim, hidden_size)
-        self.proj_out=TEColumnParallelLinear(
+        # self.proj_out=TEColumnParallelLinear(
+        #         hidden_size + self.mlp_hidden_dim,
+        #         hidden_size,
+        #         config=config,
+        #         gather_output=False,
+        #         init_method=config.init_method,
+        #         bias=True,
+        #         skip_bias_add=False,
+        #         is_expert=False)
+        
+        self.proj_out = TERowParallelLinear(
                 hidden_size + self.mlp_hidden_dim,
                 hidden_size,
                 config=config,
-                gather_output=False,
                 init_method=config.init_method,
-                bias=True,
+                bias=config.add_bias_linear,
+                input_is_parallel=True,
                 skip_bias_add=False,
-                is_expert=False)
+                is_expert=False,
+                tp_comm_buffer_name='proj',
+        )
     
     
     def forward(
@@ -312,7 +324,7 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         # print(x[0])
         # mlp_hidden_states = self.act_mlp(x)
         mlp_hidden_states = self.act_mlp(x[0])
-        mlp_hidden_states = gather_from_tensor_model_parallel_region(mlp_hidden_states)
+        # mlp_hidden_states = gather_from_tensor_model_parallel_region(mlp_hidden_states)
 
         norm_hidden_states, norm_encoder_hidden_states = (
             norm_hidden_states[:, :-text_seq_length, :],
@@ -332,14 +344,14 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         # attn_output = attn_output.transpose(0, 1)
         # context_attn_output = context_attn_output.transpose(0, 1)
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
-        output = gather_from_tensor_model_parallel_region(attn_output)
+        # attn_output = gather_from_tensor_model_parallel_region(attn_output)
         # 3. Modulation and residual connection
         
-        hidden_states = torch.cat([output, mlp_hidden_states], dim=2)
+        hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
 
-        x = self.proj_out(hidden_states)
+        x, bias = self.proj_out(hidden_states)
         # print(f"x:{x[0].shape}")
-        x = gather_from_tensor_model_parallel_region(x[0])
+        # x = gather_from_tensor_model_parallel_region(x[0])
 
         hidden_states = gate.unsqueeze(1) * x
         hidden_states = hidden_states + residual
