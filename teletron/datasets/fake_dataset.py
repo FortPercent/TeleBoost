@@ -1,3 +1,5 @@
+# Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
+
 from typing import List
 from collections import defaultdict
 import torch

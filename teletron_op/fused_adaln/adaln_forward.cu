@@ -1,3 +1,4 @@
+// Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 #include <cuda_bf16.h>
 #include <ATen/ATen.h>
 constexpr int kWarpSize = 32;

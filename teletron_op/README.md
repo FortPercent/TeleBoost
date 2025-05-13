@@ -1,7 +1,8 @@
-# 安装
+# Installation
+```
+cd teletron_op && bash install.sh
+```
 
-进入指定算子目录，运行 `install.sh`
-
-# 使用
-
-export ADALN_EFFICIENT=1
+# Usage
+Activate fused kernels with environment variables.
+- Enable adalayernorm fused kernel with `export ADALN_EFFICIENT=1` 

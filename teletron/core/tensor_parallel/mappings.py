@@ -1,3 +1,4 @@
+# Copyright (c) 2025 TeleAI-infra and Nvidia Megatron-LM Team. All rights reserved.
 
 import torch
 

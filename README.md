@@ -47,7 +47,7 @@ git clone https://github.com/NVIDIA/Megatron-LM.git
 pip install -r requirements.txt
 
 # (optional) install Teletron fused kernels 
-bash teletron_op/install.sh
+cd teletron_op && bash install.sh
 ```
 
 ### Training
