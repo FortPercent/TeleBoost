@@ -98,7 +98,7 @@ class HunyuanPipeline(nn.Module):
                     else None
                 )
                 
-                latents = batch_dict["latents"].squeeze(0)
+                latents = batch_dict["latents"]
 
                 noise = torch.randn(
                     latents.shape,
@@ -203,7 +203,7 @@ class HunyuanPipeline(nn.Module):
                 sigmas=sigmas,
             )
             target = noise - latents
-            
+
             loss = weights.float() * (model_pred.float() - target.float()).pow(2)
             if args.sanity_check:
                 loss = model_pred.norm() # dummy loss just for sanity check

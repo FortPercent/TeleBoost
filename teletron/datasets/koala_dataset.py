@@ -650,7 +650,7 @@ class KoalaDataset(torch.utils.data.Dataset):
                     latents = ast.literal_eval(latents)
                     prompt_embeds = torch.tensor(prompt_embeds).float()
                     clip_text_embed = torch.tensor(clip_text_embed).float()
-                    latents = torch.tensor(latents).to(torch.bfloat16)
+                    latents = torch.tensor(latents).to(torch.bfloat16).squeeze(0)
 
                     self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed, latents=latents))
 
