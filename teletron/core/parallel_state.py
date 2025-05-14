@@ -11,6 +11,10 @@ from functools import reduce
 import operator
 import os
 
+_TENSOR_CONTEXT_PARALLEL_GROUP = None
+_MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE = None
+_MPU_TENSOR_CONTEXT_PARALLEL_RANK = None
+
 def initialize_model_parallel_decorators(initialize_model_parallel):
     @wraps(initialize_model_parallel)
     def wrapper(
@@ -265,7 +269,10 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
                     parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP = group
 
         # # Build the tensor + context parallel groups
-        parallel_state._TENSOR_CONTEXT_PARALLEL_GROUP
+        global _TENSOR_CONTEXT_PARALLEL_GROUP
+        assert (
+        _TENSOR_CONTEXT_PARALLEL_GROUP is None
+        ), 'Tensor + context parallel group is already initialized'
         tensor_and_context_group_size: int = tensor_model_parallel_size * context_parallel_size
         num_tensor_and_context_groups: int = world_size // tensor_and_context_group_size
         print(f"world_size: {world_size}, {tensor_and_context_group_size}")
@@ -277,7 +284,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
                 ranks, timeout=timeout, pg_options=parallel_state.get_nccl_options('tp_cp', nccl_comm_cfgs)
             )
             if rank in ranks:
-                parallel_state._TENSOR_CONTEXT_PARALLEL_GROUP = group
+                _TENSOR_CONTEXT_PARALLEL_GROUP = group
 
         # Build the tensor + expert parallel groups
         tensor_and_data_group_size: int = tensor_model_parallel_size * data_parallel_size
@@ -326,3 +333,45 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
             parallel_state._set_global_memory_buffer()
 
     return wrapper
+
+
+def get_tensor_context_parallel_group(check_initialized=True):
+    """Get the tensor context parallel group the caller rank belongs to."""
+    if check_initialized:
+        assert (
+            _TENSOR_CONTEXT_PARALLEL_GROUP is not None
+        ), 'tensor context parallel group is not initialized'
+    return _TENSOR_CONTEXT_PARALLEL_GROUP
+
+def get_tensor_context_parallel_world_size():
+    """Return world size for the tensor model parallel group."""
+    global _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE
+    if _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE is not None:
+        return _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE
+    return torch.distributed.get_world_size(group=get_tensor_context_parallel_group())
+
+def get_tensor_context_parallel_rank():
+    """Return my rank for the tensor model parallel group."""
+    global _MPU_TENSOR_CONTEXT_PARALLEL_RANK
+    if _MPU_TENSOR_CONTEXT_PARALLEL_RANK is not None:
+        return _MPU_TENSOR_CONTEXT_PARALLEL_RANK
+    return torch.distributed.get_rank(group=get_tensor_context_parallel_group())
+
+def get_tensor_context_parallel_src_rank():
+    """Calculate the global rank corresponding to the first local rank
+    in the tensor model parallel group."""
+    global_rank = torch.distributed.get_rank()
+    local_world_size = get_tensor_context_parallel_world_size()
+    return (global_rank // local_world_size) * local_world_size
+    
+def destroy_model_parallel_wrapper(destroy_model_parallel):
+    @wraps(destroy_model_parallel)
+    def wrapper():
+        destroy_model_parallel()
+
+        global _TENSOR_CONTEXT_PARALLEL_GROUP
+        _TENSOR_CONTEXT_PARALLEL_GROUP = None
+        global _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE
+        _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE = None
+        global _MPU_TENSOR_CONTEXT_PARALLEL_RANK
+        _MPU_TENSOR_CONTEXT_PARALLEL_RANK= None
