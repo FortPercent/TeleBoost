@@ -71,7 +71,6 @@ class HunyuanPipeline(nn.Module):
                 # latents
                 images = batch_dict["images"]
                 batch_size, num_frames, _, height, width = images.shape
-                latents = self.forward_vae(images) * self.vae.config.scaling_factor
                 
                 timesteps = torch.tensor(0, device=torch.cuda.current_device()).long()
                 
@@ -90,6 +89,17 @@ class HunyuanPipeline(nn.Module):
                 timesteps = (sigmas * 1000.0).long()
                 broadcast_timesteps(timesteps)
 
+
+                prompt_embeds = batch_dict["prompt_embeds"].to(dtype=self.dtype)
+                pooled_prompt_embeds = batch_dict["clip_text_embed"].to(dtype=self.dtype)
+                prompt_masks = (
+                    batch_dict["prompt_masks"].to(dtype=self.dtype)
+                    if "prompt_masks" in batch_dict
+                    else None
+                )
+                
+                latents = batch_dict["latents"]
+
                 noise = torch.randn(
                     latents.shape,
                     device=torch.cuda.current_device(),
@@ -102,15 +112,6 @@ class HunyuanPipeline(nn.Module):
 
                 sigmas = expand_tensor_to_dims(sigmas, ndim=latents.ndim)
                 noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-
-                # embeddings
-                prompt_embeds = batch_dict["prompt_embeds"].to(dtype=self.dtype)
-                pooled_prompt_embeds = batch_dict["clip_text_embed"].to(dtype=self.dtype)
-                prompt_masks = (
-                    batch_dict["prompt_masks"].to(dtype=self.dtype)
-                    if "prompt_masks" in batch_dict
-                    else None
-                )
 
                 # conditional_latents
                 conditional_latents = None
