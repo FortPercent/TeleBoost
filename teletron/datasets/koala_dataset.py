@@ -644,13 +644,15 @@ class KoalaDataset(torch.utils.data.Dataset):
             with open(self.ann_file, "r") as fin:
                 for line in fin:
                     line_split = line.strip().split(";")
-                    file_path, prompt, prompt_embeds, clip_text_embed = line_split
+                    file_path, prompt, prompt_embeds, clip_text_embed, latents = line_split
                     prompt_embeds = ast.literal_eval(prompt_embeds)
                     clip_text_embed = ast.literal_eval(clip_text_embed)
+                    latents = ast.literal_eval(latents)
                     prompt_embeds = torch.tensor(prompt_embeds).float()
                     clip_text_embed = torch.tensor(clip_text_embed).float()
+                    latents = torch.tensor(latents).to(torch.bfloat16).squeeze(0)
 
-                    self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed))
+                    self.video_infos.append(dict(file_path=file_path, prompt=prompt, prompt_embeds=prompt_embeds, clip_text_embed=clip_text_embed, latents=latents))
 
 
     def refresh_hypers(self):
@@ -683,6 +685,7 @@ class KoalaDataset(torch.utils.data.Dataset):
         prompt = video_info["prompt"]
         prompt_embeds = video_info["prompt_embeds"]
         clip_text_embed = video_info["clip_text_embed"]
+        latents =  video_info["latents"]
         
         data, _ = get_spatial_and_temporal_samples(file_path, self.sample_types, self.samplers, 
                                                             self.phase == "train", self.augment and (self.phase == "train"),
@@ -697,6 +700,7 @@ class KoalaDataset(torch.utils.data.Dataset):
         res_data["prompt_embeds"] = prompt_embeds
         res_data["clip_text_embed"] = clip_text_embed
         res_data["first_ref_image"] = data["fragments"][0].unsqueeze(0)
+        res_data["latents"] = latents
         return res_data
     
     def __len__(self):
