@@ -25,11 +25,7 @@ __inline__ __device__ T Div(T a, T b);
 
 template<>
 __inline__ __device__ float Div<float>(float a, float b) {
-#ifdef OF_LAYER_NORM_USE_FAST_MATH
-  return __fdividef(a, b);
-#else
   return a / b;
-#endif
 }
 
 template<typename T>

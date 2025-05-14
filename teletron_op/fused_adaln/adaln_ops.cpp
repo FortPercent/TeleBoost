@@ -1,7 +1,6 @@
 // Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 #include <torch/extension.h>
 #include "adaln_kernel.h"
-#include <stdio.h>
 
 
 void torch_launch_adaln_forward(
