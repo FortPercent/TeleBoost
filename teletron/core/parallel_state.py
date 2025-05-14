@@ -28,13 +28,15 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
                 nccl_communicator_config_path: Optional[str] = None,
                 distributed_timeout_minutes: int = 30,
     ):
-        initialize_model_parallel(
+        # Calling the original Megatron's initialize_model_parallel function is to initialize the global parameters.
+        # context_parallel_size ==1 , because the original Megatron does not have a good adaptation for this parameter, and it will throw an error if it is greater than 1.
+        initialize_model_parallel(              
             tensor_model_parallel_size,
             pipeline_model_parallel_size,
             virtual_pipeline_model_parallel_size,
             pipeline_model_parallel_split_rank,
             use_sharp,
-            1,
+            1,                                                              
             expert_model_parallel_size,
             nccl_communicator_config_path,
         )
