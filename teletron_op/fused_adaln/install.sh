@@ -1,1 +1,0 @@
-python adaln_setup.py install

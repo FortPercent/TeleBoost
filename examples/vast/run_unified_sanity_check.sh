@@ -33,8 +33,8 @@ MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 export NUM_LAYERS=3
 export NUM_SINGLE_LAYERS=6
-# 开启ADALN融合计算，需要先安装fused_adaln
-export ADALN_EFFICIENT=0
+# 开启融合算子计算，需要先安装fused kernels
+export FUSED_KERNELS=1
 
 CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
 TENSORBOARD_LOGS_PATH=./logs
@@ -85,7 +85,7 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --dataset-type FakeDataset
+    --dataset-type KoalaDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
