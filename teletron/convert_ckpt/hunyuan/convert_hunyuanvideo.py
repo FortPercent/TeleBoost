@@ -392,8 +392,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # config.num_attention_heads=24
     # print(config)
     # megatron args
-    config.num_layers = 1
-    config.num_single_layers = 1
+    config.num_layers = 20
+    config.num_single_layers = 40
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
         "in_channels": config.in_channels,
