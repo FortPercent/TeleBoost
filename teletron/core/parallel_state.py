@@ -34,7 +34,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
             virtual_pipeline_model_parallel_size,
             pipeline_model_parallel_split_rank,
             use_sharp,
-            context_parallel_size,
+            1,
             expert_model_parallel_size,
             nccl_communicator_config_path,
         )
