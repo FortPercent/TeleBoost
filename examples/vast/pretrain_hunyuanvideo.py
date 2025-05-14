@@ -71,7 +71,7 @@ def extra_args_provider(parser):
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
     
     group = parser.add_argument_group(title='debug')
-    group.add_argument("--sanity-check", action="store_true")
+    group.add_argument("--sanity-check", action="store_false")
     return parser
 
 
