@@ -5,4 +5,4 @@ cd teletron_op && bash install.sh
 
 # Usage
 Activate fused kernels with environment variables.
-- Enable adalayernorm fused kernel with `export ADALN_EFFICIENT=1` 
+- Enable fused kernels with `export FUSED_KERNELS=1` 
