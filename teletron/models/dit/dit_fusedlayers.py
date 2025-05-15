@@ -22,6 +22,8 @@ from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 from torch.autograd import Function
 from diffusers.models.embeddings import CombinedTimestepLabelEmbeddings
+from megatron.core.transformer.custom_layers.transformer_engine import TEColumnParallelLinear
+from megatron.core.tensor_parallel.mappings import gather_from_tensor_model_parallel_region
 
 import os
 import logging
@@ -122,7 +124,13 @@ class FusedAdaLayerNormZero(nn.Module):
         num_embeddings (`int`): The size of the embeddings dictionary.
     """
 
-    def __init__(self, embedding_dim: int, num_embeddings: Optional[int] = None, norm_type="layer_norm", bias=True, fused_kernels = False):
+    def __init__(self, embedding_dim: int, 
+                 num_embeddings: Optional[int] = None, 
+                 norm_type="layer_norm", 
+                 bias=True, 
+                 fused_kernels = False,
+                 linear_parallel=True,
+                 config=None):
         super().__init__()
         if num_embeddings is not None:
             self.emb = CombinedTimestepLabelEmbeddings(num_embeddings, embedding_dim)
@@ -130,7 +138,21 @@ class FusedAdaLayerNormZero(nn.Module):
             self.emb = None
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 6 * embedding_dim, bias=bias)
+        
+        self.linear_parallel = linear_parallel
+        if not linear_parallel:
+            self.linear = nn.Linear(embedding_dim, 6 * embedding_dim, bias=bias)
+        else:
+            assert config is not None
+            self.linear = TEColumnParallelLinear(
+                    input_size=embedding_dim,  
+                    output_size=6 * embedding_dim,
+                    config=config,
+                    gather_output=False,
+                    init_method=config.init_method,
+                    bias=bias,
+                    skip_bias_add=False,
+                    is_expert=False)
         self.fused_kernels = fused_kernels
         if fused_kernels and fused_adaln:
             self.adaLN = AdaLNCustom(embedding_dim,  eps=1e-6)
@@ -143,8 +165,6 @@ class FusedAdaLayerNormZero(nn.Module):
                 raise ValueError(
                     f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
                 )
-
-
 
     def forward(
         self,
@@ -157,6 +177,8 @@ class FusedAdaLayerNormZero(nn.Module):
         if self.emb is not None:
             emb = self.emb(timestep, class_labels, hidden_dtype=hidden_dtype)
         emb = self.linear(self.silu(emb))
+        if self.linear_parallel:
+            emb = gather_from_tensor_model_parallel_region(emb[0])
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.chunk(6, dim=1)
         if self.fused_kernels and fused_adaln:
             x = self.adaLN(x, scale_msa, shift_msa)
@@ -164,13 +186,27 @@ class FusedAdaLayerNormZero(nn.Module):
             x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
     
+
 class FusedAdaLayerNormZeroSingle(nn.Module):
 
-    def __init__(self, embedding_dim: int, norm_type="layer_norm", bias=True, fused_kernels = False):
+    def __init__(self, embedding_dim: int, norm_type="layer_norm", bias=True, fused_kernels = False, linear_parallel=True, config=None):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 3 * embedding_dim, bias=bias)
+        self.linear_parallel = linear_parallel
+        if not linear_parallel:
+            self.linear = nn.Linear(embedding_dim, 3 * embedding_dim, bias=bias)
+        else:
+            assert config is not None
+            self.linear = TEColumnParallelLinear(
+                    input_size=embedding_dim,  
+                    output_size=3 * embedding_dim,
+                    config=config,
+                    gather_output=False,
+                    init_method=config.init_method,
+                    bias=bias,
+                    skip_bias_add=False,
+                    is_expert=False)
         self.fused_kernels = fused_kernels
         if fused_kernels and fused_adaln:
             self.adaLN = AdaLNCustom(embedding_dim,  eps=1e-6)
@@ -190,6 +226,8 @@ class FusedAdaLayerNormZeroSingle(nn.Module):
         emb: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         emb = self.linear(self.silu(emb))
+        if self.linear_parallel:
+            emb = gather_from_tensor_model_parallel_region(emb[0])
         shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=1)
         if self.fused_kernels and fused_adaln:
             x = self.adaLN(x, scale_msa, shift_msa)
