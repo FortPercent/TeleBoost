@@ -1,6 +1,6 @@
 <div align="center">
 
-Teletron
+TeleTron
 ===========================
 <h4>To pioneer training long-context multi-modal transformer models</h4>
 
@@ -13,65 +13,80 @@ Teletron
 
 - HunyuanVideo Training Speed 
 
-Figure: Teletron 训练效率对比deepspeed，根据hunyuanvideo文章中说的渐进分辨率（256, 256, 65) -> (360, 640, 85) -> (540, 960, 105) -> (720, 1280, 129) ，GBS=8
+Figure: TeleTron 训练效率对比deepspeed，根据hunyuanvideo文章中说的渐进分辨率（256, 256, 65) -> (360, 640, 85) -> (540, 960, 105) -> (720, 1280, 129) ，GBS=8
 
 
 
 ## 📖Introduction
 
-Teletron features flexible parallel strategy and fused cuda kernels to best facilitate **long-context**, **efficient** and **flexible** training of multi-modal transformer models.
+TeleTron features flexible parallel strategy and fused cuda kernels to best facilitate **long-context**, **efficient** and **flexible** training of multi-modal transformer models.
 
 * Long-Context
-  * Teletron leverages mixed parallel strategy, activation checkpointing and fused cuda kernels at the same time to optimize GPU memory usage, so as to train [HunyuanVideo](https://github.com/Tencent/HunyuanVideo) with up to 30s 720P video clips.
+  * TeleTron leverages mixed parallel strategy, activation checkpointing and fused cuda kernels at the same time to optimize GPU memory usage, so as to train [HunyuanVideo](https://github.com/Tencent/HunyuanVideo) with up to 30s 720P video clips.
 * Efficient
-  * With async VAE and fused cuda kernels, Teletron facilitates faster training speed than general training optimization libraries like [DeepSpeed](https://github.com/deepspeedai/DeepSpeed).
+  * With fused cuda kernels, TeleTron facilitates faster training than general training optimization libraries like [DeepSpeed](https://github.com/deepspeedai/DeepSpeed).
 * Flexible
-  * Training with a variety of video sequence length and model size, Teletron support flexible adjustment of parallel strategy among data parallel, context parallel, and/or tensor parallel.
+  * Training with a variety of video sequence length and model size, TeleTron support flexible adjustment of parallel strategy among data parallel, context parallel, and/or tensor parallel.
 
 ## ⚡️QuickStart
 
-Teletron now supports pretraining, full-finetuning or inference of VAST, which is a work-in-progress on video generation by TeleAI.
-
 ### Installation
 
-To save efforts on environment setup, it is recommended using [nvcr](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags)'s 24.10-py3 container image. After starting the docker container, follow the script below to setup Teletron.
+To save efforts on environment setup, it is recommended using [nvcr](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags)'s 24.10-py3 container image. 
 
 ```
-# get Teletron
-git clone https://github.com/Tele-AI/Teletron.git
+# pull docker image
+docker pull nvcr.io/nvidia/pytorch:24.10-py3
 
-# Teletron requires megatron-lm 能不能直接pip install？
-git clone https://github.com/NVIDIA/Megatron-LM.git 
+# start docker container
+sudo docker run --gpus all -itd --shm-size 512G --name litian  nvcr.io/nvidia/pytorch:24.10-py3 /bin/bash
+
+# enter the container
+sudo docker exec -it litian /bin/bash
+```
+
+In the docker container, follow the script below to setup TeleTron.
+
+```
+# get TeleTron
+git clone git@github.com:AI-Infra-Team/TeleTron.git --recurse-submodule
 
 # install requirements
 pip install -r requirements.txt
 
-# (optional) install Teletron fused kernels 
+# (optional) install TeleTron fused kernels 
 cd teletron_op && bash install.sh
+```
+
+### Sanity Check
+
+The script below will run a tiny version of HunyuanVideo with fake data. It serves as a sanity check for that the environment is correctly set up.
+
+```
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_unified_sanity_check.sh 1 1
 ```
 
 ### Training
 
-The script below will run a sanity-check training of HunyuanVideo.
+* single node training
 
 ```
-export PYTHONPATH=$PYTHONPATH:/path/to/Megatron-LM
-# replace ${TP} and ${CP} with the TP and CP size as you wish
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_unified_sanity_check.sh ${TP} ${CP}
+bash examples/vast/run_unified.sh 2 2 9
 ```
 
-- The training log will be at `test/test_data/tp${TP}cp${CP}_layer36.log`
-- Note that we include a snippet of the [Koala-36M](https://github.com/KwaiVGI/Koala-36M) dataset in the repo. You may try with this tiny dataset or download full spec from the original repo.
+Note that TeleTron the trailing numbers designates TP size, CP size, and the number of frames.  You may also alter training video resolution with `--video-resolution {width} {height}` . 
 
-* single node
-* 2-node training
+* Multi-node training
 
+Run the script below on 4 * 8 H800 cluster and 129-frame 720P training will be initiated. Note that for full finetuning you still need to download and convert HunyuanVideo pretrained weights.
 
+```
+bash examples/vast/run_unified.sh 1 4 129
+```
 
 ## 🔥News
 
-- 2025/5/16: Teletron First Release! Supports VAST/HunyuanVideo pretraining, finetuning and inference.
+- 2025/5/16: TeleTron First Release! Supports HunyuanVideo finetuning and inference.
 
 ## ✨Features
 
