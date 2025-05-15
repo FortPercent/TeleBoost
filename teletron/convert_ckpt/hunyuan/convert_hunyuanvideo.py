@@ -494,15 +494,6 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.bias']=state_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.bias'][seg*i: seg*(i+1)]
                 params_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.weight'] = state_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.weight'][seg*i: seg*(i+1), :]
                 params_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.bias']=state_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.bias'][seg*i: seg*(i+1)]
-                if layer_id==0:
-                    print(state_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.weight'][:,0])
-                    print(state_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.weight'][:,0])
-                    print(state_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.weight'][:,0].shape)
-                    print(hidden_size)
-                    print(seg*i)
-                    print(params_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.weight'][:,0])
-                    print(params_dict['transformer_blocks.' + str(layer_id) + '.norm1_context.linear.weight'][:,0])
-                    print(params_dict['transformer_blocks.' + str(layer_id) + '.norm1.linear.weight'][:,0].shape)
 
                 # 拼接 q_weight, k_weight, v_weight 后进行一次视图重塑
                 qkv_weight = internal_state_dict['transformer_blocks.' + str(layer_id) + '.self_attention.linear_qkv.weight'].view(num_heads, -1, hidden_size_per_head, hidden_size)
@@ -599,7 +590,6 @@ def convert_checkpoint_from_transformers_to_megatron(args):
 
                 params_dict[f'single_transformer_blocks.{layer_id}.proj_out.bias']=state_dict[f'single_transformer_blocks.{layer_id}.proj_out.bias']
                 
-                #print(params_dict[f'single_transformer_blocks.{layer_id}.proj_out.weight'].shape)
             params_dict["norm_out.adaLN_modulation.1.weight"] = state_dict['norm_out.linear.weight']
             params_dict["norm_out.adaLN_modulation.1.bias"] = state_dict['norm_out.linear.bias']
 
@@ -698,8 +688,7 @@ def convert_checkpoint_from_megatron_to_transformers(args):
     print("Converting")
 
     tp_state_dicts = get_megatron_sharded_states(args, tp_size, pp_size, 0)
-    new_DIT_IDENTICAL_WEIGHT = ["transformer." + item for item in DIT_IDENTICAL_WEIGHT]
-    # new_DIT_IDENTICAL_WEIGHT = [item for item in DIT_IDENTICAL_WEIGHT]
+    new_DIT_IDENTICAL_WEIGHT = [item for item in DIT_IDENTICAL_WEIGHT]
     path = 'model'
     update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict,get_element_from_dict_by_path(tp_state_dicts[0], path), new_DIT_IDENTICAL_WEIGHT)
 
@@ -708,35 +697,14 @@ def convert_checkpoint_from_megatron_to_transformers(args):
     num_heads = config.num_attention_heads // tp_size
     hidden_size_per_head = config.attention_head_dim
 
-    # for layer_id in range(config.num_layers):
-    #     TRANSFORMER_IDENTICAL_WEIGHT = {
-    #         f'transformer_blocks.{layer_id}.norm1.linear.weight',
-    #         f'transformer_blocks.{layer_id}.norm1.linear.bias',
-    #         f'transformer_blocks.{layer_id}.norm1_context.linear.weight',
-    #         f'transformer_blocks.{layer_id}.norm1_context.linear.bias',
-    #     }
-    #     update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_IDENTICAL_WEIGHT)
-    
-    # for layer_id in range(config.num_single_layers):
-    #     TRANSFORMER_SINGLE_IDENTICAL_WEIGHT = {
-    #         f'single_transformer_blocks.{layer_id}.norm.linear.weight',
-    #         f'single_transformer_blocks.{layer_id}.norm.linear.bias',
-    #     }
-    #     update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_SINGLE_IDENTICAL_WEIGHT)
-
     path='model'
 
     # Extract the layers.
     for key, val in get_element_from_dict_by_path(tp_state_dicts[0], path).items():
-        # if "extra_state" in key:
-        #     print(f"key: {key}, val: {val}")
-        #     continue
-        # else:
-        #     print(key)
-        if key.startswith("transformer.transformer_blocks"):
+        if key.startswith("transformer_blocks"):
             key_list = key.split('.')
-            layer_id = int(key_list[2])
-            # layer_id = int(key_list[1])
+            # layer_id = int(key_list[2])
+            layer_id = int(key_list[1])
             if 'norm1' in key:
                 params = torch.cat(
                         [val]
@@ -889,10 +857,10 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                     else:
                         output_state_dict['transformer_blocks.' + str(layer_id) + '.attn.to_out.0.bias']=val
         # if key.startswith("transformer.single_transformer_blocks"):
-        if key.startswith("transformer.single_transformer_blocks"):
+        if key.startswith("single_transformer_blocks"):
             key_list = key.split('.')
-            layer_id = int(key_list[2])
-            # layer_id = int(key_list[1])
+            # layer_id = int(key_list[2])
+            layer_id = int(key_list[1])
             if 'norm.linear' in key:
                 params = torch.cat(
                         [val]
