@@ -1,7 +1,7 @@
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 HUGGINGFACE_CKPT_PATH="/lustre/teleinfra/HunyuanVideo"
 SOURCE_CKPT_PATH="/workspace/ckpt_tp2_2040_2700test/release"
-TARGET_CKPT_PATH="/workspace/ckpt_vast_2040_2700/"
+TARGET_CKPT_PATH="/nvfile-heatstorage/teleai-infra/litian/megatron_ckpt/vast_ckpt/ckpt_vast_2040_2700/"
 TP=2
 PP=1
 
