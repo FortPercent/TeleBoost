@@ -104,6 +104,7 @@ class DistributedDataParallel(MegatronModule):
                 param_dtype = param.dtype
                 # grad_dtype = torch.float if accumulate_allreduce_grads_in_fp32 else param.dtype
                 grad_dtype = param_dtype
+                breakpoint()
                 params = param_and_grad_dtype_to_params.get((param_dtype, grad_dtype), [])
                 params.append(param)
                 param_and_grad_dtype_to_params[(param_dtype, grad_dtype)] = params
