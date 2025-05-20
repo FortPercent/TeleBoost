@@ -98,7 +98,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 10000
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH
+    #--load $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
@@ -110,4 +110,4 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_hunyuanvideo.py \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${DATA_ARGS[@]}    \
-    ${EVAL_AND_LOGGING_ARGS[@]} > test/test_data/tp${TP}cp${CP}_layer36.log
+    ${EVAL_AND_LOGGING_ARGS[@]} #> test/test_data/tp${TP}cp${CP}_layer36.log
