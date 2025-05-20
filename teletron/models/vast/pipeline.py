@@ -236,6 +236,27 @@ class HunyuanPipeline(nn.Module):
         with torch.no_grad():
             images = rearrange(images, "b f c h w -> b c f h w")
             latents = self.vae.encode(images).latent_dist.sample()
+            # seed = 42
+            # torch.manual_seed(seed)
+            # torch.cuda.manual_seed(seed)
+            # torch.cuda.manual_seed_all(seed) # for multi-GPU setups
+            # torch.backends.cudnn.deterministic = True
+            # torch.backends.cudnn.benchmark = False
+            # latents_1 = self.vae.encode(images).latent_dist.sample()
+            # print("SEED=42, latents", latents_1.shape)
+            # print(latents_1[0, :3, :, 20, 20])
+            # seed = 449
+            # torch.manual_seed(seed)
+            # torch.cuda.manual_seed(seed)
+            # torch.cuda.manual_seed_all(seed) # for multi-GPU setups
+            # torch.backends.cudnn.deterministic = True
+            # torch.backends.cudnn.benchmark = False
+            # latents_2 = self.vae.encode(images).latent_dist.sample()
+            # print("SEED=449, latents", latents_2.shape)
+            # print(latents_1[0, :3, :, 20, 20])
+            # print("diff," (latents_1-latents_2).sum())
+            # todo = 1.0
+            # raise ValueError("Only two seeds are allowed for now.")
         return latents
 
     def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
