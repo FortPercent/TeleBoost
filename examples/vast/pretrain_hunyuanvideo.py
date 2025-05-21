@@ -25,8 +25,7 @@ from vast.datasets.datasets.build import build_dataset as build_dataset_vast
 from megatron.training.global_vars import set_global_config, get_global_config
 from megatron.core.datasets.hunyuanvideo_dataset_config import HunyuanVideoDatasetConfig
 # TODO hard code to set VastDataset config
-# from teletron.datasets.vast_dataset.hunyuanvideo_i2vhy import config
-from teletron.datasets.vast_dataset.hunyuanvideo_i2v_multimask import config
+from config.hunyuanvideo_i2v_multimask import config as config_vast
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
@@ -96,7 +95,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
         valid_ds = None
         test_ds = None
     elif args.dataset_type == "VastDataset": 
-        global_config = load_config(config)
+        global_config = load_config(config_vast)
         train_ds_config = global_config.dataloaders.train
         eval_ds_config = global_config.dataloaders.eval
         ds_config = HunyuanVideoDatasetConfig(
@@ -145,10 +144,10 @@ def model_provider(
     args = get_args()
 
     config = core_transformer_config_from_args(args)
-    config_vast = get_global_config()
+    vast_config = load_config(config_vast)
     model = HunyuanPipeline(
         config=config,
-        config_vast=config_vast
+        config_vast=vast_config
     )
     
     return model
@@ -183,9 +182,6 @@ def forward_step(data_iterator, model: HunyuanPipeline):
     return output_tensor_list, loss_func
 
 if __name__ == "__main__":
-    # 
-    # set_global_config(global_config)
-
     pretrain(
         train_valid_test_datasets_provider,
         model_provider,
