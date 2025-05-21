@@ -12,8 +12,6 @@ from megatron.core import mpu
 
 def get_batch_on_this_tp_rank_vast(data_iterator):
     args = get_args()
-    # TODO, set to args or load from vast config
-    input_dict_list = ['images', 'prompt_embeds', 'ref_mask', 'ref_images', 'first_ref_image', 'clip_text_embed', 'prompt_masks']
 
     def _broadcast(item):
         if item is not None:
@@ -24,21 +22,19 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
            data = next(data_iterator)
         else:
            data = None
-
+           
         batch = {}
 
-        for param in input_dict_list:
-            if param in data:
-                batch.update({param: data[param].cuda(non_blocking = True)})
+        for param in data.keys():
+            batch.update({param: data[param].cuda(non_blocking = True)})
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
         # Step 2: 广播大小信息
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
-        for param in input_dict_list:
-            if param in batch:
-                _broadcast(batch[param])
+        for param in batch.keys():
+            _broadcast(batch[param])
 
     else:
         sizes_info = None 
@@ -46,21 +42,16 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         batch = {}
-        for param in input_dict_list:
-            if param in sizes_info_list[0]:
-                batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
-        for param in input_dict_list:
-            if param in batch:
-                _broadcast(batch[param])
+        for param in sizes_info_list[0].keys():
+            batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
+        for param in batch.keys():
+            _broadcast(batch[param])
 
     return batch
 
 
 def get_batch_on_this_tp_cp_rank_vast(data_iterator):
     args = get_args()
-    # TODO, set to args or load from vast config
-    input_dict_list = ['images', 'prompt_embeds', 'ref_mask', 'ref_images', 'first_ref_image', 'clip_text_embed', 'prompt_masks']
-
 
     def _broadcast(item):
         if item is not None:
@@ -72,18 +63,16 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         else:
            data = None
         batch = {}
-        for param in input_dict_list:
-            if param in data:
-                batch.update({param: data[param].cuda(non_blocking = True)})
+        for param in data.keys():
+            batch.update({param: data[param].cuda(non_blocking = True)})
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
         # Step 2: 广播大小信息
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
         
-        for param in input_dict_list:
-            if param in batch:
-                _broadcast(batch[param])
+        for param in batch.keys():
+            _broadcast(batch[param])
 
     else:
         sizes_info = None 
@@ -91,11 +80,9 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         batch = {}
-        for param in input_dict_list:
-            if param in sizes_info_list[0]:
-                batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
-        for param in input_dict_list:
-            if param in batch:
-                _broadcast(batch[param])
+        for param in sizes_info_list[0].keys():
+            batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
+        for param in batch.keys():
+            _broadcast(batch[param])
 
     return batch
