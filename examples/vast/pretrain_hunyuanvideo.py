@@ -24,7 +24,9 @@ from vast.train.configs.config import load_config
 from vast.datasets.datasets.build import build_dataset as build_dataset_vast
 from megatron.training.global_vars import set_global_config, get_global_config
 from megatron.core.datasets.hunyuanvideo_dataset_config import HunyuanVideoDatasetConfig
-from teletron.datasets.vast_dataset.hunyuanvideo_i2vhy import config
+# TODO hard code to set VastDataset config
+# from teletron.datasets.vast_dataset.hunyuanvideo_i2vhy import config
+from teletron.datasets.vast_dataset.hunyuanvideo_i2v_multimask import config
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
@@ -143,9 +145,10 @@ def model_provider(
     args = get_args()
 
     config = core_transformer_config_from_args(args)
-
+    config_vast = get_global_config()
     model = HunyuanPipeline(
-        config=config
+        config=config,
+        config_vast=config_vast
     )
     
     return model

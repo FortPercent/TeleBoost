@@ -37,7 +37,7 @@ def broadcast_timesteps(input: torch.Tensor):
         dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
 class HunyuanPipeline(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, config_vast):
         super().__init__()
         self.pre_process = mpu.is_pipeline_first_stage()
         self.post_process = mpu.is_pipeline_last_stage()
@@ -52,10 +52,12 @@ class HunyuanPipeline(nn.Module):
             self.vae.enable_tiling()
 
         hunyuanConfig = HunyuanParams()
+        hunyuanConfig.in_channels = config_vast.models.transformer.in_channels
         latent_channels = self.vae.config.latent_channels
 
         print("Load HunyuanVideoTransformer3DModel to cuda")
         self.config = config 
+        self.config_vast = config_vast
         self.transformer = HunyuanVideoTransformer3DModel(hunyuanConfig, config)
         print("Loaded HunyuanVideoTransformer3DModel to cuda")
         self.flow_scheduler = FlowMatchEulerDiscreteScheduler()
@@ -76,12 +78,15 @@ class HunyuanPipeline(nn.Module):
                 
                 # add noise from flow matching scheduler
                 scheduler_sigmas = self.flow_scheduler.sigmas.clone()
+                generator = torch.Generator(device='cpu')
+                generator.manual_seed(42)
                 weights = compute_density_for_timestep_sampling(
                     weighting_scheme=args.flow_weighting_scheme,
                     batch_size=batch_size,
                     logit_mean=args.flow_logit_mean,
                     logit_std=args.flow_logit_std,
                     mode_scale=args.flow_mode_scale,
+                    generator=generator,
                 )
                 indices = (weights * self.flow_scheduler.config.num_train_timesteps).long()
                 sigmas = scheduler_sigmas[indices].to(device=torch.cuda.current_device())
@@ -97,24 +102,6 @@ class HunyuanPipeline(nn.Module):
                     if "prompt_masks" in batch_dict
                     else None
                 )
-
-                # latents_vae = self.forward_vae(images) * self.vae.config.scaling_factor
-                # latents = batch_dict["latents"]
-                # from torchvision.utils import save_image
-                # output_path = "/nvfile-heatstorage/yxy/code/Teletron/debug/temp/"
-                # save_image(images[:,0], f"{output_path}/image0.png")
-                # save_image(images[:,1], f"{output_path}/image1.png")
-                # save_image(images[:,2], f"{output_path}/image2.png")
-                # save_image(latents[:,:3,0], f"{output_path}/latents0.png")
-                # save_image(latents[:,:3,1], f"{output_path}/latents1.png")
-                # save_image(latents[:,:3,2], f"{output_path}/latents2.png")
-                # save_image(latents_vae[:,:3,0], f"{output_path}/latents_vae0.png")
-                # save_image(latents_vae[:,:3,1], f"{output_path}/latents_vae1.png")
-                # save_image(latents_vae[:,:3,2], f"{output_path}/latents_vae2.png")
-                # print("!!!!!!!!!! images", images.shape)
-                # print("!!!!!!!!!! latent", latents.shape, latents[0,4:6,:,20,20])
-                # print("!!!!!!!!!! latents_vae", latents_vae.shape, latents_vae[0,4:6,:,20,20])
-                # print("!!!!!!!!!! vae diff", (latents_vae - latents).sum())
 
                 if "latents" in batch_dict and batch_dict["latents"] is not None:
                     latents = batch_dict["latents"]
@@ -154,6 +141,15 @@ class HunyuanPipeline(nn.Module):
                     noisy_model_input = torch.cat(
                         [noisy_model_input, conditional_latents], dim=1
                     )
+                    
+                    if "ref_mask" in batch_dict:  # True
+                        # 4 channel mask for multiple ref images
+                        ref_mask = batch_dict["ref_mask"]
+                        ref_mask = rearrange(ref_mask, "b t c h w -> b c t h w").to(conditional_latents.dtype)
+                        if drop_prob > 0:
+                            ref_mask = ref_mask * image_mask[:, None, None, None, None]
+                        noisy_model_input = torch.cat([noisy_model_input, ref_mask], dim=1)
+
                 if "first_ref_image" in batch_dict and batch_dict["first_ref_image"] is not None:
                     first_ref_image = batch_dict["first_ref_image"]
                     conditional_latents = (
