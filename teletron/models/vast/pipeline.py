@@ -78,15 +78,12 @@ class HunyuanPipeline(nn.Module):
                 
                 # add noise from flow matching scheduler
                 scheduler_sigmas = self.flow_scheduler.sigmas.clone()
-                generator = torch.Generator(device='cpu')
-                generator.manual_seed(42)
                 weights = compute_density_for_timestep_sampling(
                     weighting_scheme=args.flow_weighting_scheme,
                     batch_size=batch_size,
                     logit_mean=args.flow_logit_mean,
                     logit_std=args.flow_logit_std,
-                    mode_scale=args.flow_mode_scale,
-                    generator=generator,
+                    mode_scale=args.flow_mode_scale
                 )
                 indices = (weights * self.flow_scheduler.config.num_train_timesteps).long()
                 sigmas = scheduler_sigmas[indices].to(device=torch.cuda.current_device())
