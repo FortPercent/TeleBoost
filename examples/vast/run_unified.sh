@@ -92,7 +92,6 @@ DATA_ARGS=(
     --split 949,50,1
     --dataloader-type single
     --num-workers 1
-    --num-frames $3
 )
 
 EVAL_AND_LOGGING_ARGS=(
