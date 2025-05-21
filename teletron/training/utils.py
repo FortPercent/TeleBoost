@@ -26,7 +26,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
         batch = {}
 
         for param in data.keys():
-            batch.update({param: data[param].cuda(non_blocking = True)})
+            if isinstance(data[param], torch.Tensor):
+                batch.update({param: data[param].cuda(non_blocking = True)})
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
@@ -64,7 +65,8 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
            data = None
         batch = {}
         for param in data.keys():
-            batch.update({param: data[param].cuda(non_blocking = True)})
+            if isinstance(data[param], torch.Tensor):
+                batch.update({param: data[param].cuda(non_blocking = True)})
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
