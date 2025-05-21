@@ -10,6 +10,7 @@ from diffusers.models.embeddings import (
     CombinedTimestepTextProjEmbeddings,
     get_1d_rotary_pos_embed,
 )
+from diffusers.models.normalization import FP32LayerNorm
 
 class HunyuanVideoPatchEmbed(nn.Module):
     def __init__(
@@ -64,7 +65,7 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
 
         hidden_size = num_attention_heads * attention_head_dim
 
-        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+        self.norm1 = FP32LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         self.attn = Attention(
             query_dim=hidden_size,
             cross_attention_dim=None,
@@ -73,7 +74,7 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
             bias=attention_bias,
         )
 
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+        self.norm2 = FP32LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         self.ff = FeedForward(
             hidden_size,
             mult=mlp_width_ratio,

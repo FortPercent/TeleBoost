@@ -96,7 +96,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
         valid_ds = None
         test_ds = None
     elif args.dataset_type == "VastDataset": 
-        global_config = get_global_config()
+        global_config = load_config(config)
         train_ds_config = global_config.dataloaders.train
         eval_ds_config = global_config.dataloaders.eval
         ds_config = HunyuanVideoDatasetConfig(
@@ -183,8 +183,8 @@ def forward_step(data_iterator, model: HunyuanPipeline):
     return output_tensor_list, loss_func
 
 if __name__ == "__main__":
-    global_config = load_config(config)
-    set_global_config(global_config)
+    # 
+    # set_global_config(global_config)
 
     pretrain(
         train_valid_test_datasets_provider,
