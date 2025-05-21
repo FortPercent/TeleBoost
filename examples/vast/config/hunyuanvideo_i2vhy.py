@@ -160,7 +160,7 @@ config = dict(
                     dict(
                         type="PromptGenerator",
                         clean_prompt=True,
-                        short_prompt_prob=0,
+                        #short_prompt_prob=0,
                         default_prompt_prob=0.1,
                     ),
                     dict(
