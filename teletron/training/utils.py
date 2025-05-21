@@ -25,6 +25,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
         batch = {
             'images':data["images"].cuda(non_blocking = True),
+            'ref_mask': data["ref_mask"].cuda(non_blocking = True) if "ref_mask" in data else None,   
+            'ref_images': data["ref_images"].cuda(non_blocking = True) if "ref_images" in data else None,
             'first_ref_image': data["first_ref_image"].cuda(non_blocking = True) if "first_ref_image" in data else None,
             'prompt_embeds': data["prompt_embeds"].cuda(non_blocking = True),
             'clip_text_embed': None if "clip_text_embed" not in data else data["clip_text_embed"].cuda(non_blocking = True),
@@ -38,6 +40,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         _broadcast(batch['images'])
+        _broadcast(batch['ref_mask'])
+        _broadcast(batch['ref_images'])
         _broadcast(batch['first_ref_image'])
         _broadcast(batch['prompt_embeds'])
         _broadcast(batch['clip_text_embed'])
@@ -49,6 +53,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         images=torch.empty(sizes_info_list[0]['images'], dtype=torch.float32, device = torch.cuda.current_device())
+        ref_mask=torch.empty(sizes_info_list[0]['ref_mask'], dtype=torch.int64, device = torch.cuda.current_device())
+        ref_images=torch.empty(sizes_info_list[0]['ref_images'], dtype=torch.float32, device = torch.cuda.current_device())
         first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
         prompt_embeds=torch.empty(sizes_info_list[0]['prompt_embeds'], dtype=torch.float32, device = torch.cuda.current_device())
         clip_text_embed=torch.empty(sizes_info_list[0]['clip_text_embed'], dtype=torch.bfloat16, device = torch.cuda.current_device())
@@ -56,6 +62,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
 
         _broadcast(images)
+        _broadcast(ref_mask)
+        _broadcast(ref_images)
         _broadcast(first_ref_image)
         _broadcast(prompt_embeds)
         _broadcast(clip_text_embed)
@@ -63,6 +71,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
         batch = {
             'images':images,
+            'ref_mask': ref_mask,
+            'ref_images': ref_images,
             'first_ref_image': first_ref_image,
             'prompt_embeds': prompt_embeds,
             'clip_text_embed': clip_text_embed,
@@ -87,8 +97,11 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         
         batch = {
             'images':data["images"].cuda(non_blocking = True),
+            'ref_mask': data["ref_mask"].cuda(non_blocking = True) if "ref_mask" in data else None,   
+            'ref_images': data["ref_images"].cuda(non_blocking = True) if "ref_images" in data else None,
             'first_ref_image': data["first_ref_image"].cuda(non_blocking = True) if "first_ref_image" in data else None,
             'prompt_embeds': data["prompt_embeds"].cuda(non_blocking = True),
+            'prompt_masks': data["prompt_masks"].cuda(non_blocking = True) if "prompt_masks" in data else None,
             'clip_text_embed': None if "clip_text_embed" not in data else data["clip_text_embed"].cuda(non_blocking = True),
             'latents': data["latents"].cuda(non_blocking = True) if "latents" in data else None,
         }
@@ -100,8 +113,11 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
         
         _broadcast(batch['images'])
+        _broadcast(batch['ref_mask'])
+        _broadcast(batch['ref_images'])
         _broadcast(batch['first_ref_image'])
         _broadcast(batch['prompt_embeds'])
+        _broadcast(batch['prompt_masks'])
         _broadcast(batch['clip_text_embed'])
         _broadcast(batch['latents'])
 
@@ -111,9 +127,24 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         images=torch.empty(sizes_info_list[0]['images'], dtype=torch.float32, device = torch.cuda.current_device())
-        first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
         prompt_embeds=torch.empty(sizes_info_list[0]['prompt_embeds'], dtype=torch.float32, device = torch.cuda.current_device())
         clip_text_embed=torch.empty(sizes_info_list[0]['clip_text_embed'], dtype=torch.float32, device = torch.cuda.current_device())
+        if "prompt_masks" in sizes_info_list[0] and sizes_info_list[0]['prompt_masks'] is not None: 
+            prompt_masks=torch.empty(sizes_info_list[0]['prompt_masks'], dtype=torch.int64, device = torch.cuda.current_device())
+        else:
+            prompt_masks = None
+        if "ref_mask" in sizes_info_list[0] and sizes_info_list[0]['ref_mask'] is not None: 
+            ref_mask=torch.empty(sizes_info_list[0]['ref_mask'], dtype=torch.int64, device = torch.cuda.current_device())
+        else:
+            ref_mask = None
+        if "ref_images" in sizes_info_list[0] and sizes_info_list[0]['ref_images'] is not None: 
+            ref_images=torch.empty(sizes_info_list[0]['ref_images'], dtype=torch.float32, device = torch.cuda.current_device())
+        else:
+            ref_images = None
+        if "first_ref_image" in sizes_info_list[0] and sizes_info_list[0]['first_ref_image'] is not None: 
+            first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
+        else:
+            first_ref_image = None
         if "latents" in sizes_info_list[0] and sizes_info_list[0]['latents'] is not None: 
             latents=torch.empty(sizes_info_list[0]['latents'], dtype=torch.bfloat16, device = torch.cuda.current_device())
         else:
@@ -121,13 +152,19 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         
 
         _broadcast(images)
+        _broadcast(ref_mask)
+        _broadcast(ref_images)
         _broadcast(first_ref_image)
         _broadcast(prompt_embeds)
+        _broadcast(prompt_masks)
         _broadcast(clip_text_embed)
         _broadcast(latents)
 
         batch = {
             'images':images,
+            'ref_mask': ref_mask,
+            'prompt_masks': prompt_masks,
+            'ref_images': ref_images,
             'first_ref_image': first_ref_image,
             'prompt_embeds': prompt_embeds,
             'clip_text_embed': clip_text_embed,
