@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch
 from megatron.core.models.common.vision_module.vision_module import VisionModule
 from megatron.core.transformer.transformer_config import TransformerConfig
-
+from megatron.training import get_args
 from megatron.core import mpu, tensor_parallel
 from teletron.core.context_parallel.pad import pad_for_context_parallel, remove_pad_for_context_parallel, set_origin_length, set_target_length
 from torch import nn
@@ -61,7 +61,12 @@ class HunyuanParams:
 class HunyuanVideoTransformer3DModel(VisionModule):
     def __init__(self, hunyuan_config: HunyuanParams, config: TransformerConfig):
         self.out_channels = hunyuan_config.out_channels
-        self.in_channels = hunyuan_config.in_channels
+        args = get_args()
+        self.out_channels = hunyuan_config.out_channels
+        if args.task_type == "i2v":
+            self.in_channels = 33
+        elif args.task_type == "t2v":
+            self.in_channels = 16
         self.num_attention_heads = hunyuan_config.num_attention_heads
         self.attention_head_dim = hunyuan_config.attention_head_dim
         self.num_layers = hunyuan_config.num_layers
