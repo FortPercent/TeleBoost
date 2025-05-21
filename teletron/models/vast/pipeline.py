@@ -97,8 +97,29 @@ class HunyuanPipeline(nn.Module):
                     if "prompt_masks" in batch_dict
                     else None
                 )
-                
-                latents = batch_dict["latents"]
+
+                # latents_vae = self.forward_vae(images) * self.vae.config.scaling_factor
+                # latents = batch_dict["latents"]
+                # from torchvision.utils import save_image
+                # output_path = "/nvfile-heatstorage/yxy/code/Teletron/debug/temp/"
+                # save_image(images[:,0], f"{output_path}/image0.png")
+                # save_image(images[:,1], f"{output_path}/image1.png")
+                # save_image(images[:,2], f"{output_path}/image2.png")
+                # save_image(latents[:,:3,0], f"{output_path}/latents0.png")
+                # save_image(latents[:,:3,1], f"{output_path}/latents1.png")
+                # save_image(latents[:,:3,2], f"{output_path}/latents2.png")
+                # save_image(latents_vae[:,:3,0], f"{output_path}/latents_vae0.png")
+                # save_image(latents_vae[:,:3,1], f"{output_path}/latents_vae1.png")
+                # save_image(latents_vae[:,:3,2], f"{output_path}/latents_vae2.png")
+                # print("!!!!!!!!!! images", images.shape)
+                # print("!!!!!!!!!! latent", latents.shape, latents[0,4:6,:,20,20])
+                # print("!!!!!!!!!! latents_vae", latents_vae.shape, latents_vae[0,4:6,:,20,20])
+                # print("!!!!!!!!!! vae diff", (latents_vae - latents).sum())
+
+                if "latents" in batch_dict and batch_dict["latents"] is not None:
+                    latents = batch_dict["latents"]
+                else:
+                    latents = self.forward_vae(images) * self.vae.config.scaling_factor
 
                 noise = torch.randn(
                     latents.shape,
