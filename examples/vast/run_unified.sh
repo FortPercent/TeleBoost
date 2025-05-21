@@ -34,8 +34,8 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=20
-export NUM_SINGLE_LAYERS=40
+export NUM_LAYERS=1
+export NUM_SINGLE_LAYERS=1
 
 # CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
 CHECKPOINT_PATH=/data02/model_zoo/vast_ckpt_tp1
@@ -53,7 +53,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 20
+    --num-layers 1
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -63,6 +63,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
+    --task-type t2v
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 100000
@@ -99,8 +100,8 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 500
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH
-    --save $CHECKPOINT_PATH
+    # --load $CHECKPOINT_PATH
+    # --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
