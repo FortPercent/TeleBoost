@@ -96,7 +96,7 @@ class HunyuanPipeline(nn.Module):
                 pooled_prompt_embeds = batch_dict["clip_text_embed"].to(dtype=self.dtype)
                 prompt_masks = (
                     batch_dict["prompt_masks"].to(dtype=self.dtype)
-                    if "prompt_masks" in batch_dict
+                    if "prompt_masks" in batch_dict and batch_dict["prompt_masks"] is not None
                     else None
                 )
 
@@ -120,7 +120,7 @@ class HunyuanPipeline(nn.Module):
 
                 # conditional_latents
                 conditional_latents = None
-                if "ref_images" in batch_dict:
+                if "ref_images" in batch_dict and batch_dict["ref_images"] is not None:
                     ref_images = batch_dict["ref_images"]
                     conditional_latents = (
                         self.forward_vae(ref_images) * self.vae.config.scaling_factor
@@ -139,7 +139,7 @@ class HunyuanPipeline(nn.Module):
                         [noisy_model_input, conditional_latents], dim=1
                     )
                     
-                    if "ref_mask" in batch_dict:  # True
+                    if "ref_mask" in batch_dict and batch_dict["ref_mask"] is not None: 
                         # 4 channel mask for multiple ref images
                         ref_mask = batch_dict["ref_mask"]
                         ref_mask = rearrange(ref_mask, "b t c h w -> b c t h w").to(conditional_latents.dtype)
@@ -165,7 +165,7 @@ class HunyuanPipeline(nn.Module):
                     noisy_model_input = torch.cat(
                         [noisy_model_input, conditional_latents, mask], dim=1
                     )
-                if "cn_images" in batch_dict:
+                if "cn_images" in batch_dict and "cn_images" is not None:
                     cn_images = batch_dict["cn_images"].to(self.dtype)
                     cn_images = self.forward_vae(cn_images)
                 # TODO guidance check
@@ -180,7 +180,7 @@ class HunyuanPipeline(nn.Module):
                 )
 
                 # cn model
-                if "cn_images" in batch_dict:
+                if "cn_images" in batch_dict and batch_dict["cn_images"] is not None:
                     if hasattr(self.model, "guider"):
                         cn_model = functools.partial(self.model, "guider")
                         cn_images = rearrange(cn_images, "b t c h w -> b c t h w")
