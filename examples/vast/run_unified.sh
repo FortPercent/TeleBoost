@@ -9,9 +9,8 @@ export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-export PYTHONPATH=
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron_VAST
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/teleai_data_tool_source_code/
 
@@ -38,7 +37,8 @@ GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 export NUM_LAYERS=20
 export NUM_SINGLE_LAYERS=40
 
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+# CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+CHECKPOINT_PATH=/data02/model_zoo/vast_ckpt_tp1
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -65,7 +65,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 10
+    --train-iters 100000
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -98,12 +98,18 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 10000
+    --save-interval 500
     --eval-interval 10000 
     --load $CHECKPOINT_PATH
+    --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
+
+# necessary settings for multi-node training
+export NCCL_IB_HCA=$(/nvfile-heatstorage/teleai-infra/look_mlxdevice.sh) #必须有，不修改，本次升级改动
+echo NCCL_IB_HCA=$NCCL_IB_HCA
+export NCCL_NVLS_ENABLE=0&&export NCCL_CROSS_NIC=0&&export NCCL_ALGO=RING
 
 echo start tp${TP} cp${CP} training
 torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_hunyuanvideo.py \
