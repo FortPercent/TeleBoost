@@ -7,7 +7,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
 export PYTHONPATH=
 # TODO, change to your own path
@@ -101,9 +101,9 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 10000
+    --save-interval 1
     --eval-interval 10000 
-    #--load $CHECKPOINT_PATH
+    --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
