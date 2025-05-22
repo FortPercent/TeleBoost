@@ -62,6 +62,7 @@ class HunyuanPipeline(nn.Module):
         print("Loaded HunyuanVideoTransformer3DModel to cuda")
         self.flow_scheduler = FlowMatchEulerDiscreteScheduler()
 
+        self.token_replace = config_vast.models.get("token_replace", False)
         self.dtype = torch.bfloat16
         print(f"hunyuanpipeline dtype: {self.dtype}")
         
@@ -152,19 +153,32 @@ class HunyuanPipeline(nn.Module):
                     conditional_latents = (
                         self.forward_vae(first_ref_image) * self.vae.config.scaling_factor
                     )
-                    pad_size = noisy_model_input.size(2) - conditional_latents.size(2)
-                    conditional_latents = F.pad(
-                        conditional_latents,
-                        (0, 0, 0, 0, 0, pad_size),
-                        mode="constant",
-                        value=0,
-                    )
-                    b, c, f, h, w = noisy_model_input.shape
-                    mask = torch.zeros((b, 1, f, h, w), device=torch.cuda.current_device())
-                    mask[:, :, 0] = 1
-                    noisy_model_input = torch.cat(
-                        [noisy_model_input, conditional_latents, mask], dim=1
-                    )
+                    if self.token_replace == "first":
+                        noisy_model_input = torch.cat(
+                            [conditional_latents, noisy_model_input[:,:,1:,:,:]], dim=2
+                        )
+                    elif self.token_replace == "first_last":
+                        last_ref_image = batch_dict["last_ref_image"]
+                        last_ref_latents = (
+                            self.forward_vae(last_ref_image) * self.vae.config.scaling_factor
+                        )
+                        noisy_model_input = torch.cat(
+                            [conditional_latents, noisy_model_input[:,:,1:-1,:,:], last_ref_latents], dim=2
+                        )
+                    else:
+                        pad_size = noisy_model_input.size(2) - conditional_latents.size(2)
+                        conditional_latents = F.pad(
+                            conditional_latents,
+                            (0, 0, 0, 0, 0, pad_size),
+                            mode="constant",
+                            value=0,
+                        )
+                        b, c, f, h, w = noisy_model_input.shape
+                        mask = torch.zeros((b, 1, f, h, w), device=torch.cuda.current_device())
+                        mask[:, :, 0] = 1
+                        noisy_model_input = torch.cat(
+                            [noisy_model_input, conditional_latents, mask], dim=1
+                        )
                 if "cn_images" in batch_dict and "cn_images" is not None:
                     cn_images = batch_dict["cn_images"].to(self.dtype)
                     cn_images = self.forward_vae(cn_images)
@@ -219,6 +233,10 @@ class HunyuanPipeline(nn.Module):
             target = noise - latents
 
             loss = weights.float() * (model_pred.float() - target.float()).pow(2)
+            if self.token_replace == 'first':
+                loss = loss[:,:,1:,:,:]
+            elif self.token_replace == 'first_last':
+                loss = loss[:,:,1:-1,:,:]
             if args.sanity_check:
                 loss = model_pred.norm() # dummy loss just for sanity check
             
