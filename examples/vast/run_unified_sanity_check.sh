@@ -36,12 +36,11 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=3
-export NUM_SINGLE_LAYERS=6
+export NUM_LAYERS=20
 # 开启融合算子计算，需要先安装fused kernels
 export FUSED_KERNELS=1
 
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+CHECKPOINT_PATH=/nvfile-heatstorage/hyc/vast/work_dirs/hunyuanvideo_i2vhy_sp2_720p_85_24fps_0512/models/checkpoint_epoch_1_step_5000/teletron
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -56,7 +55,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 3
+    --num-layers $NUM_LAYERS
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -68,7 +67,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 10
+    --train-iters 100
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -90,7 +89,8 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --dataset-type FakeDataset
+    --task-type i2v_multimask
+    --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
