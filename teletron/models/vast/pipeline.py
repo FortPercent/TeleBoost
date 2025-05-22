@@ -37,7 +37,7 @@ def broadcast_timesteps(input: torch.Tensor):
         dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
 class HunyuanPipeline(nn.Module):
-    def __init__(self, config, config_vast):
+    def __init__(self, config, config_vast=None):
         super().__init__()
         self.pre_process = mpu.is_pipeline_first_stage()
         self.post_process = mpu.is_pipeline_last_stage()
@@ -52,7 +52,8 @@ class HunyuanPipeline(nn.Module):
             self.vae.enable_tiling()
 
         hunyuanConfig = HunyuanParams()
-        hunyuanConfig.in_channels = config_vast.models.transformer.in_channels
+        if config_vast is not None:
+            hunyuanConfig.in_channels = config_vast.models.transformer.in_channels
         latent_channels = self.vae.config.latent_channels
 
         print("Load HunyuanVideoTransformer3DModel to cuda")
