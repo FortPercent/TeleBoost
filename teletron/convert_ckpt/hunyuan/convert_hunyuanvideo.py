@@ -54,8 +54,9 @@ def add_extra_args(parser):
     parser.add_argument(
         '--patch-embedder-in-channels',
         type=int,
-        default=33,
-        help=""
+        required=False,
+        help="if specified, converter will narrow or expand \
+         the in-channel dim of the conv kernel of the patch embedder."
     )
 
     parser.add_argument(
@@ -346,7 +347,6 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     os.makedirs(release_dir, exist_ok=True)
     
     config = GPT2Config.from_pretrained(args.load_path)
-    
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
         "in_channels": config.in_channels,
@@ -493,17 +493,18 @@ def convert_checkpoint_from_transformers_to_megatron(args):
             # 更新 DIT_IDENTICAL_WEIGHT 中的参数
             update_params_with_identical_weights(params_dict, state_dict, DIT_IDENTICAL_WEIGHT)
 
-            # 扩展xembedder卷积核 if necessary
-            if args.patch_embedder_in_channels != margs.in_channels:
-                proj_weight = state_dict["x_embedder.proj.weight"]
-                if margs.in_channels > args.patch_embedder_in_channels:
-                    params_dict["x_embedder.proj.weight"] = proj_weight[:, :args.patch_embedder_in_channels]
-                else:
-                    weight_shape = list(proj_weight.shape)
-                    weight_shape[1] = args.patch_embedder_in_channels
-                    params_dict["x_embedder.proj.weight"] = proj_weight.new_zeros(weight_shape)
-                    params_dict["x_embedder.proj.weight"][:, :proj_weight.shape[1]] = proj_weight
-
+            # 扩展或裁剪 patch embedder卷积核 if necessary
+            if args.patch_embedder_in_channels:
+                if args.patch_embedder_in_channels != margs.in_channels:
+                    proj_weight = state_dict["x_embedder.proj.weight"]
+                    if margs.in_channels > args.patch_embedder_in_channels:
+                        params_dict["x_embedder.proj.weight"] = proj_weight[:, :args.patch_embedder_in_channels]
+                    else:
+                        weight_shape = list(proj_weight.shape)
+                        weight_shape[1] = args.patch_embedder_in_channels
+                        params_dict["x_embedder.proj.weight"] = proj_weight.new_zeros(weight_shape)
+                        params_dict["x_embedder.proj.weight"][:, :proj_weight.shape[1]] = proj_weight
+            
             # 更新 transformer_blocks 中的参数
             for layer_id in range(config.num_layers):
                 seg = 6 * hidden_size // args.target_tensor_model_parallel_size
