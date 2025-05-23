@@ -1,24 +1,30 @@
 import os
-import torch
+import sys
+import json
 from vast.models import  HunyuanVideoTransformer3DModel
-import transformers
-import diffusers
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
 
-print("transformers version:", transformers.__version__)
-print("diffusers version:", diffusers.__version__)
+ckpt_name = "hunyuanvideo_i2vhy_token_replace"
+ckpt_name = "hunyuanvideo_i2v_multimask"
 
-ckpt_path = "/nvfile-heatstorage/hyc/vast/work_dirs/hunyuanvideo_i2vhy_sp2_720p_85_24fps_0512/models/checkpoint_epoch_1_step_5000"
-bin_path = f"{ckpt_path}/transformer/diffusion_pytorch_model.bin"
-path = f"{ckpt_path}/transformer"
+config_path = "/nvfile-heatstorage/yxy/code/Teletron/model_paths.json"
+with open(config_path, 'r') as f:
+    config = json.load(f)
+ckpt_path = config.get(ckpt_name)
+
+bin_path = f"{ckpt_path}/transformer"
+bin_file = f"{bin_path}/diffusion_pytorch_model.bin"
 save_path = f"{ckpt_path}/transformer_safetensor"
 
 print(f"check .bin file exist: {bin_path}")
-assert os.path.exists(bin_path), f"{bin_path} not exist!"
+assert os.path.exists(bin_file), f"{bin_file} not exist!"
 
+print(f"load bin model from {bin_path}")
 transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-    path,
+    bin_path,
     allow_pickle=True,
     trust_remote_code=True,   
     use_safetensors=False
 )
 transformer.save_pretrained(save_path)
+print(f"save safetensors model to {save_path}")

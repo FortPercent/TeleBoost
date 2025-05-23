@@ -1,0 +1,7 @@
+
+{
+    "hunyuanvideo_i2v_multimask": 
+        "/nvfile-heatstorage/hyc/vast/work_dirs/hunyuanvideo_i2vhy_sp2_720p_85_24fps_0512/models/checkpoint_epoch_1_step_5000",
+    "hunyuanvideo_i2vhy_token_replace":  
+        "/nvfile-heatstorage/ljq/repos/vast/work_dirs/hunyuanvideo_i2vhy_token_replace/models/checkpoint_epoch_1_step_1300"
+}
