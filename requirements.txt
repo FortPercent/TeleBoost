@@ -22,3 +22,6 @@ matplotlib==3.10.0
 tensorboard==2.18.0
 loguru==0.7.3
 fvcore~=0.1.5
+attrs==24.2.0
+easydict==1.13
+cattrs==24.1.3
