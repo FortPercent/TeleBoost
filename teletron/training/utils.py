@@ -12,6 +12,7 @@ from megatron.core import mpu
 
 def get_batch_on_this_tp_rank_vast(data_iterator):
     args = get_args()
+    data_dict = ['images', 'prompt_embeds', 'prompt_masks', 'clip_text_embed', 'ref_mask', 'ref_images']
 
     def _broadcast(item):
         if item is not None:
@@ -24,10 +25,15 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
            data = None
            
         batch = {}
-
-        for param in data.keys():
-            if isinstance(data[param], torch.Tensor):
+        data_dict = [d for d in data.keys()]
+        for param in data_dict:
+            if isinstance(data[param], list): # prompt is list
+                pass
+            elif isinstance(data[param], torch.Tensor):
                 batch.update({param: data[param].cuda(non_blocking = True)})
+            else:
+                raise NotImplementedError(f"Unsupported data type: {type(data[param])}")
+
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
@@ -43,8 +49,12 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         batch = {}
-        for param in sizes_info_list[0].keys():
-            batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
+        data_dict = [d for d in sizes_info_list[0].keys()]
+        for param in data_dict:
+            if param == "prompt_masks":
+                batch. update({param: torch.empty(sizes_info_list[0][param], dtype=torch.int64, device=torch.cuda.current_device())})
+            else:
+                batch. update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device=torch.cuda.current_device())})
         for param in batch.keys():
             _broadcast(batch[param])
 
@@ -53,6 +63,7 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
 def get_batch_on_this_tp_cp_rank_vast(data_iterator):
     args = get_args()
+    data_dict = ['images', 'prompt_embeds', 'prompt_masks', 'clip_text_embed', 'ref_mask', 'ref_images']
 
     def _broadcast(item):
         if item is not None:
@@ -64,9 +75,14 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         else:
            data = None
         batch = {}
-        for param in data.keys():
-            if isinstance(data[param], torch.Tensor):
+        data_dict = [d for d in data.keys()]
+        for param in data_dict:
+            if isinstance(data[param], list): # prompt is list
+                pass
+            elif isinstance(data[param], torch.Tensor):
                 batch.update({param: data[param].cuda(non_blocking = True)})
+            else:
+                raise NotImplementedError(f"Unsupported data type: {type(data[param])}")
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
         sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
@@ -82,8 +98,12 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
 
         batch = {}
-        for param in sizes_info_list[0].keys():
-            batch.update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device = torch.cuda.current_device())})
+        data_dict = [d for d in sizes_info_list[0].keys()]
+        for param in data_dict:
+            if param == "prompt_masks":
+                batch. update({param: torch.empty(sizes_info_list[0][param], dtype=torch.int64, device=torch.cuda.current_device())})
+            else:
+                batch. update({param: torch.empty(sizes_info_list[0][param], dtype=torch.float32, device=torch.cuda.current_device())})
         for param in batch.keys():
             _broadcast(batch[param])
 
