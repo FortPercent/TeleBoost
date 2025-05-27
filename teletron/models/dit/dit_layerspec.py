@@ -1,9 +1,11 @@
 # Copyright 2025 TeleAI-infra Team and HuggingFace Inc. All rights reserved.
 
+import os
 import copy
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
+from diffusers.models.normalization import FP32LayerNorm
 from megatron.core.transformer.attention import (
     CrossAttention,
     CrossAttentionSubmodules,
@@ -34,28 +36,21 @@ from teletron.models.dit.dit_attention import (
     HunyuanSingleAttention,
 )
 
-from teletron.models.dit.dit_adaln import (
+from teletron.models.dit.dit_fusedlayers import (
     FusedAdaLayerNormZero,
-    FusedAdaLayerNormZeroSingle
+    FusedAdaLayerNormZeroSingle,
+    Get_RMSNorm
 )
+RMSNorm = Get_RMSNorm()
+
+
 
 from megatron.core.tensor_parallel.mappings import (
     gather_from_tensor_model_parallel_region,
 )
 
 
-class RMSNorm(nn.Module):
-    def __init__(self, hidden_size: int, config, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(hidden_size))
 
-    def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
-
-    def forward(self, x):
-        output = self._norm(x.float()).type_as(x)
-        return output * self.weight
 
 
 class AdaLNContinuous(MegatronModule):
@@ -71,7 +66,7 @@ class AdaLNContinuous(MegatronModule):
             nn.SiLU(), nn.Linear(conditioning_embedding_dim, config.hidden_size * 2, bias=modulation_bias)
         )
         if norm_type == "layer_norm":
-            self.norm = nn.LayerNorm(config.hidden_size, elementwise_affine=False, eps=1e-6, bias=modulation_bias)
+            self.norm = FP32LayerNorm(config.hidden_size, elementwise_affine=False, eps=1e-6, bias=modulation_bias)
         elif norm_type == "rms_norm":
             self.norm = RMSNorm(config.hidden_size, eps=1e-6)
         else:
@@ -97,16 +92,17 @@ class HunyuanDiTLayer(TransformerLayer):
         config: TransformerConfig,
         submodules: TransformerLayerSubmodules,
         layer_number: int = 1,
-        memory_efficient: bool = False,
+        fused_kernels: bool = False,
         context_pre_only: bool = False,
     ):
         hidden_size = config.hidden_size
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
 
-        self.norm1 = FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
-        self.norm1_context= FusedAdaLayerNormZero(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+
+        self.norm1 = FusedAdaLayerNormZero(hidden_size, norm_type="fp32_layer_norm", fused_kernels=fused_kernels, config=config)
+        self.norm1_context= FusedAdaLayerNormZero(hidden_size, norm_type="fp32_layer_norm", fused_kernels=fused_kernels, config=config)
+        self.norm2 = FP32LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm2_context = FP32LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         
         cp_override_config = copy.deepcopy(config)
         cp_override_config.context_parallel_size = 1
@@ -257,15 +253,15 @@ class HunyuanSingleDiTLayer(TransformerLayer):
         submodules: TransformerLayerSubmodules,
         layer_number: int = 1,
         mlp_ratio: int = 4,
-        memory_efficient: bool = False,
+        fused_kernels: bool = False,
         n_adaln_chunks: int = 3,
         modulation_bias: bool = True,
     ):
         super().__init__(config=config, submodules=submodules, layer_number=layer_number)
         hidden_size = config.hidden_size
 
-        self.norm = FusedAdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm", memory_efficient=memory_efficient, config=config)
-
+        self.norm = FusedAdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm", fused_kernels=fused_kernels, config=config)
+        self.norm.norm = FP32LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.mlp_hidden_dim=hidden_size*mlp_ratio
         # self.proj_mlp=nn.Linear(hidden_size, self.mlp_hidden_dim)
         self.proj_mlp=TEColumnParallelLinear(
