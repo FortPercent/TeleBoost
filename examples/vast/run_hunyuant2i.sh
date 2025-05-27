@@ -56,6 +56,16 @@ GPT_MODEL_ARGS=(
     --vocab-size 0
 )
 
+TOKENIZER_ARGS=(
+    --tokenizer-path-llama /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/tokenizer
+    --tokenizer-path-clip /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/tokenizer_2
+)
+
+MODEL_ARGS=(
+    --llama-path /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder
+    --clip-path /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder_2
+)
+
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
@@ -93,7 +103,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 10000
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH
+    # --load $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
@@ -104,4 +114,6 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_hunyuanvideoT2I.py \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${DATA_ARGS[@]}    \
-    ${EVAL_AND_LOGGING_ARGS[@]} 
+    ${EVAL_AND_LOGGING_ARGS[@]}  \
+    ${TOKENIZER_ARGS[@]} \
+    ${MODEL_ARGS[@]}
