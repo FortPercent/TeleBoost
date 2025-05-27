@@ -808,7 +808,6 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             f'transformer_blocks.{layer_id}.norm1_context.linear.bias',
         }
         update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_IDENTICAL_WEIGHT)
-    import ipdb; ipdb.set_trace()
     for layer_id in range(config.num_single_layers):
         TRANSFORMER_SINGLE_IDENTICAL_WEIGHT = {
             # f'transformer.single_transformer_blocks.{layer_id}.norm.linear.weight',
@@ -817,7 +816,6 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             f'single_transformer_blocks.{layer_id}.norm.linear.bias',
         }
         update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_SINGLE_IDENTICAL_WEIGHT)
-    import ipdb; ipdb.set_trace()
     path='model'
 
     # Extract the layers.
@@ -1050,7 +1048,6 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                 output_state_dict[f'single_transformer_blocks.{layer_id}.attn.norm_k.weight']=val
             continue
     # exit(0)
-    import ipdb; ipdb.set_trace()
     output_state_dict['norm_out.linear.weight']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.weight"]
     output_state_dict['norm_out.linear.bias']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.bias"]
     
@@ -1071,9 +1068,9 @@ def convert_checkpoint_from_megatron_to_transformers(args):
         shard = {tensor: output_state_dict[tensor].contiguous() for tensor in tensors}
         filepath = os.path.join(args.save_path, filename)
         torch.save(shard, filepath)
+        print(f"Saved {len(shard)} models to {filepath}")
 
     # 保存index文件
-    import ipdb; ipdb.set_trace()
     if state_dict_split.is_sharded:
         index = {
             "metadata": state_dict_split.metadata,
