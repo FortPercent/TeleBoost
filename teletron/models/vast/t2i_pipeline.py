@@ -53,25 +53,24 @@ class HunyuanPipelineT2I(nn.Module):
         self.vae.requires_grad_(False)
         self.vae_scale_factor_temporal = 2 ** sum(self.vae.temperal_downsample) if getattr(self, "vae", None) else 4
         self.vae_scale_factor_spatial = 2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
-        
-        self.tokenizer = LlamaTokenizerFast()
-        self.text_encoder = LlamaModel()
+        args = get_args()
+        self.tokenizer = LlamaTokenizerFast.from_pretrained(args.tokenizer_path_llama)
+        self.text_encoder = LlamaModel.from_pretrained(args.llama_path)
         self.text_encoder.requires_grad_(False)
         self.text_encoder.to(device=torch.cuda.current_device())
         
-        self.tokenizer2 = CLIPTokenizer()
-        self.text_encoder2 = CLIPTextModel()
+        self.tokenizer2 = CLIPTokenizer.from_pretrained(args.tokenizer_path_clip)
+        self.text_encoder2 = CLIPTextModel.from_pretrained(args.clip_path)
         self.text_encoder2.requires_grad_(False)
         self.text_encoder2.to(device=torch.cuda.current_device())
 
-        args = get_args()
-        if args.vae_slicing:
-            self.vae.enable_slicing()
-        if args.vae_tiling:
-            self.vae.enable_tiling()
+        
+        # if args.vae_slicing:
+        #     self.vae.enable_slicing()
+        # if args.vae_tiling:
+        #     self.vae.enable_tiling()
 
         hunyuanConfig = HunyuanParams()
-        latent_channels = self.vae.config.latent_channels
 
         print("Load HunyuanVideoTransformer3DModel to cuda")
         self.config = config 

@@ -69,9 +69,17 @@ def extra_args_provider(parser):
     group.add_argument("--flow-logit-mean", type=float, default=0.0)
     group.add_argument("--flow-logit-std", type=float, default=1.0)
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
-    
+
     group = parser.add_argument_group(title='debug')
     group.add_argument("--sanity-check", action="store_true")
+
+    group = parser.add_argument_group(title='tokenizer')
+    group.add_argument("--tokenizer-path-llama", type=str)
+    group.add_argument("--tokenizer-path-clip", type=str)
+
+    group = parser.add_argument_group(title='model')
+    group.add_argument("--llama-path", type=str)
+    group.add_argument("--clip-path", type=str)
     return parser
 
 
