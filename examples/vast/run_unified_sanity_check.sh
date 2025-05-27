@@ -9,7 +9,10 @@ export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/adk/Teletron
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron_VAST
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/teleai_data_tool_source_code/
 
 
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
@@ -36,7 +39,8 @@ export NUM_SINGLE_LAYERS=6
 # 开启融合算子计算，需要先安装fused kernels
 export FUSED_KERNELS=1
 
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+# CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/litian/megatron_ckpt_v2/ckpt_tp${TP}_36_i2v
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -85,7 +89,7 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --dataset-type KoalaDataset
+    --dataset-type FakeDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
@@ -96,7 +100,7 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 10000
+    --save-interval 1
     --eval-interval 10000 
     --load $CHECKPOINT_PATH
     --eval-iters 10000

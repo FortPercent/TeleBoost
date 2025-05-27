@@ -90,7 +90,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
             'first_ref_image': data["first_ref_image"].cuda(non_blocking = True) if "first_ref_image" in data else None,
             'prompt_embeds': data["prompt_embeds"].cuda(non_blocking = True),
             'clip_text_embed': None if "clip_text_embed" not in data else data["clip_text_embed"].cuda(non_blocking = True),
-            'latents': data["latents"].cuda(non_blocking = True),
+            'latents': data["latents"].cuda(non_blocking = True) if "latents" in data else None,
         }
 
         # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
@@ -114,7 +114,10 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
         prompt_embeds=torch.empty(sizes_info_list[0]['prompt_embeds'], dtype=torch.float32, device = torch.cuda.current_device())
         clip_text_embed=torch.empty(sizes_info_list[0]['clip_text_embed'], dtype=torch.float32, device = torch.cuda.current_device())
-        latents=torch.empty(sizes_info_list[0]['latents'], dtype=torch.bfloat16, device = torch.cuda.current_device())
+        if "latents" in sizes_info_list[0] and sizes_info_list[0]['latents'] is not None: 
+            latents=torch.empty(sizes_info_list[0]['latents'], dtype=torch.bfloat16, device = torch.cuda.current_device())
+        else:
+            latents = None
         
 
         _broadcast(images)
