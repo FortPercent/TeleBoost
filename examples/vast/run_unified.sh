@@ -9,10 +9,13 @@ export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/teleai_data_tool_source_code/
+export PYTHONPATH=
+# TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons 
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_VAST
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
+
 
 
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
@@ -34,11 +37,19 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=1
-export NUM_SINGLE_LAYERS=1
 
-# CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
-CHECKPOINT_PATH=/data02/model_zoo/vast_ckpt_tp1
+# model layers are set by environment variable
+export NUM_LAYERS=20
+export NUM_SINGLE_LAYERS=40
+
+# read baseline from model_paths.json
+TASK_TYPE=i2vhy_token_replace 
+#TASK_TYPE=i2v_multimask
+#TASK_TYPE=i2v
+
+CONFIG_FILE="/nvfile-heatstorage/yxy/code/Teletron/model_paths.json"
+CHECKPOINT_PATH=$(jq -r ".hunyuanvideo_${TASK_TYPE}" "$CONFIG_FILE")
+
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -53,7 +64,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 1
+    --num-layers $NUM_LAYERS
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -63,7 +74,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --task-type t2v
+    --task-type $TASK_TYPE
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 100000
@@ -97,10 +108,11 @@ DATA_ARGS=(
 
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
-    --log-interval 1
-    --save-interval 500
+    --log-interval 10
+    --save-interval 200
     --eval-interval 10000 
-    # --load $CHECKPOINT_PATH
+    --load $CHECKPOINT_PATH/teletron
+    --save $CHECKPOINT_PATH/teletron
     # --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 

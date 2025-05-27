@@ -3,8 +3,8 @@ import os
 from vast.datasets.config.t2v_200w import get_data_list
 
 # 训练配置
-dst_size = (720, 480)
-dst_num_frames = 81
+dst_size = (1280, 720)
+dst_num_frames = 49
 dst_fps = 15
 
 config = dict(
@@ -32,19 +32,19 @@ config = dict(
                 type="ClipDataset",
                 data_path_list=[
                     "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_1.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_2.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_3.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/200w_nobody/pack_zwzx_1_slice_new_0.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/150w/pexels_v0.0.8.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/150w/mixkit_v0.0.7.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/150w/pixapay_v0.0.7.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_2.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_3.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/200w_nobody/pack_zwzx_1_slice_new_0.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/150w/pexels_v0.0.8.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/150w/mixkit_v0.0.7.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/150w/pixapay_v0.0.7.json",
                                         
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-20.json",==
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-21.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-22.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-23.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-24.json",
-                    # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-25.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-20.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-21.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-22.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-23.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-24.json",
+                    "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-25.json",
                     # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-26-1.json",
                     # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-26-2.json",
                     # "/nvfile-heatstorage/Text2Video/annotations/koala/koala-1-26-3.json",
@@ -168,13 +168,13 @@ config = dict(
                     dict(
                         type="PromptToTransformerEmbedding",
                         model_name="llama",
-                        model_path="/data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder",
+                        model_path="/data01/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder",
                         max_length=256,
                         with_attention_mask=True,
                     ),
                     dict(
                         type="PromptToClipEmbedding",
-                        model_path="/data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder_2",
+                        model_path="/data01/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder_2",
                     ),
                     dict(
                         type="PackInputs",
@@ -215,7 +215,7 @@ config = dict(
     ),
     ### 模型model配置
     models=dict(
-        pretrained="/data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b",
+        pretrained="/data01/model_zoo/huggingface/hunyuan/hunyuanvideo_13b",
         # transformer_pretrained="/nvfile-heatstorage/hyc/vast/work_dirs/hunyuanvideo_i2v_480p_85/models/checkpoint_epoch_1_step_7500/transformer_safetensor",
         transformer=dict(
             in_channels=36,  # with ref images 16->32, with ref and cn_images 16->48
