@@ -701,6 +701,8 @@ def convert_checkpoint_from_megatron_to_transformers(args):
 
     # Extract the layers.
     for key, val in get_element_from_dict_by_path(tp_state_dicts[0], path).items():
+        if "extra_state" in key:
+            continue
         if key.startswith("transformer_blocks"):
             key_list = key.split('.')
             # layer_id = int(key_list[2])
@@ -969,8 +971,8 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                 output_state_dict[f'single_transformer_blocks.{layer_id}.attn.norm_k.weight']=val
             continue
 
-    output_state_dict['norm_out.linear.weight']=get_element_from_dict_by_path(tp_state_dicts[0], path)["transformer.norm_out.adaLN_modulation.1.weight"]
-    output_state_dict['norm_out.linear.bias']=get_element_from_dict_by_path(tp_state_dicts[0], path)["transformer.norm_out.adaLN_modulation.1.bias"]
+    output_state_dict['norm_out.linear.weight']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.weight"]
+    output_state_dict['norm_out.linear.bias']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.bias"]
     
     log_file = open("output_state_dict_kv.txt", "w")
     for key, val in output_state_dict.items():
