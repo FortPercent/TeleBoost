@@ -113,7 +113,7 @@ def init(
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True, parallel_output=True
-) -> HunyuanPipeline:
+) -> HunyuanPipelineT2I:
     args = get_args()
 
     config = core_transformer_config_from_args(args)
@@ -131,7 +131,7 @@ def loss_func(output_tensor):
     loss = loss.unsqueeze(0)
     return loss, {"loss": averaged_loss[0]}
 
-def forward_step(data_iterator, model: HunyuanPipeline):
+def forward_step(data_iterator, model: HunyuanPipelineT2I):
     """Forward training step.
 
     Args:
