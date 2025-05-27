@@ -2,6 +2,7 @@
 import os
 import json
 import torch
+import teletron
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.training.arguments import core_transformer_config_from_args
@@ -19,7 +20,12 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
-from teletron.datasets.fake_dataset import FakeDataset
+from vast.train.configs.config import load_config
+from vast.datasets.datasets.build import build_dataset as build_dataset_vast
+# from megatron.core.datasets.hunyuanvideo_dataset_config import HunyuanVideoDatasetConfig
+from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
+from config.hunyuanvideo_i2vhy import config
+from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
@@ -71,6 +77,8 @@ def extra_args_provider(parser):
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
     
     group = parser.add_argument_group(title='debug')
+    group.add_argument("--debug", action="store_true")
+    group.add_argument("--debug_dir", type=str, default="./logs")
     group.add_argument("--sanity-check", action="store_true")
     return parser
 
@@ -81,9 +89,27 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
 
-    train_ds = build_dataset(args.dataset_type)
-    valid_ds = None
-    test_ds = None
+    if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
+        train_ds = build_dataset(args.dataset_type)
+        valid_ds = None
+        test_ds = None
+    elif args.dataset_type == "VastDataset": 
+        global_config = load_config(config)
+        train_ds_config = global_config.dataloaders.train
+        eval_ds_config = global_config.dataloaders.eval
+        ds_config = HunyuanVideoDatasetConfig(
+            train_ds_config=train_ds_config,
+            eval_ds_config=eval_ds_config
+        )
+        dataset = build_dataset_vast(train_ds_config.dataset)
+        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+            dataset,
+            train_val_test_num_samples,
+            lambda: True,
+            ds_config,
+        ).build()
+    else:
+        raise NotImplementedError
 
     print_rank_0("> finished creating multimodal datasets ...")
 
@@ -154,6 +180,9 @@ def forward_step(data_iterator, model: HunyuanPipeline):
     return output_tensor_list, loss_func
 
 if __name__ == "__main__":
+    # 
+    # set_global_config(global_config)
+
     pretrain(
         train_valid_test_datasets_provider,
         model_provider,

@@ -40,5 +40,5 @@ class FakeDataset():
         random_data["first_ref_image"] = torch.randn((1, 3, self.dst_size[1], self.dst_size[0]))
         random_data["prompt_embeds"] = torch.randn(120, 4096) # assume text token length=120
         random_data["clip_text_embed"] = torch.randn(768)
-        
+        random_data["latents"] = torch.randn(16, int(self.dst_num_frames / 4) + 1, int(self.dst_size[1] / 8), int(self.dst_size[0] / 8)).to(torch.bfloat16)
         return random_data

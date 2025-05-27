@@ -1,15 +1,20 @@
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-HUGGINGFACE_CKPT_PATH="/lustre/teleinfra/HunyuanVideo"
-SOURCE_CKPT_PATH="/workspace/ckpt_tp2_2040_2700test/release"
-TARGET_CKPT_PATH="/nvfile-heatstorage/teleai-infra/litian/megatron_ckpt/vast_ckpt/ckpt_vast_2040_2700/"
-TP=2
-PP=1
+export PYTHONPATH=$PYTHONPATH:/path/to/Megatron-LM
 
-python convert_hunyuan.py  \
-    --load ${SOURCE_CKPT_PATH} \
-    --save ${TARGET_CKPT_PATH} \
-    --hf-ckpt-path ${HUGGINGFACE_CKPT_PATH} \
-    --target-params-dtype bf16 \
-    --target-tensor-model-parallel-size ${TP} \
-    --target-pipeline-model-parallel-size ${PP} \
-    --convert-checkpoint-from-megatron-to-transformers
+# megatron_checkpoint path
+SOURCE_CKPT_PATH="/path/to/megatron_checkpoint"
+# converted huggingface_checkpoint path
+TARGET_CKPT_PATH="/path/to/output/huggingface_checkpoint"
+
+# Model parallelism settings
+TP=1  # Tensor Parallelism
+PP=1  # Pipeline Parallelism
+
+# Run the conversion script
+python convert_hunyuanvideo.py \
+--load ${SOURCE_CKPT_PATH} \
+--save ${TARGET_CKPT_PATH} \
+--target-params-dtype bf16 \
+--target-tensor-model-parallel-size ${TP} \
+--target-pipeline-model-parallel-size ${PP} \
+--convert-checkpoint-from-megatron-to-transformers
+
