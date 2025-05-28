@@ -9,12 +9,10 @@ TeleTron
 
 <div align="left">
 
-## ⏱️Speed Benchmark 
 
-- HunyuanVideo Training Speed 
+## 🔥News
 
-Figure: TeleTron 训练效率对比deepspeed，根据hunyuanvideo文章中说的渐进分辨率（256, 256, 65) -> (360, 640, 85) -> (540, 960, 105) -> (720, 1280, 129) ，GBS=8
-
+- 2025/5/16: TeleTron First Release! Supports HunyuanVideo finetuning and inference.
 
 
 ## 📖Introduction
@@ -32,29 +30,18 @@ TeleTron features flexible parallel strategy and fused cuda kernels to best faci
 
 ### Installation
 
-To save efforts on environment setup, it is recommended using [nvcr](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags)'s 24.10-py3 container image. 
-
-```
-# pull docker image
-docker pull nvcr.io/nvidia/pytorch:24.10-py3
-
-# start docker container
-sudo docker run --gpus all -itd --shm-size 512G --name litian  nvcr.io/nvidia/pytorch:24.10-py3 /bin/bash
-
-# enter the container
-sudo docker exec -it litian /bin/bash
-```
+Docker image tag: `harbor.telecom-ai.com.cn/teleai-t2v/ncvr-torch2.5-cuda12.4:v0.2`
 
 In the docker container, follow the script below to setup TeleTron.
 
 ```
 # get TeleTron
-git clone git@github.com:AI-Infra-Team/TeleTron.git --recurse-submodule
+git clone ssh://${your_user_name}@code.srdcloud.cn:29418/P24HQASYF0004/AI-Infra/Teletron
 
 # install requirements
 pip install -r requirements.txt
 
-# (optional) install TeleTron fused kernels 
+# install TeleTron fused kernels 
 cd teletron_op && bash install.sh
 ```
 
@@ -70,23 +57,27 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MASTER_PORT=12345 bash examples/vast/run_un
 
 * single node training
 
+The script below starts one-node training of HunyuanVideo/VAST. The default training setting is i2v, 720P 49 frames. 
+
 ```
-bash examples/vast/run_unified.sh 2 2 9
+bash examples/vast/run_unified.sh 2 2
 ```
 
-Note that TeleTron the trailing numbers designates TP size, CP size, and the number of frames.  You may also alter training video resolution with `--video-resolution {width} {height}` . 
+Note that the trailing numbers designates TP size and CP size respectively. You may see the full set of training options in `examples/vast/pretrain_hunyuanvideo.py`. Note that for full finetuning you still need to download and convert HunyuanVideo pretrained weights.
 
 * Multi-node training
 
-Run the script below on 4 * 8 H800 cluster and 129-frame 720P training will be initiated. Note that for full finetuning you still need to download and convert HunyuanVideo pretrained weights.
-
 ```
-bash examples/vast/run_unified.sh 1 4 129
+bash examples/vast/run_unified.sh 1 4 
 ```
 
-## 🔥News
+If using k8s, just start a 4-node pod and run the script above. Otherwise, you need to set the env variables below before starting training.
+```
+$MASTER_ADDR
+$RANK
+$WORLD_SIZE
+```
 
-- 2025/5/16: TeleTron First Release! Supports HunyuanVideo finetuning and inference.
 
 ## ✨Features
 
@@ -95,6 +86,8 @@ bash examples/vast/run_unified.sh 1 4 129
 - [x] AdaLayerNorm fused kernel
 
 - [x] RmsNorm fused kernel
+
+- [x] Support VAST dataloader (thanks to yxy)
 
 - [ ] Asynchronous VAE 
 
