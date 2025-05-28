@@ -74,6 +74,9 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         'struct_prompt': list[str],
         'short_prompt': list[str],
         'dense_prompt': list[str],
+        'prompt': list[str],
+        'first_ref_image': torch.float32,
+        'latents': torch.bfloat16
     }
 
     def _broadcast(item):
