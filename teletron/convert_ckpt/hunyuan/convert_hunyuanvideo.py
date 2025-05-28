@@ -821,13 +821,7 @@ def convert_checkpoint_from_megatron_to_transformers(args):
     # Extract the layers.
     for key, val in get_element_from_dict_by_path(tp_state_dicts[0], path).items():
         if "extra_state" in key:
-            print(f"key: {key}, val: {val}")
             continue
-        else:
-            print(key)
-        # if isinstance(val, torch.Tensor):
-        #     print(f"key: {key}, val: {val.shape}")
-        # if key.startswith("transformer.transformer_blocks"):
         if key.startswith("transformer_blocks"):
             key_list = key.split('.')
             # layer_id = int(key_list[2])
@@ -1047,7 +1041,7 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             if 'k_layernorm' in key:
                 output_state_dict[f'single_transformer_blocks.{layer_id}.attn.norm_k.weight']=val
             continue
-    # exit(0)
+
     output_state_dict['norm_out.linear.weight']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.weight"]
     output_state_dict['norm_out.linear.bias']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.bias"]
     
