@@ -44,7 +44,7 @@ config = dict(
             dict(
                 type="PromptGenerator",
                 clean_prompt=True,
-                short_prompt_prob=0.0,
+                #short_prompt_prob=0.0,
                 default_prompt_prob=0.1,
             ),
             dict(
@@ -71,7 +71,7 @@ config = dict(
     ),
 
     ### 模型model配置
-    model=dict(
+    models=dict(
         pretrained="/data01/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/",
         vae_pretrained="/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/vae",
         transformer_pretrained="/nvfile-heatstorage/model_zoo/huggingface/hunyuan/hunyuanvideo_2p6b/transformer",
