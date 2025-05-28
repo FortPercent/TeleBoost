@@ -19,12 +19,28 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
+from vast.datasets.datasets.build import build_dataset as build_dataset_vast
+from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
+from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.datasets.fake_dataset import FakeDataset
 from teletron.models.vast.t2i_pipeline import HunyuanPipelineT2I
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
 from teletron .datasets.build import build_dataset
 import yaml
+
+
+def load_config_vast():
+    args = get_args()
+    if args.task_type == "t2i_wanvae": 
+        print("loading t2i_wanvae config")
+        from config.hunyuanvideo_t2i_wanvae import config
+    else:
+        return None
+    from vast.train.configs.config import load_config
+    config_vast = load_config(config)
+    return config_vast
+
 
 class Config(dict):
     def __init__(self, d=None):
@@ -71,6 +87,8 @@ def extra_args_provider(parser):
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
 
     group = parser.add_argument_group(title='debug')
+    group.add_argument("--debug", action="store_true")
+    group.add_argument("--debug_dir", type=str, default="./logs")
     group.add_argument("--sanity-check", action="store_true")
 
     group = parser.add_argument_group(title='tokenizer')
@@ -80,6 +98,10 @@ def extra_args_provider(parser):
     group = parser.add_argument_group(title='model')
     group.add_argument("--llama-path", type=str)
     group.add_argument("--clip-path", type=str)
+
+    group = parser.add_argument_group(title='training')
+    group.add_argument("--task-type", type=str, choices=['t2i_wanvae'], default="i2v")
+    
     return parser
 
 
@@ -89,9 +111,41 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     print_rank_0("> building train, validation, and test datasets for multimodal ...")
 
-    train_ds = build_dataset(args.dataset_type)
-    valid_ds = None
-    test_ds = None
+    if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
+        train_ds = build_dataset(args.dataset_type)
+        valid_ds = None
+        test_ds = None
+    elif args.dataset_type == "VastDataset": 
+        global_config = load_config_vast()
+        train_ds_config = global_config.dataloaders.train
+        eval_ds_config = global_config.dataloaders.eval
+        ds_config = HunyuanVideoDatasetConfig(
+            train_ds_config=train_ds_config,
+            eval_ds_config=eval_ds_config
+        )
+        dataset = build_dataset_vast(train_ds_config.dataset)
+        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+            dataset,
+            train_val_test_num_samples,
+            lambda: True,
+            ds_config,
+        ).build()
+    elif args.dataset_type == "BucketDataset": 
+        global_config = load_config_vast()
+        train_ds_config = global_config
+        ds_config = HunyuanVideoDatasetConfig(
+            train_ds_config=train_ds_config,
+        )
+        dataset = build_dataset_vast(train_ds_config.dataset)
+
+        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+            dataset,
+            train_val_test_num_samples,
+            lambda: True,
+            ds_config,
+        ).build()
+    else:
+        raise NotImplementedError
 
     print_rank_0("> finished creating multimodal datasets ...")
 
