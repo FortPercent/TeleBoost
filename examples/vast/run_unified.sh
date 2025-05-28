@@ -9,10 +9,13 @@ export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/teleai_data_tool_source_code/
+export PYTHONPATH=
+# TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons 
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_VAST
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
+
 
 
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
@@ -53,7 +56,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 20
+    --num-layers $NUM_LAYERS
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -63,7 +66,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --task-type t2v
+    --task-type $TASK_TYPE
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 100000
