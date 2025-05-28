@@ -109,9 +109,13 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         sizes_info = None 
         sizes_info_list = [sizes_info]
         torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-
+        # print(sizes_info_list)
+        # exit(0)
         images=torch.empty(sizes_info_list[0]['images'], dtype=torch.float32, device = torch.cuda.current_device())
-        first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
+        if "first_ref_image" in sizes_info_list[0] and sizes_info_list[0]['first_ref_image'] is not None: 
+            first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.float32, device = torch.cuda.current_device())
+        else:
+            first_ref_image = None
         prompt_embeds=torch.empty(sizes_info_list[0]['prompt_embeds'], dtype=torch.float32, device = torch.cuda.current_device())
         clip_text_embed=torch.empty(sizes_info_list[0]['clip_text_embed'], dtype=torch.float32, device = torch.cuda.current_device())
         if "latents" in sizes_info_list[0] and sizes_info_list[0]['latents'] is not None: 
@@ -133,5 +137,4 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
             'clip_text_embed': clip_text_embed,
             'latents':latents
         }
-
     return batch

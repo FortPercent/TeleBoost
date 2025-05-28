@@ -38,7 +38,7 @@ export NUM_LAYERS=20
 export NUM_SINGLE_LAYERS=40
 
 # CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
-CHECKPOINT_PATH=/data02/model_zoo/vast_ckpt_tp1
+CHECKPOINT_PATH=/data02/model_zoo/origin_hunyuan_ckpt_tp1_2040_t2v
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -63,6 +63,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
+    --task-type t2v
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 100000
@@ -97,7 +98,7 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 500
+    --save-interval 100
     --eval-interval 10000 
     --load $CHECKPOINT_PATH
     --save $CHECKPOINT_PATH
