@@ -34,11 +34,11 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=1
-export NUM_SINGLE_LAYERS=1
+export NUM_LAYERS=20
+export NUM_SINGLE_LAYERS=40
 
 # CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
-CHECKPOINT_PATH=/data02/model_zoo/vast_ckpt_tp1
+CHECKPOINT_PATH=/data02/model_zoo/origin_hunyuan_ckpt_tp1_2040_t2v
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -53,7 +53,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 1
+    --num-layers 20
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -98,10 +98,10 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 500
+    --save-interval 100
     --eval-interval 10000 
-    # --load $CHECKPOINT_PATH
-    # --save $CHECKPOINT_PATH
+    --load $CHECKPOINT_PATH
+    --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )

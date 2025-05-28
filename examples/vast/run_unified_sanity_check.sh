@@ -39,7 +39,7 @@ export NUM_SINGLE_LAYERS=6
 # 开启融合算子计算，需要先安装fused kernels
 export FUSED_KERNELS=1
 
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
+CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/litian/megatron_ckpt_v2/ckpt_tp${TP}_36_t2v
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -64,6 +64,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
+    --task-type t2v
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 10
@@ -88,20 +89,21 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --dataset-type FakeDataset
+    --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
-    --dataloader-type single
+    --dataloader-type cyclic
     --num-workers 1
 )
 
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 1
+    --save-interval 5
     --eval-interval 10000 
-    # --save $CHECKPOINT_PATH
+    --load $CHECKPOINT_PATH
+    --save $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
