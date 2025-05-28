@@ -20,15 +20,13 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
-from vast.train.configs.config import load_config
 from vast.datasets.datasets.build import build_dataset as build_dataset_vast
-# from megatron.core.datasets.hunyuanvideo_dataset_config import HunyuanVideoDatasetConfig
 from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 
-from teletron .datasets.build import build_dataset
+from teletron.datasets.build import build_dataset
 import yaml
 
 class Config(dict):
@@ -43,6 +41,7 @@ class Config(dict):
 
 
 def load_config_vast():
+    from vast.train.configs.config import load_config
     args = get_args()
     if args.task_type == "t2v":
         print("loading t2v config")
