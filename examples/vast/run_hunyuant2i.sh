@@ -90,10 +90,12 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
+    --task-type t2i_wanvae
+    --dataset-type BucketDataset # BucketDataset
+    --dataloader-type external # external
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
-    --dataloader-type single
     --num-workers 1
     --num-frames $3
 )
