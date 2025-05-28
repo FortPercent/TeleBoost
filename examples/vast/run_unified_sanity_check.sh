@@ -9,10 +9,12 @@ export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron_VAST
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/teleai_data_tool_source_code/
+export PYTHONPATH=
+# TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons 
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_VAST
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 
 
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
@@ -34,8 +36,7 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=3
-export NUM_SINGLE_LAYERS=6
+export NUM_LAYERS=20
 # 开启融合算子计算，需要先安装fused kernels
 export FUSED_KERNELS=1
 
@@ -55,7 +56,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 3
+    --num-layers $NUM_LAYERS
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -67,7 +68,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 10
+    --train-iters 100
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -89,7 +90,8 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --dataset-type FakeDataset
+    --task-type i2v_multimask
+    --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1

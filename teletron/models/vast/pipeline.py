@@ -37,7 +37,7 @@ def broadcast_timesteps(input: torch.Tensor):
         dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
 class HunyuanPipeline(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, config_vast=None):
         super().__init__()
         self.pre_process = mpu.is_pipeline_first_stage()
         self.post_process = mpu.is_pipeline_last_stage()
@@ -52,14 +52,18 @@ class HunyuanPipeline(nn.Module):
             self.vae.enable_tiling()
 
         hunyuanConfig = HunyuanParams()
+        if config_vast is not None:
+            hunyuanConfig.in_channels = config_vast.models.transformer.in_channels
         latent_channels = self.vae.config.latent_channels
 
         print("Load HunyuanVideoTransformer3DModel to cuda")
         self.config = config 
+        self.config_vast = config_vast
         self.transformer = HunyuanVideoTransformer3DModel(hunyuanConfig, config)
         print("Loaded HunyuanVideoTransformer3DModel to cuda")
         self.flow_scheduler = FlowMatchEulerDiscreteScheduler()
 
+        self.token_replace = config_vast.models.get("token_replace", False)
         self.dtype = torch.bfloat16
         print(f"hunyuanpipeline dtype: {self.dtype}")
         
@@ -81,7 +85,7 @@ class HunyuanPipeline(nn.Module):
                     batch_size=batch_size,
                     logit_mean=args.flow_logit_mean,
                     logit_std=args.flow_logit_std,
-                    mode_scale=args.flow_mode_scale,
+                    mode_scale=args.flow_mode_scale
                 )
                 indices = (weights * self.flow_scheduler.config.num_train_timesteps).long()
                 sigmas = scheduler_sigmas[indices].to(device=torch.cuda.current_device())
@@ -94,27 +98,9 @@ class HunyuanPipeline(nn.Module):
                 pooled_prompt_embeds = batch_dict["clip_text_embed"].to(dtype=self.dtype)
                 prompt_masks = (
                     batch_dict["prompt_masks"].to(dtype=self.dtype)
-                    if "prompt_masks" in batch_dict
+                    if "prompt_masks" in batch_dict and batch_dict["prompt_masks"] is not None
                     else None
                 )
-
-                # latents_vae = self.forward_vae(images) * self.vae.config.scaling_factor
-                # latents = batch_dict["latents"]
-                # from torchvision.utils import save_image
-                # output_path = "/nvfile-heatstorage/yxy/code/Teletron/debug/temp/"
-                # save_image(images[:,0], f"{output_path}/image0.png")
-                # save_image(images[:,1], f"{output_path}/image1.png")
-                # save_image(images[:,2], f"{output_path}/image2.png")
-                # save_image(latents[:,:3,0], f"{output_path}/latents0.png")
-                # save_image(latents[:,:3,1], f"{output_path}/latents1.png")
-                # save_image(latents[:,:3,2], f"{output_path}/latents2.png")
-                # save_image(latents_vae[:,:3,0], f"{output_path}/latents_vae0.png")
-                # save_image(latents_vae[:,:3,1], f"{output_path}/latents_vae1.png")
-                # save_image(latents_vae[:,:3,2], f"{output_path}/latents_vae2.png")
-                # print("!!!!!!!!!! images", images.shape)
-                # print("!!!!!!!!!! latent", latents.shape, latents[0,4:6,:,20,20])
-                # print("!!!!!!!!!! latents_vae", latents_vae.shape, latents_vae[0,4:6,:,20,20])
-                # print("!!!!!!!!!! vae diff", (latents_vae - latents).sum())
 
                 if "latents" in batch_dict and batch_dict["latents"] is not None:
                     latents = batch_dict["latents"]
@@ -136,7 +122,7 @@ class HunyuanPipeline(nn.Module):
 
                 # conditional_latents
                 conditional_latents = None
-                if "ref_images" in batch_dict:
+                if "ref_images" in batch_dict and batch_dict["ref_images"] is not None:
                     ref_images = batch_dict["ref_images"]
                     conditional_latents = (
                         self.forward_vae(ref_images) * self.vae.config.scaling_factor
@@ -154,25 +140,47 @@ class HunyuanPipeline(nn.Module):
                     noisy_model_input = torch.cat(
                         [noisy_model_input, conditional_latents], dim=1
                     )
+                    
+                    if "ref_mask" in batch_dict and batch_dict["ref_mask"] is not None: 
+                        # 4 channel mask for multiple ref images
+                        ref_mask = batch_dict["ref_mask"]
+                        ref_mask = rearrange(ref_mask, "b t c h w -> b c t h w").to(conditional_latents.dtype)
+                        if drop_prob > 0:
+                            ref_mask = ref_mask * image_mask[:, None, None, None, None]
+                        noisy_model_input = torch.cat([noisy_model_input, ref_mask], dim=1)
+
                 if "first_ref_image" in batch_dict and batch_dict["first_ref_image"] is not None:
                     first_ref_image = batch_dict["first_ref_image"]
                     conditional_latents = (
                         self.forward_vae(first_ref_image) * self.vae.config.scaling_factor
                     )
-                    pad_size = noisy_model_input.size(2) - conditional_latents.size(2)
-                    conditional_latents = F.pad(
-                        conditional_latents,
-                        (0, 0, 0, 0, 0, pad_size),
-                        mode="constant",
-                        value=0,
-                    )
-                    b, c, f, h, w = noisy_model_input.shape
-                    mask = torch.zeros((b, 1, f, h, w), device=torch.cuda.current_device())
-                    mask[:, :, 0] = 1
-                    noisy_model_input = torch.cat(
-                        [noisy_model_input, conditional_latents, mask], dim=1
-                    )
-                if "cn_images" in batch_dict:
+                    if self.token_replace == "first":
+                        noisy_model_input = torch.cat(
+                            [conditional_latents, noisy_model_input[:,:,1:,:,:]], dim=2
+                        )
+                    elif self.token_replace == "first_last":
+                        last_ref_image = batch_dict["last_ref_image"]
+                        last_ref_latents = (
+                            self.forward_vae(last_ref_image) * self.vae.config.scaling_factor
+                        )
+                        noisy_model_input = torch.cat(
+                            [conditional_latents, noisy_model_input[:,:,1:-1,:,:], last_ref_latents], dim=2
+                        )
+                    else:
+                        pad_size = noisy_model_input.size(2) - conditional_latents.size(2)
+                        conditional_latents = F.pad(
+                            conditional_latents,
+                            (0, 0, 0, 0, 0, pad_size),
+                            mode="constant",
+                            value=0,
+                        )
+                        b, c, f, h, w = noisy_model_input.shape
+                        mask = torch.zeros((b, 1, f, h, w), device=torch.cuda.current_device())
+                        mask[:, :, 0] = 1
+                        noisy_model_input = torch.cat(
+                            [noisy_model_input, conditional_latents, mask], dim=1
+                        )
+                if "cn_images" in batch_dict and "cn_images" is not None:
                     cn_images = batch_dict["cn_images"].to(self.dtype)
                     cn_images = self.forward_vae(cn_images)
                 # TODO guidance check
@@ -187,7 +195,7 @@ class HunyuanPipeline(nn.Module):
                 )
 
                 # cn model
-                if "cn_images" in batch_dict:
+                if "cn_images" in batch_dict and batch_dict["cn_images"] is not None:
                     if hasattr(self.model, "guider"):
                         cn_model = functools.partial(self.model, "guider")
                         cn_images = rearrange(cn_images, "b t c h w -> b c t h w")
@@ -226,6 +234,10 @@ class HunyuanPipeline(nn.Module):
             target = noise - latents
 
             loss = weights.float() * (model_pred.float() - target.float()).pow(2)
+            if self.token_replace == 'first':
+                loss = loss[:,:,1:,:,:]
+            elif self.token_replace == 'first_last':
+                loss = loss[:,:,1:-1,:,:]
             if args.sanity_check:
                 loss = model_pred.norm() # dummy loss just for sanity check
             
@@ -236,6 +248,27 @@ class HunyuanPipeline(nn.Module):
         with torch.no_grad():
             images = rearrange(images, "b f c h w -> b c f h w")
             latents = self.vae.encode(images).latent_dist.sample()
+            # seed = 42
+            # torch.manual_seed(seed)
+            # torch.cuda.manual_seed(seed)
+            # torch.cuda.manual_seed_all(seed) # for multi-GPU setups
+            # torch.backends.cudnn.deterministic = True
+            # torch.backends.cudnn.benchmark = False
+            # latents_1 = self.vae.encode(images).latent_dist.sample()
+            # print("SEED=42, latents", latents_1.shape)
+            # print(latents_1[0, :3, :, 20, 20])
+            # seed = 449
+            # torch.manual_seed(seed)
+            # torch.cuda.manual_seed(seed)
+            # torch.cuda.manual_seed_all(seed) # for multi-GPU setups
+            # torch.backends.cudnn.deterministic = True
+            # torch.backends.cudnn.benchmark = False
+            # latents_2 = self.vae.encode(images).latent_dist.sample()
+            # print("SEED=449, latents", latents_2.shape)
+            # print(latents_1[0, :3, :, 20, 20])
+            # print("diff," (latents_1-latents_2).sum())
+            # todo = 1.0
+            # raise ValueError("Only two seeds are allowed for now.")
         return latents
 
     def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
