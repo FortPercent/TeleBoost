@@ -36,7 +36,8 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=20
+export NUM_LAYERS=3
+export NUM_SINGLE_LAYERS=6
 # 开启融合算子计算，需要先安装fused kernels
 export FUSED_KERNELS=1
 
@@ -68,7 +69,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 100
+    --train-iters 10
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -90,8 +91,8 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --task-type i2v_multimask
-    --dataset-type VastDataset
+    --task-type i2v
+    --dataset-type FakeDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
