@@ -127,7 +127,7 @@ class HunyuanPipelineT2I(nn.Module):
                 max_length=256, # TODO
                 truncation=True,
                 return_tensors="pt",
-            ).to(self.device)
+            ).to(torch.cuda.current_device())
             input_ids = text_inputs.input_ids
             attention_mask = text_inputs.attention_mask
             with torch.no_grad():
@@ -144,7 +144,7 @@ class HunyuanPipelineT2I(nn.Module):
                 return_tensors="pt",
             )
                 
-            input_ids = inputs.input_ids.to(self.device)
+            input_ids = inputs.input_ids.to(torch.cuda.current_device())
             pooled_prompt_embeds = self.text_encoder2(input_ids)[1].to(self.dtype)
 
             # conditional_latents
@@ -157,7 +157,7 @@ class HunyuanPipelineT2I(nn.Module):
                     self.forward_vae(ref_images)
                 )
                 if drop_prob > 0:
-                    random_p = torch.rand(batch_size, device=self.device)
+                    random_p = torch.rand(batch_size, device=torch.cuda.current_device())
                     image_mask = torch.logical_and(
                         random_p >= drop_prob, random_p < 3 * drop_prob
                     )
