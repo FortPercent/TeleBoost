@@ -23,7 +23,7 @@ from megatron.core import mpu
 
 from teletron.models.vast.model import HunyuanVideoTransformer3DModel, HunyuanParams
 
-from diffusers import AutoencoderKLWan, FlowMatchEulerDiscreteScheduler
+from diffusers import AutoencoderKLWan, AutoencoderKLHunyuanVideo, FlowMatchEulerDiscreteScheduler
 
 from megatron.training import get_args
 import torch.nn.functional as F
@@ -89,7 +89,7 @@ class HunyuanPipelineT2I(nn.Module):
                 # latents
                 images = batch_dict["images"]
                 batch_size, num_frames, _, height, width = images.shape
-                latents = self.forward_vae(images) * self.vae.config.scaling_factor
+                latents = self.forward_vae(images) # * self.vae.config.scaling_factor
                 
                 timesteps = torch.tensor(0, device=torch.cuda.current_device()).long()
                 
@@ -257,6 +257,18 @@ class HunyuanPipelineT2I(nn.Module):
         with torch.no_grad():
             images = rearrange(images, "b f c h w -> b c f h w")
             latents = self.vae.encode(images).latent_dist.sample()
+        if isinstance(self.vae, AutoencoderKLWan):
+            latents_mean = (
+                torch.tensor(self.vae.config.latents_mean)
+                .view(1, self.vae.config.z_dim, 1, 1, 1)
+                .to(latents.device, latents.dtype)
+            )
+            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
+                    latents.device, latents.dtype
+                )
+            latents = (latents - latents_mean) * latents_std
+        elif isinstance(self.vae, AutoencoderKLHunyuanVideo):
+            latents = latents * self.vae.config.scaling_factor
         return latents
 
     def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
