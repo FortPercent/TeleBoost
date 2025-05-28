@@ -3,19 +3,12 @@
 # Runs the "175B" parameter model
 export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-# export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=0,1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
-export PYTHONPATH=
-# TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletrons 
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_VAST
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
-
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Teletron
 
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
 echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
@@ -23,7 +16,7 @@ echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 # Change for multinode config
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
 echo '$MASTER_ADDR'$MASTER_ADDR
-# MASTER_PORT='12341'
+MASTER_PORT='12341'
 NNODES=${WORLD_SIZE:-'1'}
 
 echo '$NNODES' $NNODES
@@ -37,11 +30,9 @@ CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 export NUM_LAYERS=20
-# 开启融合算子计算，需要先安装fused kernels
-export FUSED_KERNELS=1
+export NUM_SINGLE_LAYERS=40
 
-# CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/litian/megatron_ckpt_v2/ckpt_tp${TP}_36_i2v
+CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -56,7 +47,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers $NUM_LAYERS
+    --num-layers 20
     --hidden-size 3072        
     --num-attention-heads 24
     --seq-length 512          
@@ -65,10 +56,20 @@ GPT_MODEL_ARGS=(
     --vocab-size 0
 )
 
+TOKENIZER_ARGS=(
+    --tokenizer-path-llama /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/tokenizer
+    --tokenizer-path-clip /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/tokenizer_2
+)
+
+MODEL_ARGS=(
+    --llama-path /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder
+    --clip-path /data02/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder_2
+)
+
 TRAINING_ARGS=(
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 100
+    --train-iters 10
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -82,7 +83,6 @@ TRAINING_ARGS=(
     --recompute-num-layers 42
     --no-rope-fusion
     --distributed-timeout-minutes 60
-    --sanity-check
 )
 
 MODEL_PARALLEL_ARGS=(
@@ -90,30 +90,30 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
 )
 DATA_ARGS=(
-    --task-type i2v_multimask
-    --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
     --dataloader-type single
     --num-workers 1
+    --num-frames $3
 )
 
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 1
+    --save-interval 10000
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH
+    # --load $CHECKPOINT_PATH
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
 
-rm test/test_data/tp${TP}cp${CP}_layer36.log
 echo start tp${TP} cp${CP} training
-torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_hunyuanvideo.py \
+torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_hunyuanvideoT2I.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${DATA_ARGS[@]}    \
-    ${EVAL_AND_LOGGING_ARGS[@]} > test/test_data/tp${TP}cp${CP}_layer36.log
+    ${EVAL_AND_LOGGING_ARGS[@]}  \
+    ${TOKENIZER_ARGS[@]} \
+    ${MODEL_ARGS[@]}
