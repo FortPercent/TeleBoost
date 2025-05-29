@@ -22,13 +22,13 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
-from vast.datasets.datasets.build import build_dataset as build_dataset_vast
-from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
-from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
-from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast, load_config_vast
+from teletron.training.utils import (
+    get_batch_on_this_tp_cp_rank_vast, 
+    load_config_vast,
+    train_valid_test_datasets_provider
+)
 
-from teletron.datasets.build import build_dataset
 import yaml
 
 class Config(dict):
@@ -85,51 +85,6 @@ def extra_args_provider(parser):
     return parser
 
 
-def train_valid_test_datasets_provider(train_val_test_num_samples):
-
-    args = get_args()
-
-    print_rank_0("> building train, validation, and test datasets for multimodal ...")
-
-    if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
-        train_ds = build_dataset(args.dataset_type)
-        valid_ds = None
-        test_ds = None
-    elif args.dataset_type == "VastDataset": 
-        global_config = load_config_vast()
-        train_ds_config = global_config.dataloaders.train
-        eval_ds_config = global_config.dataloaders.eval
-        ds_config = HunyuanVideoDatasetConfig(
-            train_ds_config=train_ds_config,
-            eval_ds_config=eval_ds_config
-        )
-        dataset = build_dataset_vast(train_ds_config.dataset)
-        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
-            dataset,
-            train_val_test_num_samples,
-            lambda: True,
-            ds_config,
-        ).build()
-    elif args.dataset_type == "BucketDataset": 
-        global_config = load_config_vast()
-        train_ds_config = global_config
-        ds_config = HunyuanVideoDatasetConfig(
-            train_ds_config=train_ds_config,
-        )
-        dataset = build_dataset_vast(train_ds_config.dataset)
-
-        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
-            dataset,
-            train_val_test_num_samples,
-            lambda: True,
-            ds_config,
-        ).build()
-    else:
-        raise NotImplementedError
-
-    print_rank_0("> finished creating multimodal datasets ...")
-
-    return train_ds, valid_ds, test_ds
 
 def init(
     train_valid_test_dataset_provider,
