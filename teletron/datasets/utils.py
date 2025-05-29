@@ -1,9 +1,14 @@
+import torch
+from torch.utils.data import BatchSampler
 from megatron.training import (
     get_args,
     print_rank_0
 )
+from megatron.core import mpu
+from vast.datasets import DefaultCollator
 from vast.train.configs.config import load_config
 from vast.datasets.datasets.build import build_dataset as build_dataset_vast
+from vast.train.samplers import build_sampler as build_sampler_vast
 from teletron.datasets.build import build_dataset
 from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
@@ -58,20 +63,31 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
             lambda: True,
             ds_config,
         ).build()
+
     elif args.dataset_type == "BucketDataset": 
         global_config = load_config_vast()
-        train_ds_config = global_config
-        ds_config = HunyuanVideoDatasetConfig(
-            train_ds_config=train_ds_config,
+        dataset = build_dataset_vast(global_config.dataset)
+        assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
+        assert args.task_type == "t2i_wanvae", "BucketDataset is only supported for t2i_wanvae task"
+        sampler = build_sampler_vast(
+            global_config.sampler,
+            dataset=dataset, 
+            rank=mpu.get_data_parallel_rank(),
+            num_replicas=mpu.get_data_parallel_world_size(),
+            # consumed_samples=consumed_samples, # TODO, resume sampler args
         )
-        dataset = build_dataset_vast(train_ds_config.dataset)
-
-        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+        batch_sampler = BatchSampler(sampler, 1, drop_last=False)
+        collator = dict(is_equal=True)
+        collator = DefaultCollator(**collator)
+        train_ds = torch.utils.data.DataLoader(
             dataset,
-            train_val_test_num_samples,
-            lambda: True,
-            ds_config,
-        ).build()
+            batch_sampler=batch_sampler,
+            collate_fn=collator,
+            num_workers=1
+        )
+        train_ds = iter(train_ds)
+        valid_ds = None
+        test_ds = None
     else:
         raise NotImplementedError
 

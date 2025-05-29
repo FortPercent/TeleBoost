@@ -13,14 +13,6 @@
 # limitations under the License.
 
 def exe_adaptation():
-    # circular import inside teletron.datasets.data.data_samplers, so we need to monkey patch by replace sys.modules
-    import sys
-    from teletron.datasets.data.data_samplers import build_pretraining_data_loader 
-    original_module_name = 'megatron.legacy.data.data_samplers'
-    my_fake_module = type(sys)(original_module_name)
-    my_fake_module.build_pretraining_data_loader = build_pretraining_data_loader
-    sys.modules[original_module_name] = my_fake_module
-
     import megatron.core.distributed
     from teletron.core.distributed.distributed_data_parallel import DistributedDataParallel
     from teletron.core.distributed.param_and_grad_buffer import start_grad_sync
