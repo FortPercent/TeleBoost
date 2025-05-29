@@ -23,7 +23,7 @@ from megatron.training.global_vars import (
     get_timers,
 )
 from teletron.models.vast.pipeline import HunyuanPipeline
-from teletron.training.utils import (
+from teletron.datasets.utils import (
     get_batch_on_this_tp_cp_rank_vast, 
     load_config_vast,
     train_valid_test_datasets_provider
