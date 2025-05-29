@@ -11,7 +11,6 @@ from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core import mpu
 
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain, print_rank_0,get_model
-from teletron.datasets.data.data_samplers import build_pretraining_data_loader
 from megatron.training import pretrain
 from megatron.training.utils import (
     average_losses_across_data_parallel_group
