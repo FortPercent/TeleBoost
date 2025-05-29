@@ -144,3 +144,28 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
                 _broadcast(batch[param])
 
     return batch
+
+
+
+def load_config_vast():
+    from vast.train.configs.config import load_config
+    args = get_args()
+    if args.task_type == "t2v":
+        print("loading t2v config")
+        from config.hunyuanvideo_t2v import config
+    elif args.task_type == "i2v":
+        print("loading i2v config")
+        from config.hunyuanvideo_i2vhy import config 
+    elif args.task_type == "i2v_multimask":
+        print("loading i2v_multimask config")
+        from config.hunyuanvideo_i2v_multimask import config
+    elif args.task_type == "i2vhy_token_replace":
+        print("loading i2vhy_token_replace config")
+        from config.hunyuanvideo_i2vhy_token_replace import config
+    elif args.task_type == "t2i_wanvae": 
+        print("loading t2i_wanvae config")
+        from config.hunyuanvideo_t2i_wanvae import config
+    else:
+        return None
+    config_vast = load_config(config)
+    return config_vast

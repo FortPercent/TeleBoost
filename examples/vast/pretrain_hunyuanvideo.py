@@ -3,13 +3,15 @@ import os
 import json
 import torch
 import teletron
+# import teletron before megatron for monkey patching
+import teletron
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core import mpu
 
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain, print_rank_0,get_model
-from megatron.legacy.data.data_samplers import build_pretraining_data_loader
+from teletron.datasets.data.data_samplers import build_pretraining_data_loader
 from megatron.training import pretrain
 from megatron.training.utils import (
     average_losses_across_data_parallel_group
@@ -24,7 +26,7 @@ from vast.datasets.datasets.build import build_dataset as build_dataset_vast
 from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.vast.pipeline import HunyuanPipeline
-from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
+from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast, load_config_vast
 
 from teletron.datasets.build import build_dataset
 import yaml
@@ -38,27 +40,6 @@ class Config(dict):
             if isinstance(v, dict):
                 v = Config(v)
             setattr(self, k, v)
-
-
-def load_config_vast():
-    from vast.train.configs.config import load_config
-    args = get_args()
-    if args.task_type == "t2v":
-        print("loading t2v config")
-        from config.hunyuanvideo_t2v import config
-    elif args.task_type == "i2v":
-        print("loading i2v config")
-        from config.hunyuanvideo_i2vhy import config 
-    elif args.task_type == "i2v_multimask":
-        print("loading i2v_multimask config")
-        from config.hunyuanvideo_i2v_multimask import config
-    elif args.task_type == "i2vhy_token_replace":
-        print("loading i2vhy_token_replace config")
-        from config.hunyuanvideo_i2vhy_token_replace import config
-    else:
-        return None
-    config_vast = load_config(config)
-    return config_vast
 
 
 def get_batch(data_iterator):
@@ -100,7 +81,7 @@ def extra_args_provider(parser):
     group.add_argument("--sanity-check", action="store_true")
 
     group = parser.add_argument_group(title='training')
-    group.add_argument("--task-type", type=str, choices=['i2v', 't2v', 'i2v_multimask', 'i2vhy_token_replace'], default="i2v")
+    group.add_argument("--task-type", type=str, choices=['i2v', 't2v', 'i2v_multimask', 'i2vhy_token_replace', 't2i_wanvae'], default="i2v")
     return parser
 
 
@@ -123,6 +104,20 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
             eval_ds_config=eval_ds_config
         )
         dataset = build_dataset_vast(train_ds_config.dataset)
+        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+            dataset,
+            train_val_test_num_samples,
+            lambda: True,
+            ds_config,
+        ).build()
+    elif args.dataset_type == "BucketDataset": 
+        global_config = load_config_vast()
+        train_ds_config = global_config
+        ds_config = HunyuanVideoDatasetConfig(
+            train_ds_config=train_ds_config,
+        )
+        dataset = build_dataset_vast(train_ds_config.dataset)
+
         train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
             dataset,
             train_val_test_num_samples,

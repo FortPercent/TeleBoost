@@ -24,22 +24,10 @@ from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDa
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.datasets.fake_dataset import FakeDataset
 from teletron.models.vast.t2i_pipeline import HunyuanPipelineT2I
-from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
+from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast, load_config_vast
 
 from teletron .datasets.build import build_dataset
 import yaml
-
-
-def load_config_vast():
-    args = get_args()
-    if args.task_type == "t2i_wanvae": 
-        print("loading t2i_wanvae config")
-        from config.hunyuanvideo_t2i_wanvae import config
-    else:
-        return None
-    from vast.train.configs.config import load_config
-    config_vast = load_config(config)
-    return config_vast
 
 
 class Config(dict):
