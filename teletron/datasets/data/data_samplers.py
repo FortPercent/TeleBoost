@@ -46,13 +46,14 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         
         if args.dataset_type == "BucketDataset":
             print("Use Custom Sampler implemented in Vast")
+            print(f"depreacated args: args.micro_batch_size={args.micro_batch_size}")
             assert args.task_type == "t2i_wanvae"
             config = load_config_vast()
             sampler = build_sampler_vast(
                 config.sampler,
                 dataset=dataset, 
                 rank=mpu.get_data_parallel_rank(),
-                num_replicas=1,
+                num_replicas=mpu.get_data_parallel_world_size(),
                 # TODO , world size and other params are missing in bucket sampler
                 # total_samples=len(dataset),
                 # consumed_samples=consumed_samples,
