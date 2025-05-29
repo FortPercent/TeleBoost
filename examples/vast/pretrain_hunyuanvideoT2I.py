@@ -2,6 +2,8 @@
 import os
 import json
 import torch
+# import teletron before megatron for monkey patching
+import teletron
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.training.arguments import core_transformer_config_from_args
