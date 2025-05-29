@@ -66,16 +66,22 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     elif args.dataset_type == "BucketDataset": 
         global_config = load_config_vast()
-        dataset = build_dataset_vast(global_config.dataset)
+        assert global_config.sampler == "BucketVariableBatchSampler"
         assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
         assert args.task_type == "t2i_wanvae", "BucketDataset is only supported for t2i_wanvae task"
+        print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
+
+        dataset = build_dataset_vast(global_config.dataset)
         sampler = build_sampler_vast(
             global_config.sampler,
             dataset=dataset, 
             rank=mpu.get_data_parallel_rank(),
             num_replicas=mpu.get_data_parallel_world_size(),
-            # consumed_samples=consumed_samples, # TODO, resume sampler args
+            seed=args.seed
         )
+        # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
+        sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
+
         batch_sampler = BatchSampler(sampler, 1, drop_last=False)
         collator = dict(is_equal=True)
         collator = DefaultCollator(**collator)
