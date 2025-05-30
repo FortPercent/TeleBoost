@@ -131,6 +131,7 @@ class HunyuanPipelineT2I(nn.Module):
             ).to(torch.cuda.current_device())
             input_ids = text_inputs.input_ids
             attention_mask = text_inputs.attention_mask
+            
             with torch.no_grad():
                 prompt_embeds = self.text_encoder(input_ids, attention_mask=attention_mask).last_hidden_state.to(self.dtype)
             prompt_masks = attention_mask
