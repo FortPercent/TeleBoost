@@ -27,9 +27,9 @@ config = dict(
         type="VariableImageDataset",
         data_path_list=[
             "/nvfile-heatstorage/Text2Video/annotations/image_data/mfw_1024_v1.json",
-            "/nvfile-heatstorage/Text2Video/annotations/image_data/0830_430w_kolors_tars.json",
-            "/nvfile-heatstorage/Text2Video/annotations/image_data/mid_186000_new.json",
-            "/nvfile-heatstorage/Text2Video/annotations/image_data/untared_md.json"
+            # "/nvfile-heatstorage/Text2Video/annotations/image_data/0830_430w_kolors_tars.json",
+            # "/nvfile-heatstorage/Text2Video/annotations/image_data/mid_186000_new.json",
+            # "/nvfile-heatstorage/Text2Video/annotations/image_data/untared_md.json"
         ],
         filter_cfg=dict(
             aesthetic_th=4,
