@@ -44,13 +44,13 @@ config = dict(
             dict(
                 type="PromptGenerator",
                 clean_prompt=True,
-                #short_prompt_prob=0.0,
+                #short_prompt_prob=0.0, deprecated
                 default_prompt_prob=0.1,
             ),
             dict(
                 type="PackInputs",
                 image_keys=["images",],
-                dst_size=dst_size,
+                #dst_size=dst_size, deprecated
             ),
         ],
     ),
@@ -59,8 +59,11 @@ config = dict(
     sampler=dict(
         type="BucketVariableBatchSampler",
         bucket_config={
-            "256px":{
-                "1": 64,
+            "256px": {
+                "1": {
+                        "bsz": 64,
+                        "prob": 1.0
+                },
             }
         }
     ),
