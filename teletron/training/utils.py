@@ -63,85 +63,61 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
 
 def get_batch_on_this_tp_cp_rank_vast(data_iterator):
-    args = get_args()
-    data_dict = {
-        'images': torch.float32,
-        'prompt_embeds': torch.float32,
-        'prompt_masks': torch.int64,
-        'clip_text_embed': torch.float32,
-        'ref_mask': torch.float32,
-        'ref_images': torch.float32,
-        'struct_prompt': list[str],
-        'short_prompt': list[str],
-        'dense_prompt': list[str],
-        'prompt': list[str],
-        'first_ref_image': torch.float32,
-        'latents': torch.bfloat16
-    }
-
     def _broadcast(item):
         if item is not None:
-           torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-
-    def _broadcast_object_list(item):
-        if item is not None:
-           torch.distributed.broadcast_object_list(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+            import torch.distributed as dist
+            rank = dist.get_rank()
+            torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
     
     if mpu.get_tensor_context_parallel_rank() == 0:
+        print("begin data iterator")
         if data_iterator is not None:
            data = next(data_iterator)
         else:
            data = None
-        assert all(key in data_dict for key in data.keys()), f"Not all keys from input valid: {set(data.keys()) - set(data_dict)}"
         
-        batch = {}
-        for param in data.keys():
-            dtype = data_dict[param]
-            if get_origin(dtype) is list:
-                assert isinstance(data[param], list), f"{param} is not list"
-                # 字符串列表更新内容本身
-                batch.update({param: data[param]})
-            elif isinstance(dtype, torch.dtype):
-                assert data[param].dtype == dtype, f"{param} is not of type {dtype}"
-                # torch Tensor更新前先传输到CUDA
-                batch.update({param: data[param].cuda(non_blocking = True)})
-            else:
-                raise NotImplementedError(f"Unsupported data type: {type(data[param]), dtype}")
+        sizes_info = {}
+        type_info = {}
+        batch=dict(data)
+        for key, tensor in batch.items():
+            if isinstance(tensor, torch.Tensor):
+                batch[key] = tensor.to(torch.cuda.current_device())
+        for key, tensor in batch.items():
+            sizes_info[key] = tensor.size() if tensor is not None and isinstance(tensor, torch.Tensor)  else None
+            type_info[key] = tensor.dtype if tensor is not None and isinstance(tensor, torch.Tensor) else type(tensor)
 
-        # Step 1: 保存每部分的大小信息（只在 Rank 0 执行）
-        sizes_info = {key: tensor.size() if (tensor is not None and isinstance(tensor, torch.Tensor)) else None for key, tensor in batch.items()}
         # Step 2: 广播大小信息
-        _broadcast_object_list([sizes_info])
-        for param in data.keys():
-            dtype = data_dict[param]
-            if get_origin(dtype) is list: 
-                # 字符串以object list的形式广播
-                _broadcast_object_list(batch[param])
-            elif isinstance(dtype, torch.dtype):
-                _broadcast(batch[param])
+        sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+        type_info = torch.distributed.broadcast_object_list([type_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+
+        for key, tensor in batch.items():
+            if isinstance(tensor, list):
+                torch.distributed.broadcast_object_list(tensor, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+            else:
+                _broadcast(tensor)
 
     else:
-        # TODO check 
-        sizes_info = None 
-        sizes_info_list = [sizes_info]
-        _broadcast_object_list(sizes_info_list)
-
+        sizes_info_list = [None]
+        torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+        type_info_list =[None]
+        torch.distributed.broadcast_object_list(type_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
+        
         batch = {}
-        for param in sizes_info_list[0].keys():
-            dtype = data_dict[param]
-            if get_origin(dtype) is list: 
-                # 需要注意，列表需要有一个默认值占位，否则广播失败
-                batch.update({param: ['']})
-            elif isinstance(dtype, torch.dtype):
-                batch.update({param: torch.empty(sizes_info_list[0][param], dtype=dtype, device=torch.cuda.current_device())})
-
-        for param in batch.keys():
-            dtype = data_dict[param]
-            if get_origin(dtype) is list: 
-                # 以object list的形式广播字符串列表
-                _broadcast_object_list(batch[param])
-            elif isinstance(dtype, torch.dtype):
-                _broadcast(batch[param])
+        for key, value in sizes_info_list[0].items():
+            dtype = type_info_list[0][key]
+            
+            if isinstance(dtype, torch.dtype):  # dtype 是 torch.float32 这种
+                tensor = torch.empty(value, dtype=dtype, device=torch.cuda.current_device())
+                _broadcast(tensor)
+                batch[key] = tensor
+            
+            else:  # 表示这是个 list 类型对象
+                tensor = [None]
+                torch.distributed.broadcast_object_list(
+                    tensor,
+                    src=mpu.get_tensor_context_parallel_src_rank(),
+                    group=mpu.get_tensor_context_parallel_group()
+                )
+                batch[key] = tensor
 
     return batch
-
