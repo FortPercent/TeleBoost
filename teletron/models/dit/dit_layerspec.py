@@ -75,9 +75,8 @@ class AdaLNContinuous(MegatronModule):
     def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
         emb = self.adaLN_modulation(conditioning_embedding)
         scale, shift = torch.chunk(emb, 2, dim=1)
-        x = self.norm(x) * (1 + scale) + shift
+        x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
         return x
-
 
 class HunyuanDiTLayer(TransformerLayer):
     """A double transformer layer.
@@ -131,6 +130,8 @@ class HunyuanDiTLayer(TransformerLayer):
             self.norm1_context(encoder_hidden_states, emb=temb)
         )
         
+        print(norm_hidden_states.shape)
+        print("="*100)
         # 2. Joint attention
         attn_output, context_attn_output = self.self_attention(
             # hidden_states=norm_hidden_states,

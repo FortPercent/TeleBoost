@@ -71,6 +71,7 @@ class HunyuanPipelineT2I(nn.Module):
         #     self.vae.enable_tiling()
 
         hunyuanConfig = HunyuanParams()
+        hunyuanConfig.in_channels=16
 
         print("Load HunyuanVideoTransformer3DModel to cuda")
         self.config = config 
@@ -130,6 +131,7 @@ class HunyuanPipelineT2I(nn.Module):
             ).to(torch.cuda.current_device())
             input_ids = text_inputs.input_ids
             attention_mask = text_inputs.attention_mask
+            
             with torch.no_grad():
                 prompt_embeds = self.text_encoder(input_ids, attention_mask=attention_mask).last_hidden_state.to(self.dtype)
             prompt_masks = attention_mask
@@ -196,40 +198,29 @@ class HunyuanPipelineT2I(nn.Module):
                 noisy_model_input = torch.cat(
                     [noisy_model_input, conditional_latents, mask], dim=1
                 )
-                # TODO guidance check
-                guidance_scale = 1.0
-                guidance = (
-                    torch.tensor(
-                        [guidance_scale] * latents.shape[0],
-                        dtype=self.dtype,
-                        device='cuda',
-                    )
-                    * 1000.0
+            # TODO guidance check
+            guidance_scale = 1.0
+            guidance = (
+                torch.tensor(
+                    [guidance_scale] * latents.shape[0],
+                    dtype=self.dtype,
+                    device='cuda',
                 )
-
-                # cn model
-                if "cn_images" in batch_dict:
-                    if hasattr(self.model, "guider"):
-                        cn_model = functools.partial(self.model, "guider")
-                        cn_images = rearrange(cn_images, "b t c h w -> b c t h w")
-                        cn_latents = cn_model(cn_images)
-                        # cn_latents = rearrange(cn_latents, "b c t h w -> b t c h w")
-                    else:
-                        cn_latents = cn_images
-                    noisy_model_input = torch.cat([noisy_model_input, cn_latents], dim=1)
-                latent_model_input = noisy_model_input.to(torch.bfloat16)
+                * 1000.0
+            )
+        noisy_model_input = noisy_model_input.to(self.dtype)
 
         # generate dummy input for sanity check
         if args.sanity_check:
             torch.manual_seed(1234)
-            latent_model_input = torch.randn_like(latent_model_input)
+            noisy_model_input = torch.randn_like(noisy_model_input)
             prompt_embeds = torch.randn_like(prompt_embeds)
             timesteps = torch.randint_like(timesteps, 0, 100)
             pooled_prompt_embeds = torch.randn_like(pooled_prompt_embeds)
             guidance = torch.randn_like(guidance)
 
         model_pred = self.transformer(
-            hidden_states=latent_model_input,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
+            hidden_states=noisy_model_input,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
             timestep=timesteps,  # [263]
             encoder_hidden_states=prompt_embeds,  # [1, 226, 4096]
             encoder_attention_mask=prompt_masks,  # [[1, 1, 1, 0, 0 ]]
