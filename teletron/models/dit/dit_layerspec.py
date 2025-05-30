@@ -75,9 +75,8 @@ class AdaLNContinuous(MegatronModule):
     def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
         emb = self.adaLN_modulation(conditioning_embedding)
         scale, shift = torch.chunk(emb, 2, dim=1)
-        x = self.norm(x) * (1 + scale) + shift
+        x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
         return x
-
 
 class HunyuanDiTLayer(TransformerLayer):
     """A double transformer layer.

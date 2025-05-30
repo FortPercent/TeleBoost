@@ -285,9 +285,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         freqs_cos, freqs_sin = self.rope(hidden_states)
         # 2. Conditional embeddings
         temb = self.time_text_embed(timestep, guidance, pooled_projections)
-
         hidden_states = self.x_embedder(hidden_states)
-        print(encoder_hidden_states.shape,timestep.shape,encoder_attention_mask.shape)
         encoder_hidden_states = self.context_embedder(
             encoder_hidden_states, timestep, encoder_attention_mask
         )

@@ -70,7 +70,6 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
             torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
     
     if mpu.get_tensor_context_parallel_rank() == 0:
-        print("begin data iterator")
         if data_iterator is not None:
            data = next(data_iterator)
         else:
@@ -83,7 +82,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
             if isinstance(tensor, torch.Tensor):
                 batch[key] = tensor.to(torch.cuda.current_device())
         for key, tensor in batch.items():
-            sizes_info[key] = tensor.size() if tensor is not None and isinstance(tensor, torch.Tensor)  else None
+            sizes_info[key] = tensor.size() if tensor is not None and isinstance(tensor, torch.Tensor)  else len(tensor)
             type_info[key] = tensor.dtype if tensor is not None and isinstance(tensor, torch.Tensor) else type(tensor)
 
         # Step 2: 广播大小信息
@@ -112,7 +111,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
                 batch[key] = tensor
             
             else:  # 表示这是个 list 类型对象
-                tensor = [None]
+                tensor = [None]*value
                 torch.distributed.broadcast_object_list(
                     tensor,
                     src=mpu.get_tensor_context_parallel_src_rank(),
