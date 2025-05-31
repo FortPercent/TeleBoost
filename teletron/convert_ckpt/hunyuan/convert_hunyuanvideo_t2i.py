@@ -24,9 +24,10 @@ from diffusers import AutoencoderKLHunyuanVideo
 from vast.train.configs.config import load_config
 from transformers import AutoModelForCausalLM, GPT2Config
 from diffusers.utils import WEIGHTS_NAME,WEIGHTS_INDEX_NAME
+from diffusers import AutoencoderKLWan
 from huggingface_hub import DDUFEntry, create_repo, split_torch_state_dict_into_shards
 # from transformers.modeling_utils import WEIGHTS_INDEX_NAME, WEIGHTS_NAME, shard_checkpoint
-from hunyuanvideo.configs.hunyuanvideo_i2vhy import config as globalConfig
+from hunyuanvideo.configs.hunyuanvideo_t2i_wanvae import config as globalConfig
 import numpy as np
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
