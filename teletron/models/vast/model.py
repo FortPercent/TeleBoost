@@ -86,6 +86,15 @@ class HunyuanVideoTransformer3DModel(VisionModule):
                 self.num_single_layers = num_single_layers
             except ValueError:
                 raise ValueError(f"Invalid integer value for NUM_SINGLE_LAYERS: {os.environ.get('NUM_SINGLE_LAYERS')}")
+
+        if os.environ.get("NUM_ATTN_HEAD"):
+            try:
+                num_attention_heads = int(os.environ.get("NUM_ATTN_HEAD"))
+                assert isinstance(num_attention_heads, int)
+                self.num_attention_heads = num_attention_heads
+            except ValueError:
+                raise ValueError(f"Invalid integer value for NUM_ATTN_HEAD: {os.environ.get('NUM_SINGLE_LAYERS')}")
+        
         self.num_refiner_layers = hunyuan_config.num_refiner_layers
         self.mlp_ratio = hunyuan_config.mlp_ratio
         self.patch_size = hunyuan_config.patch_size
@@ -98,7 +107,7 @@ class HunyuanVideoTransformer3DModel(VisionModule):
         self.guidance_embed = hunyuan_config.guidance_embeds
 
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
-        config.hidden_size =self.hidden_size
+        config.hidden_size = self.hidden_size
         config.num_attention_heads=self.num_attention_heads
 
         config.num_query_groups = config.num_attention_heads
