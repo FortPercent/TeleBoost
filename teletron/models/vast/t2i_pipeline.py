@@ -123,7 +123,7 @@ class HunyuanPipelineT2I(nn.Module):
                 noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
             # embeddings
             text_inputs = self.tokenizer(
-                batch_dict["dense_prompt"],
+                batch_dict["dense_prompt"], # TODO: the input should be a list of 64 strings
                 padding="max_length",
                 max_length=256, # TODO
                 truncation=True,

@@ -30,7 +30,8 @@ CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 export NUM_LAYERS=20
-export NUM_SINGLE_LAYERS=40
+export NUM_SINGLE_LAYERS=20
+export NUM_ATTN_HEAD=12
 
 CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700
 TENSORBOARD_LOGS_PATH=./logs
@@ -47,9 +48,9 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 20
-    --hidden-size 3072        
-    --num-attention-heads 24
+    --num-layers $NUM_LAYERS
+    --hidden-size 1536        
+    --num-attention-heads 12
     --seq-length 512          
     --max-position-embeddings 4096
     --tokenizer-type NullTokenizer

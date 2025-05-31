@@ -130,8 +130,6 @@ class HunyuanDiTLayer(TransformerLayer):
             self.norm1_context(encoder_hidden_states, emb=temb)
         )
         
-        print(norm_hidden_states.shape)
-        print("="*100)
         # 2. Joint attention
         attn_output, context_attn_output = self.self_attention(
             # hidden_states=norm_hidden_states,
