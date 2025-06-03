@@ -29,8 +29,8 @@ TP=$1
 CP=$2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-export NUM_LAYERS=20
-export NUM_SINGLE_LAYERS=20
+export NUM_LAYERS=16
+export NUM_SINGLE_LAYERS=32
 export NUM_ATTN_HEAD=12
 
 CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/adk/Megatron_VAST/ckpt_tp${TP}_36_linearparallel_epoch1step2700

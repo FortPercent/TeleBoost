@@ -365,8 +365,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # config.num_attention_heads=24
     # print(config)
     # megatron args
-    # config.num_layers = 1
-    # config.num_single_layers = 1
+    config.num_layers = 16
+    config.num_single_layers = 32
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
         "in_channels": config.in_channels,
@@ -389,7 +389,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     state_dict = HunyuanVideoTransformer3DModel.from_pretrained(args.load_path).state_dict()
 
     pretrained = get_model_path(global_config.models.pretrained)
-    vae_pretrained = global_config.get(
+    vae_pretrained = global_config.models.get(
         "vae_pretrained", os.path.join(pretrained, "vae")
     )
     vae_dict = AutoencoderKLWan.from_pretrained(vae_pretrained, trust_remote_code=True).state_dict()
