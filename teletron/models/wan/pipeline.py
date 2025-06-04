@@ -83,6 +83,8 @@ class WanPipeline(nn.Module):
 
         wanConfig = WanParams()
 
+        self.config = config
+        self.wan_config = wan_config
         print("Initialize WanVideoTransformer3DModel")
         self.transformer = WanVideoTransformer3DModel(wanConfig,config)
         # from tensorwatch import watch_module_forward_backward
