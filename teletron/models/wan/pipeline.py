@@ -33,6 +33,7 @@ from diffusers.training_utils import (
 )
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 from megatron.core import mpu
+# TODO
 from vast.models.dit.wan_dit import ModelManager
 from vast.models.dit.wan_dit import WanModel
 from vast.models.dit.wan_dit import WanTextEncoder
@@ -40,7 +41,7 @@ from vast.models.dit.wan_dit import WanVideoVAE
 from vast.models.dit.wan_dit import WanImageEncoder
 from vast.models.dit.wan_dit import WanPrompter
 
-from megatron.core.models.wan.model import WanParams, WanVideoTransformer3DModel
+from teletron.models.wan.model import WanParams, WanVideoTransformer3DModel
 from torchvision.transforms.functional import to_pil_image
 
 from megatron.training import get_args
@@ -59,6 +60,9 @@ def broadcast_timesteps(input: torch.Tensor):
 class WanPipeline(nn.Module):
     def __init__(self, wan_config,config,tokenizer_path=None):
         super().__init__()
+        text_encoder_path = wan_config.text_encoder_path
+        tokenizer_path = os.path.join(os.path.dirname(text_encoder_path), "google/umt5-xxl")
+    
         self.pre_process = mpu.is_pipeline_first_stage()
         self.post_process = mpu.is_pipeline_last_stage()
         self.input_tensor = None

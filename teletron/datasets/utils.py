@@ -32,6 +32,8 @@ def load_config_vast():
     elif args.task_type == "t2i_wanvae": 
         print("loading t2i_wanvae config")
         from config.hunyuanvideo_t2i_wanvae import config
+    elif args.task_type == "wan_flf":
+        from config.wan_flf import config
     else:
         return None
     config_vast = load_config(config)

@@ -7,8 +7,9 @@ export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
@@ -62,6 +63,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
+    --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 10
@@ -102,7 +104,7 @@ EVAL_AND_LOGGING_ARGS=(
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
-    --ckpt-format torch
+    # --ckpt-format torch # TODO, not support now
 )
 
 
@@ -114,7 +116,7 @@ EVAL_AND_LOGGING_ARGS=(
 # echo $NCCL_IBEXT_DISABLE
 # export NCCL_DEBUG=INFO
 
-torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_wan.py \
+torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \

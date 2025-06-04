@@ -4,31 +4,14 @@ import json
 import torch
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
-# from megatron.core.rerun_state_machine import (
-#     get_rerun_state_machine,
-#     destroy_rerun_state_machine,
-#     RerunDataIterator,
-#     RerunMode,
-# )
 from megatron.training.arguments import core_transformer_config_from_args
-from megatron.core.models.wan.pipeline import WanPipeline
 from megatron.core import mpu
-# builder
-from hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
-# hunyuanvideoconfig
-from megatron.core.datasets.hunyuanvideo_dataset_config import HunyuanVideoDatasetConfig
 
-## test
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain, print_rank_0,get_model
 from megatron.legacy.data.data_samplers import build_pretraining_data_loader
 from megatron.training import pretrain
 from vast.train.configs.config import load_config
-from wan.configs.wan_flf import config
-# from megatron.training.global_vars import set_global_config
-# from megatron.training import get_global_config
 from megatron.training.utils import (
-    get_batch_on_this_tp_cp_rank_vast,
-    get_batch_on_this_tp_rank_vast,
     average_losses_across_data_parallel_group
 )
 import torch.distributed as dist
@@ -37,8 +20,10 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
-import numpy as np
-import random
+
+from teletron.models.wan.pipeline import WanPipeline
+from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
+from teletron.datasets.utils import train_valid_test_datasets_provider, load_config_vast
 
 # seed = 42
 # torch.manual_seed(seed)
@@ -76,38 +61,41 @@ def get_batch(data_iterator):
     return batch
 
 
-def train_valid_test_datasets_provider(train_val_test_num_samples):
-    from vast.datasets.datasets.build import build_dataset as build_dataset_vast
-    from megatron.core.datasets.fake.build import build_dataset
+def extra_args_provider(parser):
+    group = parser.add_argument_group(title='dataset')
+    group.add_argument('--dataset-type', default="KoalaDataset")
+    group.add_argument("--num-frames", type=int, default=9,
+                       help='number of frames to train, must be of 4n+1, \
+                        overloads yaml if using koala dataset. example: 45')
+    group.add_argument("--video-resolution", nargs=2, type=int, default=[1280, 720], 
+                       help='video resolution to train, overloads yaml if using koala dataset. \
+                       width and height should satisfy: (width or height) // 8 % 2 == 0')
+    group.add_argument("--koala-opt", type=str, default="./teletron/datasets/koala.yml", 
+                        help="the koala dataset option file")
 
-    global_config = load_config(config)
 
-    train_ds_config = global_config.dataloaders.train
-    # eval_ds_config = global_config.dataloaders.eval
+    group = parser.add_argument_group(title="diffusion")
+    group.add_argument("--vae-slicing", action="store_false")
+    group.add_argument("--vae-tiling", action="store_false")
+    group.add_argument("--flow-resolution-shifting", action="store_true")
+    group.add_argument("--flow-base-image-seq-len", type=int, default=256)
+    group.add_argument("--flow-max-image-seg-len", type=int, default=4096)
+    group.add_argument("--flow-base-shift", type=float, default=0.5)
+    group.add_argument("--flow-max-shift", type=float, default=1.15)
+    group.add_argument("--flow-shift", type=float, default=1.0)
+    group.add_argument("--flow-weighting-scheme", type=str, default="none")
+    group.add_argument("--flow-logit-mean", type=float, default=0.0)
+    group.add_argument("--flow-logit-std", type=float, default=1.0)
+    group.add_argument("--flow-mode-scale", type=float, default=1.29)
+    
+    group = parser.add_argument_group(title='debug')
+    group.add_argument("--debug", action="store_true")
+    group.add_argument("--debug_dir", type=str, default="./logs")
+    group.add_argument("--sanity-check", action="store_true")
 
-    ds_config = HunyuanVideoDatasetConfig(
-        train_ds_config=train_ds_config
-    )
-
-    print_rank_0("> building train, validation, and test datasets for multimodal ...")
-    # train_ds_config.dataset.type=None
-    if "FakeDataset" == train_ds_config.dataset.type:
-        train_ds = build_dataset(train_ds_config.dataset)
-        valid_ds = None
-        test_ds = None
-    else:
-        dataset = build_dataset_vast(train_ds_config.dataset)
-        # print_rank_0(f"dataset.shape: {dataset.shape}")
-        train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
-            dataset,
-            train_val_test_num_samples,
-            lambda: True,
-            ds_config,
-        ).build()
-
-    print_rank_0("> finished creating multimodal datasets ...")
-
-    return train_ds, valid_ds, test_ds
+    group = parser.add_argument_group(title='training')
+    group.add_argument("--task-type", type=str, choices=['wan_flf'], default="wan_flf")
+    return parser
 
 # def init(
 #     train_valid_test_dataset_provider,
@@ -137,30 +125,13 @@ def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True, parallel_output=True
 ) -> WanPipeline:
     args = get_args()
-
-    wan_config=global_config.models
-
     config = core_transformer_config_from_args(args)
-
+    config_vast = load_config_vast()
     model = WanPipeline(
-        wan_config=wan_config,
+        wan_config=config_vast.models,
         config=config,
-        tokenizer_path=os.path.join(os.path.dirname(wan_config.get("text_encoder_path")), "google/umt5-xxl")
     )
-    list = []
-    with open('model_layers.txt', 'w') as f:
-        for name in model.transformer.state_dict().keys():
-            list.append(name)
-            f.write(f"{name}\n")  # 每行写入一个层名称
-    print(model.state_dict().keys())
-    print("transformer lenth: ", len(list))
-    print("vae lenth: ",         len(model.vae.state_dict().keys()))
-    print("Image encoder lenth: ", len(model.image_encoder.state_dict().keys()))
-    print("transformer lenth: ", len(model.transformer.state_dict().keys()))
-
-    # hooks = register_hooks(model, print_values=True, max_elements=20)
-    
-    
+    # model.module = model.modules
     return model
 
 
@@ -194,7 +165,6 @@ def forward_step(data_iterator, model: WanPipeline):
     return output_tensor_list, loss_func
 
 if __name__ == "__main__":
-    global_config = load_config(config)
     # global_config = Config(config)
 
 
@@ -230,6 +200,7 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
+        extra_args_provider=extra_args_provider,
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'}
     )
 

@@ -28,7 +28,7 @@ from megatron.core.transformer.attention import (
 )
 from megatron.core import mpu
 from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
-from megatron.core.extensions.transformer_engine import (
+from megatron.core.transformer.custom_layers.transformer_engine import (
     TEColumnParallelLinear,
     TEDotProductAttention,
     TENorm,
@@ -52,7 +52,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
 from megatron.core.utils import make_viewless_tensor
 
-from megatron.core.models.dit.wan_attention import (
+from teletron.models.dit.wan_attention import (
     WanCrossAttention,
     WanSelfAttention,
     WanCrossAttentionSubmodules

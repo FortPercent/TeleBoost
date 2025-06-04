@@ -7,13 +7,13 @@ from megatron.core import mpu
 # from megatron.core.models.common.embeddings.rotary_pos_embedding import apply_rotary_pos_emb
 from diffusers.models.embeddings import apply_rotary_emb
 from megatron.core.transformer.attention import Attention, SelfAttention,CrossAttention
-from megatron.core.extensions.transformer_engine import SplitAlongDim
+from megatron.core.transformer.custom_layers.transformer_engine import SplitAlongDim
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.transformer_config import TransformerConfig
-from megatron.core.tensor_parallel.mappings import split_forward_gather_backward, gather_forward_split_backward
+from teletron.core.tensor_parallel.mappings import split_forward_gather_backward, gather_forward_split_backward
 import torch.nn as nn
-from megatron.core.process_groups_config import ModelCommProcessGroups
+from teletron.core.process_groups_config import ModelCommProcessGroups
 
 from megatron.core.transformer.attention import (
     CrossAttention,
@@ -278,7 +278,7 @@ class WanCrossAttention(Attention):
         attn_mask_type=AttnMaskType.padding,
         eps: float= 1e-6,
         context_pre_only: bool = False,
-        cp_comm_type: str = None,
+        # cp_comm_type: str = None, # TODO
         model_comm_pgs: ModelCommProcessGroups = None,
     ):
         super().__init__(
@@ -287,7 +287,7 @@ class WanCrossAttention(Attention):
             layer_number=layer_number,
             attn_mask_type=attn_mask_type,
             attention_type="cross",
-            cp_comm_type=cp_comm_type,
+            # cp_comm_type=cp_comm_type, # TODO
         )
 
         self.q_layernorm = build_module(

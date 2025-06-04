@@ -17,12 +17,12 @@ from diffusers.models.embeddings import PixArtAlphaTextProjection, TimestepEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import FP32LayerNorm
-from megatron.core.models.dit.wan_layerspec import (
+from teletron.models.dit.wan_layerspec import (
     WanDiTLayer,
     get_wan_spec,
 )
 
-from megatron.core.models.wan.module import WanTimeTextImageEmbedding,WanRotaryPosEmbed,MLP
+from teletron.models.wan.module import WanTimeTextImageEmbedding,WanRotaryPosEmbed,MLP
 
 from torch import nn
 import math
