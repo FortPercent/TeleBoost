@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 def broadcast_timesteps(input: torch.Tensor):
     tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
-    if mpu.get_tensor_and_context_parallel_world_size() > 1:
+    if mpu.get_tensor_context_parallel_world_size() > 1:
         dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_and_context_parallel_group())
 
 class WanPipeline(nn.Module):
