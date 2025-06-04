@@ -53,7 +53,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     elif args.dataset_type == "VastDataset": 
         global_config = load_config_vast()
         train_ds_config = global_config.dataloaders.train
-        eval_ds_config = global_config.dataloaders.eval
+        eval_ds_config = global_config.dataloaders.get("eval", None)
         ds_config = HunyuanVideoDatasetConfig(
             train_ds_config=train_ds_config,
             eval_ds_config=eval_ds_config
