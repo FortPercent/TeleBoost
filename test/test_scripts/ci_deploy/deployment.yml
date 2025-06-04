@@ -1,0 +1,56 @@
+comment: 自动监控 git 变更并触发ci执行
+
+
+
+local_values:
+  busyboxTag: 1.37.0
+  busyboxSrcImage: busybox:${busyboxTag}
+  busyboxImage: "${IMG_REPO}/teleinfra/busybox:${busyboxTag}"
+  
+  checkoutImageTag: v2.47.2
+  checkoutSrcImage: alpine/git:${checkoutImageTag}
+  checkoutImage: "${IMG_REPO}/teleinfra/git:${checkoutImageTag}"
+
+  
+  debugImage: ${busyboxImage}
+
+
+  teletron_test_image: ${IMG_REPO}/teleai-t2v/ncvr-torch2.5-cuda12.4:v0.2
+
+  ci-pipeline-overwrite.yaml: |
+    ci:
+      repository:
+        url: "ssh://zhongyichen153@code.srdcloud.cn:29418/P24HQASYF0004/AI-Infra/Teletron"
+        branch: "zycdev"
+        credentialsSecret: "tele-deploy-secret"
+        secretKey: GIT_REPO_SSH_PRIVATE_KEY
+
+      checkout:
+        image: ${checkoutImage}
+      
+      debug:
+        image: ${debugImage}
+
+      stageOrder:
+        - 1-testcase-verify-accuracy
+      
+      stages:
+        1-testcase-verify-accuracy:
+          image: ${teletron_test_image}
+          commands:
+            - "python3 scripts/setup_env.py"
+            - "python3 test/test_scripts/1.1.test_case_verify_accuracy.py"
+
+prepare:
+  # - image: alpine:${reportImageTag}
+  # - image: alpine/git:${checkoutImageTag}
+  - image: ${busyboxSrcImage}
+  - filemap:
+      content: ${ci-pipeline-overwrite.yaml}
+      path: teledeploy/ci-pipeline-overwrite.yaml
+      mode: 755
+helms:
+  helm-ci-pipeline:
+    helm-dir: helm-define-ci/helm-ci-pipeline
+    namespace: tele-deployment
+    overwrite-config: teledeploy/ci-pipeline-overwrite.yaml
