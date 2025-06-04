@@ -14,7 +14,7 @@ from megatron.training.global_vars  import (
 from megatron.core.optimizer import get_megatron_optimizer, OptimizerConfig
 from megatron.training.checkpointing import load_checkpoint
 import megatron.training.training as training
-
+from megatron.core import mpu
 
 
 def setup_model_and_optimizer_decorators(setup_model_and_optimizer):
@@ -28,6 +28,8 @@ def setup_model_and_optimizer_decorators(setup_model_and_optimizer):
     ):
         """Setup model and optimizer."""
         args = get_args()
+        # teletron now doesn't support gradient accumulation
+        assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
         timers = get_timers()
 
         model = training.get_model(model_provider_func, model_type)

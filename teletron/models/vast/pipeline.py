@@ -180,7 +180,7 @@ class HunyuanPipeline(nn.Module):
                         noisy_model_input = torch.cat(
                             [noisy_model_input, conditional_latents, mask], dim=1
                         )
-                if "cn_images" in batch_dict and "cn_images" is not None:
+                if "cn_images" in batch_dict and batch_dict["cn_images"] is not None:
                     cn_images = batch_dict["cn_images"].to(self.dtype)
                     cn_images = self.forward_vae(cn_images)
                 # TODO guidance check
