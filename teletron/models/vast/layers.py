@@ -91,7 +91,6 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         norm_hidden_states = self.norm1(hidden_states)
-
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=None,
@@ -149,7 +148,7 @@ class HunyuanVideoIndividualTokenRefiner(nn.Module):
             self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
             self_attn_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
             self_attn_mask[:, :, :, 0] = True
-
+        
         for block in self.refiner_blocks:
             hidden_states = block(hidden_states, temb, self_attn_mask)
 
