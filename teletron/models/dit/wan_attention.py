@@ -46,50 +46,53 @@ class WanCrossAttentionSubmodules:
     k_layernorm: Union[ModuleSpec, type] = None
     added_k_layernorm: Union[ModuleSpec, type] = None
 
-class WanSelfAttention(SelfAttention):
+
+class WanSelfAttention(Attention):
     """Joint Self-attention layer class
 
     Used for MMDIT-like transformer block.
     """
 
-    # def __init__(
-    #     self,
-    #     config: TransformerConfig,
-    #     submodules: SelfAttentionSubmodules,
-    #     layer_number: int,
-    #     attn_mask_type=AttnMaskType.padding,
-    #     eps: float= 1e-6,
-    #     context_pre_only: bool = False,
-    #     cp_comm_type: str = None,
-    #     model_comm_pgs: ModelCommProcessGroups = None,
-    # ):
-    #     super().__init__(
-    #         config=config,
-    #         submodules=submodules,
-    #         layer_number=layer_number,
-    #         attn_mask_type=attn_mask_type,
-    #         cp_comm_type=cp_comm_type,
-    #     )
+    def __init__(
+        self,
+        config: TransformerConfig,
+        submodules: SelfAttentionSubmodules,
+        layer_number: int,
+        attn_mask_type=AttnMaskType.padding,
+        eps: float = 1e-6,
+        context_pre_only: bool = False,
+        cp_comm_type: str = None,
+        model_comm_pgs: ModelCommProcessGroups = None,
+    ):
+        super().__init__(
+            config=config,
+            submodules=submodules,
+            layer_number=layer_number,
+            attn_mask_type=attn_mask_type,
+            attention_type="self",
+            #cp_comm_type=cp_comm_type,
+        )
+        self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.q_layernorm = build_module(
+            submodules.q_layernorm,
+            hidden_size=config.hidden_size,
+            config=self.config,
+            eps=self.config.layernorm_epsilon,
+        )
 
-        # self.linear_qkv = build_module(
-        #     submodules.linear_qkv,
-        #     self.config.hidden_size,
-        #     self.query_projection_size + 2 * self.kv_projection_size,
-        #     config=self.config,
-        #     init_method=self.config.init_method,
-        #     gather_output=False,
-        #     bias=self.config.add_bias_linear or self.config.add_qkv_bias,
-        #     skip_bias_add=False,
-        #     is_expert=False,
-        #     tp_comm_buffer_name='qkv',
-        # )
-
-        # self.q_layernorm = RMSNorm(config.hidden_size, eps=eps)
-        # self.k_layernorm= RMSNorm(config.hidden_size, eps=eps)
+        self.k_layernorm = build_module(
+            submodules.k_layernorm,
+            hidden_size=config.hidden_size,
+            config=self.config,
+            eps=self.config.layernorm_epsilon,
+        )
 
     def _split_qkv(self, mixed_qkv):
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]
-        new_tensor_shape = mixed_qkv.size()[:-1] + (    # [1, 360] + (12, ())
+        new_tensor_shape = mixed_qkv.size()[:-1] + (  # [1, 360] + (12, ())
             self.num_query_groups_per_partition,
             (
                 (self.num_attention_heads_per_partition // self.num_query_groups_per_partition + 2)
@@ -111,19 +114,11 @@ class WanSelfAttention(SelfAttention):
         if SplitAlongDim is not None:
 
             # [sq, b, ng, (np/ng + 2) * hn] --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
-            (query, key, value) = SplitAlongDim(
-                mixed_qkv,
-                3,
-                split_arg_list,
-            )
+            (query, key, value) = SplitAlongDim(mixed_qkv, 3, split_arg_list)
         else:
 
             # [sq, b, ng, (np/ng + 2) * hn] --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
-            (query, key, value) = torch.split(
-                mixed_qkv,
-                split_arg_list,
-                dim=3,
-            )
+            (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)
 
         # [sq, b, ng, np/ng * hn] -> [sq, b, np, hn]
         query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
@@ -135,11 +130,10 @@ class WanSelfAttention(SelfAttention):
         """
         # Attention heads [sq, b, h] --> [sq, b, ng * (np/ng + 2) * hn)]
         mixed_qkv, _ = self.linear_qkv(hidden_states)
-        
-        query, key, value = self._split_qkv(mixed_qkv)  
+
+        query, key, value = self._split_qkv(mixed_qkv)
         # [2, 9604, 12, 128] [b, s, num_heads, hiddensize_per_head]
         # batch_size, sequense_lenth, num_heads, hiddensize_per_head
-
 
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
@@ -156,7 +150,7 @@ class WanSelfAttention(SelfAttention):
             key = self.k_layernorm(key)
 
         return query, key, value
-        
+
     def forward(
         self,
         hidden_states,
@@ -182,11 +176,13 @@ class WanSelfAttention(SelfAttention):
         # Get the query, key and value tensors based on the type of attention -
         # self or cross attn.
         # bs, img_seq_len, _, _ = img_q.shape
-        query, key, value = self.get_query_key_value_tensors(encoder_hidden_states) #(b,h,s,d)
+        query = self.linear_q(hidden_states)
+        key = self.linear_k(hidden_states)
+        value = self.linear_v(hidden_states)
         query = self.q_layernorm(query)
         key = self.k_layernorm(key)
         # batch_size, num_head, sequense_lenth, hiddensize_per_head
-        
+
         # query = query.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
         # key = key.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
         # value = value.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
@@ -207,37 +203,32 @@ class WanSelfAttention(SelfAttention):
         # relative positional embedding (rotary embedding)
         # ================================================
         if rotary_pos_emb is not None:
-            def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
-                x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
-                return x_out.type_as(hidden_states)
-            # cos,sin = rotary_pos_emb
+            query = rope_apply(query, rotary_pos_emb, self.config.num_attention_heads)
+            key = rope_apply(key, rotary_pos_emb, self.config.num_attention_heads)
 
-            # rotary_pos_emb=(cos,sin)
-            
-            query = rope_apply(query, rotary_pos_emb,self.num_attention_heads_per_partition)
-            key = rope_apply(key, rotary_pos_emb,self.num_attention_heads_per_partition) 
-
+        key = key.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        query = query.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        value = value.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
 
         if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
-            query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 1, 2)
-            key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),key,  1, 2)
-            value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),value,  1, 2)
-            # TODO, can apply positional embedding to value_layer so it has
-            # absolute positional embedding.
-            # otherwise, only relative positional embedding takes effect
-            # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
+
+            query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
+            key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
+            value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+        # TODO, can apply positional embedding to value_layer so it has
+        # absolute positional embedding.
+        # otherwise, only relative positional embedding takes effect
+        # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
         # ==================================
         # core attention computation
         # ==================================
         if self.checkpoint_core_attention and self.training:
             core_attn_out = self._checkpointed_attention_forward(
-                query,
-                key,
-                value,
-                attention_mask,
-                attn_mask_type=self.attn_mask_type,
+                query, key, value, attention_mask, attn_mask_type=self.attn_mask_type
             )
         else:
             # core_attn_out = self.core_attention(
@@ -248,20 +239,22 @@ class WanSelfAttention(SelfAttention):
             #     attn_mask_type=self.attn_mask_type,
             # )
             import torch.nn.functional as F
-            
+
             torch.backends.cuda.enable_cudnn_sdp(False)
             hidden_states = F.scaled_dot_product_attention(
                 query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-            )#b h s d
+            )  # b h s d
 
         # if mpu.get_context_parallel_group() is not None:
         if mpu.get_context_parallel_world_size() > 1:
-            hidden_states=SeqAllToAll4D.apply(mpu.get_context_parallel_group(),hidden_states, 2, 1) # b sub_n img_seq d
-        hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3).contiguous()
-
-        hidden_states,bias= self.linear_proj(hidden_states)
-        hidden_states=hidden_states+bias
+            hidden_states = SeqAllToAll4D.apply(
+                mpu.get_context_parallel_group(), hidden_states, 2, 1
+            )  # b img_seq sub_n d
+        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()
+        hidden_states = self.linear_proj(hidden_states)
+        # hidden_states=hidden_states+bias
         return hidden_states
+
 
 class WanCrossAttention(Attention):
     """Self-attention layer class
@@ -276,9 +269,9 @@ class WanCrossAttention(Attention):
         submodules: WanCrossAttentionSubmodules,
         layer_number: int,
         attn_mask_type=AttnMaskType.padding,
-        eps: float= 1e-6,
+        eps: float = 1e-6,
         context_pre_only: bool = False,
-        # cp_comm_type: str = None, # TODO
+        cp_comm_type: str = None,
         model_comm_pgs: ModelCommProcessGroups = None,
     ):
         super().__init__(
@@ -287,91 +280,41 @@ class WanCrossAttention(Attention):
             layer_number=layer_number,
             attn_mask_type=attn_mask_type,
             attention_type="cross",
-            # cp_comm_type=cp_comm_type, # TODO
+            # cp_comm_type=cp_comm_type,
         )
 
         self.q_layernorm = build_module(
             submodules.q_layernorm,
-            hidden_size=self.hidden_size_per_attention_head,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
-        )
-        
-        self.k_layernorm = build_module(
-            submodules.k_layernorm,
-            hidden_size=self.hidden_size_per_attention_head,
+            hidden_size=config.hidden_size,
             config=self.config,
             eps=self.config.layernorm_epsilon,
         )
 
+        self.k_layernorm = build_module(
+            submodules.k_layernorm,
+            hidden_size=config.hidden_size,
+            config=self.config,
+            eps=self.config.layernorm_epsilon,
+        )
 
         self.added_k_layernorm = build_module(
             submodules.added_k_layernorm,
-            hidden_size=self.hidden_size_per_attention_head,
+            hidden_size=config.hidden_size,
             config=self.config,
             eps=self.config.layernorm_epsilon,
         )
 
-        self.linear_q = build_module(
-            submodules.linear_q,
-            self.config.hidden_size,
-            self.query_projection_size,
-            config=self.config,
-            init_method=self.config.init_method,
-            gather_output=False,
-            bias=self.config.add_bias_linear or self.config.add_qkv_bias,
-            is_expert=False,
-            tp_comm_buffer_name='qkv',
-        )
+        self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
-        self.linear_k = build_module(
-            submodules.linear_k,
-            self.config.hidden_size,
-            self.kv_projection_size,
-            config=self.config,
-            init_method=self.config.init_method,
-            gather_output=False,
-            bias=self.config.add_bias_linear or self.config.add_qkv_bias,
-            is_expert=False,
-            tp_comm_buffer_name='qkv',
-        )
-        self.linear_v = build_module(
-            submodules.linear_v,
-            self.config.hidden_size,
-            self.kv_projection_size,
-            config=self.config,
-            init_method=self.config.init_method,
-            gather_output=False,
-            bias=self.config.add_bias_linear or self.config.add_qkv_bias,
-            is_expert=False,
-            tp_comm_buffer_name='qkv',
-        )
-
-        self.add_k_proj = build_module(
-            submodules.add_k_proj,
-            self.query_projection_size,
-            self.config.hidden_size,
-            config=self.config,
-            init_method=self.config.output_layer_init_method,
-            bias=self.config.add_bias_linear,
-            is_expert=False,
-            tp_comm_buffer_name='proj',
-        )
-        
-        self.add_v_proj = build_module(
-            submodules.add_v_proj,
-            self.query_projection_size,
-            self.config.hidden_size,
-            config=self.config,
-            init_method=self.config.output_layer_init_method,
-            bias=self.config.add_bias_linear,
-            is_expert=False,
-            tp_comm_buffer_name='proj',
-        )
+        self.add_k_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.add_v_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
     def _split_qkv(self, mixed_qkv):
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]
-        new_tensor_shape = mixed_qkv.size()[:-1] + (    # [1, 360] + (12, ())
+        new_tensor_shape = mixed_qkv.size()[:-1] + (  # [1, 360] + (12, ())
             self.num_query_groups_per_partition,
             (
                 (self.num_attention_heads_per_partition // self.num_query_groups_per_partition + 2)
@@ -393,19 +336,11 @@ class WanCrossAttention(Attention):
         if SplitAlongDim is not None:
 
             # [sq, b, ng, (np/ng + 2) * hn] --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
-            (query, key, value) = SplitAlongDim(
-                mixed_qkv,
-                3,
-                split_arg_list,
-            )
+            (query, key, value) = SplitAlongDim(mixed_qkv, 3, split_arg_list)
         else:
 
             # [sq, b, ng, (np/ng + 2) * hn] --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
-            (query, key, value) = torch.split(
-                mixed_qkv,
-                split_arg_list,
-                dim=3,
-            )
+            (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)
 
         # [sq, b, ng, np/ng * hn] -> [sq, b, np, hn]
         query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
@@ -417,7 +352,7 @@ class WanCrossAttention(Attention):
         """
         # Attention heads [sq, b, h] --> [sq, b, ng * (np/ng + 2) * hn)]
         mixed_qkv, _ = self.linear_qkv(hidden_states)
-        query, key, value = self._split_qkv(mixed_qkv)  
+        query, key, value = self._split_qkv(mixed_qkv)
         # [2, 9604, 12, 128] [b, s, num_heads, hiddensize_per_head]
 
         query = query.transpose(1, 2)
@@ -449,7 +384,6 @@ class WanCrossAttention(Attention):
             encoder_hidden_states_img = encoder_hidden_states[:, :257]
             encoder_hidden_states = encoder_hidden_states[:, 257:]
 
-        
         # hidden_states: [sq, b, h]
 
         # For self attention we just duplicate the rotary_pos_emb if it isn't already
@@ -464,16 +398,16 @@ class WanCrossAttention(Attention):
         # bs, img_seq_len, _, _ = img_q.shape
         # kv = self.linear_kv(hidden_states)
         # q=self.linear_q(encoder_hidden_states)
-        query, _ = self.linear_q(hidden_states)
-        key, _ = self.linear_k(hidden_states)
-        value, _ = self.linear_v(hidden_states)
+        query = self.linear_q(hidden_states)
+        key = self.linear_k(hidden_states)
+        value = self.linear_v(hidden_states)
 
-        value = value.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        query = query.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        key = key.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
- 
+        # value = value.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
+        # query = query.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
+        # key = key.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
+
         # query, key, value = self.get_query_key_value_tensors(hidden_states) #(b,h,s,d)
-        
+
         query = self.q_layernorm(query)
         key = self.k_layernorm(key)
 
@@ -498,71 +432,66 @@ class WanCrossAttention(Attention):
         # ================================================
 
         if rotary_pos_emb is not None:
-            def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
-                x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
-                return x_out.type_as(hidden_states)
-
             query = rope_apply(query, rotary_pos_emb)
             key = rope_apply(key, rotary_pos_emb)
 
         hidden_states_img = None
-        key_img,bias = self.add_k_proj(encoder_hidden_states_img)
-        key_img=key_img
+        key_img = self.add_k_proj(encoder_hidden_states_img)
         # key_img = self.norm_added_k(key_img)
-        value_img,bias = self.add_v_proj(encoder_hidden_states_img)
-        value_img = value_img
-        key_img = key_img.view(encoder_hidden_states_img.shape[0], encoder_hidden_states_img.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        value_img = value_img.view(encoder_hidden_states_img.shape[0], encoder_hidden_states_img.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        
-        key_img=self.added_k_layernorm(key_img)
+        value_img = self.add_v_proj(encoder_hidden_states_img)
+
+        key_img = self.added_k_layernorm(key_img)
 
         # key_img = key_img.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
         # value_img = value_img.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
-        
+
         # if mpu.get_context_parallel_group() is not None:
         #     from yunchang.comm.all_to_all import SeqAllToAll4D
         #     query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 1, 2)
         #     key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),key,  1, 2)
         #     value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),value,  1, 2)
-            
+
         #     added_query = split_forward_gather_backward(added_query,mpu.get_context_parallel_group(), dim=1)
         #     added_key = split_forward_gather_backward(added_key,mpu.get_context_parallel_group(), dim=1)
         #     added_value= split_forward_gather_backward(added_value,mpu.get_context_parallel_group(), dim=1)
-            # TODO, can apply positional embedding to value_layer so it has
-            # absolute positional embedding.
-            # otherwise, only relative positional embedding takes effect
-            # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
+        # TODO, can apply positional embedding to value_layer so it has
+        # absolute positional embedding.
+        # otherwise, only relative positional embedding takes effect
+        # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
 
         # ==================================
         # core attention computation
         # ==================================
+        key = key.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        query = query.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        value = value.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        key_img = key_img.view(
+            key_img.shape[0], key_img.shape[1], -1, self.config.num_attention_heads
+        )
+        value_img = value_img.view(
+            value_img.shape[0], value_img.shape[1], -1, self.config.num_attention_heads
+        )
         if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
-            query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 1, 2)
-            key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),key,  1, 2)
-            value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),value,  1, 2)
+
+            query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
+            key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
+            value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
 
             key_img = split_forward_gather_backward(
-                key_img, 
-                mpu.get_context_parallel_group(),
-                dim=1,
-                grad_scale="down"
-            ) # b s n d         
+                key_img, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
+            )  # b s n d
             value_img = split_forward_gather_backward(
-                value_img, 
-                mpu.get_context_parallel_group(),
-                dim=1,
-                grad_scale="down"
-            ) # b s n d             
-
+                value_img, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
+            )  # b s n d
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+        key_img = key_img.transpose(1, 2)
+        value_img = value_img.transpose(1, 2)
         if self.checkpoint_core_attention and self.training:
             core_attn_out = self._checkpointed_attention_forward(
-                query,
-                key,
-                value,
-                attention_mask,
-                attn_mask_type=self.attn_mask_type,
+                query, key, value, attention_mask, attn_mask_type=self.attn_mask_type
             )
         else:
             # core_attn_out = self.core_attention(
@@ -573,6 +502,7 @@ class WanCrossAttention(Attention):
             #     attn_mask_type=self.attn_mask_type,
             # )
             import torch.nn.functional as F
+
             # query, key, value = [x.permute(1, 2, 0, 3).contiguous() for x in (query, key, value)] # sbhd -> bhsd
             torch.backends.cuda.enable_cudnn_sdp(False)
             hidden_states = F.scaled_dot_product_attention(
@@ -582,20 +512,24 @@ class WanCrossAttention(Attention):
                 query, key_img, value_img, attn_mask=None, dropout_p=0.0, is_causal=False
             )
             hidden_states = hidden_states + hidden_states_img
-        
+
         # # if mpu.get_context_parallel_group() is not None:
         if mpu.get_context_parallel_world_size() > 1:
-            hidden_states=SeqAllToAll4D.apply(mpu.get_context_parallel_group(),hidden_states, 2, 1) # b sub_n img_seq d
+            hidden_states = SeqAllToAll4D.apply(
+                mpu.get_context_parallel_group(), hidden_states, 2, 1
+            )
+        # b sub_n img_seq d
         #     encoder_hidden_states=gather_forward_split_backward(encoder_hidden_states, mpu.get_context_parallel_group(), 2) # b txt_seq n d
-        hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3).contiguous()
-        hidden_states,bias = self.linear_proj(hidden_states)
-        hidden_states=hidden_states+bias
+        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()
+        hidden_states = self.linear_proj(hidden_states)
+
         return hidden_states
 
+
 def rope_apply(x, freqs, num_heads):
-    x = rearrange(x, "b n s d -> b s n d", n=num_heads)
-    x_out = torch.view_as_complex(x.to(torch.float64).reshape(
-        x.shape[0], x.shape[1], x.shape[2], -1, 2))
+    x = rearrange(x, "b s (n d) -> b s n d", n=num_heads)
+    x_out = torch.view_as_complex(
+        x.to(torch.float64).reshape(x.shape[0], x.shape[1], x.shape[2], -1, 2)
+    )
     x_out = torch.view_as_real(x_out * freqs).flatten(2)
-    x_out=rearrange(x_out, "b s (n d) -> b n s d", n=num_heads)
     return x_out.to(x.dtype)

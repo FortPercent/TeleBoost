@@ -77,6 +77,7 @@ class WanVideoTransformer3DModel(VisionModule):
         config.hidden_size =self.hidden_size
         config.ffn_hidden_size = self.ffn_dim
         config.num_attention_heads=self.num_attention_heads
+        config.attention_head_dim = self.attention_head_dim
         # TODO: Assume not use GQA
         config.num_query_groups = config.num_attention_heads
         config.use_cpu_initialization = True
