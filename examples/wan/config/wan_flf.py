@@ -37,8 +37,8 @@ config = dict(
                 type="ClipDataset",
                 data_path_list=[
                     "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_1.json",
-                    "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_2.json",
-                    "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_3.json",
+                    # "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_2.json",
+                    # "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_3.json",
 
                     # # "/nvfile-heatstorage/Text2Video/annotations/200w_nobody/pack_zwzx_1_slice_new_0.json",
                     # "/nvfile-heatstorage/Text2Video/annotations/150w/pexels_v0.0.8.json",

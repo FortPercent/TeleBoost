@@ -32,7 +32,7 @@ echo '$NODE_RANK' $NODE_RANK
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 echo '$WORLD_SIZE' $WORLD_SIZE
 
-CHECKPOINT_PATH=/nvfile-heatstorage/teleai-infra/wxe/Megatron_VAST/ckpt
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
@@ -53,7 +53,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 40
+    --num-layers 1
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
@@ -66,7 +66,7 @@ TRAINING_ARGS=(
     --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 10
+    --train-iters 10000
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -99,7 +99,7 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 100
+    --save-interval 1000
     --eval-interval 10000 
     --load $CHECKPOINT_PATH 
     --save $CHECKPOINT_PATH 
