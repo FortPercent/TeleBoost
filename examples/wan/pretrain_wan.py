@@ -131,7 +131,6 @@ def model_provider(
         wan_config=config_vast.models,
         config=config,
     )
-    # model.module = model.modules
     return model
 
 

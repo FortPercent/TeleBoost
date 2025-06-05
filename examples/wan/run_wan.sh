@@ -53,9 +53,9 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 5
-    --hidden-size 3072        
-    --num-attention-heads 24
+    --num-layers 40
+    --hidden-size 5120        
+    --num-attention-heads 40
     --seq-length 512          
     --max-position-embeddings 4096
     --tokenizer-type NullTokenizer
@@ -101,6 +101,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
+    --load $CHECKPOINT_PATH 
     --save $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
