@@ -49,6 +49,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from transformers import CLIPImageProcessor, CLIPVisionModel
+from tensorwatch import watch_module_forward_backward
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,8 @@ class WanPipeline(nn.Module):
         print("Initializing Wanpipeline...")
 
         self.vae=WanVideoVAE()
+        self.vae.model.encoder.conv1.weight.norm()
+        #import ipdb;ipdb.set_trace()
         self.tiler_kwargs = {
             "tiled": wan_config.get("tiled", True), 
             "tile_size": wan_config.get("tile_size", (34, 34)), 
@@ -81,6 +84,8 @@ class WanPipeline(nn.Module):
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(tokenizer_path)
 
+        
+
         wanConfig = WanParams()
 
         self.config = config
@@ -89,7 +94,7 @@ class WanPipeline(nn.Module):
         self.transformer = WanVideoTransformer3DModel(wanConfig,config)
         # from tensorwatch import watch_module_forward_backward
         # watch_module_forward_backward(self.transformer, use_megatron=True)
-    
+        watch_module_forward_backward(self.transformer, use_megatron=True)
         print("WanVideoTransformer3DModel Initialized")
         # self.vae_scale_factor = 2 ** (len(self.vae.params.ch_mult))
         
@@ -101,8 +106,18 @@ class WanPipeline(nn.Module):
         print(f"wan dtype: {self.dtype}")
         
     def forward(self, batch):
+        DEBUG_FIX = True
+        if DEBUG_FIX:
+            torch.random.manual_seed(1234)
+            batch['dense_prompt'] = ["a cute cat"]
+            batch['images'] = torch.ones_like(batch["images"])
+            batch['raw_first_image'] = torch.ones_like(batch["images"])
+            batch['raw_last_image'] = torch.ones_like(batch["images"])
+        #import ipdb; ipdb.set_trace()
+
         if self.pre_process:
             with torch.no_grad():
+                torch.manual_seed(1234) 
                 prompt_emb = self.encode_prompt(batch["dense_prompt"][0])
                 latents = self.encode_video(rearrange(batch["images"], "b t c h w -> b c t h w").to(dtype=self.dtype, device=torch.cuda.current_device()), **self.tiler_kwargs)[0]
 
@@ -127,7 +142,7 @@ class WanPipeline(nn.Module):
                 image_emb["clip_feature"] = image_emb["clip_feature"][0].to(dtype=self.dtype, device=torch.cuda.current_device()).unsqueeze(0)
             if "y" in image_emb:
                 image_emb["y"] = image_emb["y"][0].to(dtype=self.dtype, device=torch.cuda.current_device()).unsqueeze(0)
-        
+        torch.manual_seed(1234)
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.flow_scheduler.num_train_timesteps, (1,))
         timestep = self.flow_scheduler.timesteps[timestep_id].to(dtype=self.dtype, device=torch.cuda.current_device())
@@ -136,7 +151,14 @@ class WanPipeline(nn.Module):
         broadcast_timesteps(noise)
         noisy_latents = self.flow_scheduler.add_noise(latents, noise, timestep)
         training_target = self.flow_scheduler.training_target(latents, noise, timestep)
-# noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
+        # noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
+        if DEBUG_FIX:
+            prompt_emb['context'] = torch.ones_like(prompt_emb['context'])
+            noisy_latents = torch.ones_like(noisy_latents)
+            image_emb['clip_feature'] = torch.ones_like(image_emb['clip_feature'])
+            image_emb['y'] = torch.ones_like(image_emb['y'])
+            # timestep = [1]
+
         noise_pred = self.transformer(
                 x=noisy_latents,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
                 timestep=timestep,  # [263]
@@ -150,6 +172,8 @@ class WanPipeline(nn.Module):
 
         # # offload
         # self.vae.to(device="cpu")
+        print(loss.mean())
+        import ipdb; ipdb.set_trace()
         return [loss]
     
     def forward_vae(self, images):
@@ -224,6 +248,7 @@ class WanPipeline(nn.Module):
         y = y.unsqueeze(0)
         clip_context = clip_context.to(dtype=self.dtype, device=torch.cuda.current_device())
         y = y.to(dtype=self.dtype, device=torch.cuda.current_device())
+        import ipdb; ipdb.set_trace()
         return {"clip_feature": clip_context, "y": y}
 
     def tensor2video(self, frames):

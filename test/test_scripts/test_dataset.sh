@@ -1,5 +1,5 @@
 #!/bin/bash
-
+CUDA_VISIBLE_DEVICES=0,1,2,3 bash examples/wan/run_wan.sh 1 4 1
 # CUDA_VISIBLE_DEVICES=0 \
 #   MASTER_PORT=12395 WORLD_SIZE=1 \
 #   WORLD_SIZE=1 RANK=0 \

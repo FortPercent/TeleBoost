@@ -438,7 +438,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained(args.hf_ckpt_path)
-    #config.num_layers = 1 # TODO
+    config.num_layers = 1 # TODO
 
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
