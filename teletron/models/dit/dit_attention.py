@@ -250,7 +250,6 @@ class JointHunyuanAttention(Attention):
         additional_hidden_states=None,
     ):
         # hidden_states: [sq, b, h]
-
         query, key, value = self.get_query_key_value_tensors(hidden_states) # (b,h,s,d)
         added_query, added_key, added_value = self.get_added_query_key_value_tensors(additional_hidden_states)
         bs, _, img_seq_len, _ = query.shape
