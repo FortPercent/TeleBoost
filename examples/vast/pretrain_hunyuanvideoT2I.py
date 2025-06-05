@@ -2,7 +2,6 @@
 import os
 import json
 import torch
-import teletron
 # import teletron before megatron for monkey patching
 import teletron
 from megatron.core import parallel_state, tensor_parallel
@@ -11,6 +10,7 @@ from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core import mpu
 
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain, print_rank_0,get_model
+from megatron.legacy.data.data_samplers import build_pretraining_data_loader
 from megatron.training import pretrain
 from megatron.training.utils import (
     average_losses_across_data_parallel_group
@@ -21,9 +21,9 @@ from megatron.training.global_vars import (
     get_args,
     get_timers,
 )
-from teletron.models.vast.pipeline import HunyuanPipeline
+from teletron.models.vast.t2i_pipeline import HunyuanPipelineT2I
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
-from teletron.datasets.utils import train_valid_test_datasets_provider, load_config_vast
+from teletron.datasets.utils import train_valid_test_datasets_provider
 import yaml
 
 
@@ -70,16 +70,24 @@ def extra_args_provider(parser):
     group.add_argument("--flow-logit-mean", type=float, default=0.0)
     group.add_argument("--flow-logit-std", type=float, default=1.0)
     group.add_argument("--flow-mode-scale", type=float, default=1.29)
-    
+
     group = parser.add_argument_group(title='debug')
     group.add_argument("--debug", action="store_true")
     group.add_argument("--debug_dir", type=str, default="./logs")
     group.add_argument("--sanity-check", action="store_true")
 
-    group = parser.add_argument_group(title='training')
-    group.add_argument("--task-type", type=str, choices=['i2v', 't2v', 'i2v_multimask', 'i2vhy_token_replace', 't2i_wanvae'], default="i2v")
-    return parser
+    group = parser.add_argument_group(title='tokenizer')
+    group.add_argument("--tokenizer-path-llama", type=str)
+    group.add_argument("--tokenizer-path-clip", type=str)
 
+    group = parser.add_argument_group(title='model')
+    group.add_argument("--llama-path", type=str)
+    group.add_argument("--clip-path", type=str)
+
+    group = parser.add_argument_group(title='training')
+    group.add_argument("--task-type", type=str, choices=['t2i_wanvae'], default="i2v")
+    
+    return parser
 
 
 def init(
@@ -106,14 +114,13 @@ def init(
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True, parallel_output=True
-) -> HunyuanPipeline:
+) -> HunyuanPipelineT2I:
     args = get_args()
 
     config = core_transformer_config_from_args(args)
-    config_vast = load_config_vast()
-    model = HunyuanPipeline(
-        config=config,
-        config_vast=config_vast
+
+    model = HunyuanPipelineT2I(
+        config=config
     )
     
     return model
@@ -125,7 +132,7 @@ def loss_func(output_tensor):
     loss = loss.unsqueeze(0)
     return loss, {"loss": averaged_loss[0]}
 
-def forward_step(data_iterator, model: HunyuanPipeline):
+def forward_step(data_iterator, model: HunyuanPipelineT2I):
     """Forward training step.
 
     Args:

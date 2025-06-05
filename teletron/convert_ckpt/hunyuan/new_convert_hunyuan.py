@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Alibaba PAI and Nvidia Megatron-LM Team.
+# Copyright (c) 2025 TeleAI-infra and Nvidia Megatron-LM Team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -364,8 +364,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # config.num_attention_heads=24
     # print(config)
     # megatron args
-    # config.num_layers = 1
-    # config.num_single_layers = 1
+    config.num_layers = 1
+    config.num_single_layers = 1
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
         "in_channels": config.in_channels,
@@ -808,6 +808,7 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             f'transformer_blocks.{layer_id}.norm1_context.linear.bias',
         }
         update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_IDENTICAL_WEIGHT)
+    
     for layer_id in range(config.num_single_layers):
         TRANSFORMER_SINGLE_IDENTICAL_WEIGHT = {
             # f'transformer.single_transformer_blocks.{layer_id}.norm.linear.weight',
@@ -816,12 +817,19 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             f'single_transformer_blocks.{layer_id}.norm.linear.bias',
         }
         update_params_with_identical_weights_for_megatron_to_transformers(output_state_dict, get_element_from_dict_by_path(tp_state_dicts[0], path), TRANSFORMER_SINGLE_IDENTICAL_WEIGHT)
+
     path='model'
 
     # Extract the layers.
     for key, val in get_element_from_dict_by_path(tp_state_dicts[0], path).items():
-        if "extra_state" in key:
-            continue
+        # if "extra_state" in key:
+        #     print(f"key: {key}, val: {val}")
+        #     continue
+        # else:
+        #     print(key)
+        # if isinstance(val, torch.Tensor):
+        #     print(f"key: {key}, val: {val.shape}")
+        # if key.startswith("transformer.transformer_blocks"):
         if key.startswith("transformer_blocks"):
             key_list = key.split('.')
             # layer_id = int(key_list[2])
@@ -959,13 +967,10 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                     else:
                         output_state_dict['transformer_blocks.' + str(layer_id) + '.attn.to_out.0.bias']=val
         # if key.startswith("transformer.single_transformer_blocks"):
-        if key.startswith("transformer.single_transformer_blocks"):
+        if key.startswith("single_transformer_blocks"):
             key_list = key.split('.')
-            # layer_id = int(key_list[2])
             layer_id = int(key_list[1])
             if 'linear_qkv' in key:
-                # key_list = key.split('.')
-                # layer_id = int(key_list[2])
                 if 'weight' in key:
                     dim=0
                     # 拆成视图
@@ -1041,6 +1046,7 @@ def convert_checkpoint_from_megatron_to_transformers(args):
             if 'k_layernorm' in key:
                 output_state_dict[f'single_transformer_blocks.{layer_id}.attn.norm_k.weight']=val
             continue
+    # exit(0)
 
     output_state_dict['norm_out.linear.weight']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.weight"]
     output_state_dict['norm_out.linear.bias']=get_element_from_dict_by_path(tp_state_dicts[0], path)["norm_out.adaLN_modulation.1.bias"]
@@ -1062,7 +1068,6 @@ def convert_checkpoint_from_megatron_to_transformers(args):
         shard = {tensor: output_state_dict[tensor].contiguous() for tensor in tensors}
         filepath = os.path.join(args.save_path, filename)
         torch.save(shard, filepath)
-        print(f"Saved {len(shard)} models to {filepath}")
 
     # 保存index文件
     if state_dict_split.is_sharded:

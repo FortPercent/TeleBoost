@@ -44,5 +44,4 @@ def exe_adaptation():
         megatron.training.training.setup_model_and_optimizer
     )
 
-    
 exe_adaptation()

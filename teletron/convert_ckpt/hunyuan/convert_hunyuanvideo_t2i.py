@@ -19,14 +19,14 @@ import torch
 import json
 import types
 from collections import OrderedDict
-from megatron.core.models.hunyuan.hunyuan_pipeline_utils import get_model_path
 from diffusers import AutoencoderKLHunyuanVideo
 from vast.train.configs.config import load_config
 from transformers import AutoModelForCausalLM, GPT2Config
 from diffusers.utils import WEIGHTS_NAME,WEIGHTS_INDEX_NAME
+from diffusers import AutoencoderKLWan
 from huggingface_hub import DDUFEntry, create_repo, split_torch_state_dict_into_shards
 # from transformers.modeling_utils import WEIGHTS_INDEX_NAME, WEIGHTS_NAME, shard_checkpoint
-from hunyuanvideo.configs.hunyuanvideo_i2vhy import config as globalConfig
+from hunyuanvideo.configs.hunyuanvideo_t2i_wanvae import config as globalConfig
 import numpy as np
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
@@ -79,6 +79,11 @@ def add_extra_args(parser):
 
     parser.add_argument(
         "--hf-ckpt-path",
+        type=str
+    )
+
+    parser.add_argument(
+        "--wan_vae_pretrained_path",
         type=str
     )
 
@@ -364,8 +369,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # config.num_attention_heads=24
     # print(config)
     # megatron args
-    # config.num_layers = 1
-    # config.num_single_layers = 1
+    config.num_layers = 16
+    config.num_single_layers = 32
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
         "in_channels": config.in_channels,
@@ -387,11 +392,9 @@ def convert_checkpoint_from_transformers_to_megatron(args):
 
     state_dict = HunyuanVideoTransformer3DModel.from_pretrained(args.load_path).state_dict()
 
-    pretrained = get_model_path(global_config.models.pretrained)
-    vae_pretrained = global_config.get(
-        "vae_pretrained", os.path.join(pretrained, "vae")
-    )
-    vae_dict = AutoencoderKLHunyuanVideo.from_pretrained(vae_pretrained, trust_remote_code=True).state_dict()
+    # read wan vae path from args
+    vae_pretrained = args.wan_vae_pretrained_path
+    vae_dict = AutoencoderKLWan.from_pretrained(vae_pretrained, trust_remote_code=True).state_dict()
     num_layers = config.num_hidden_layers // args.target_pipeline_model_parallel_size
 
     # layer_re = re.compile("transformer_blocks\.(\d+)\.([a-z0-9_.]+)\.([a-z]+)")
@@ -571,20 +574,21 @@ def convert_checkpoint_from_transformers_to_megatron(args):
             params_dict = get_element_from_dict_by_path(output_state_dict[i], "model")
             # 更新 DIT_IDENTICAL_WEIGHT 中的参数
             update_params_with_identical_weights(params_dict, state_dict, DIT_IDENTICAL_WEIGHT)
-            hunyuan_config=global_config.models.get("transformer", dict())
+            # read in_channels from checkpointing dimension
+            in_channels = state_dict["x_embedder.proj.weight"].shape[1]
 
-            if hunyuan_config.in_channels != margs.in_channels:
+            if in_channels != margs.in_channels:
                 proj_weight = state_dict["x_embedder.proj.weight"]
-                if margs.in_channels > hunyuan_config.in_channels:
-                    params_dict["x_embedder.proj.weight"] = proj_weight[:, :hunyuan_config.in_channels]
+                if margs.in_channels > in_channels:
+                    params_dict["x_embedder.proj.weight"] = proj_weight[:, :in_channels]
                 else:
                     weight_shape = list(proj_weight.shape)
-                    weight_shape[1] = hunyuan_config.get("in_channels")
+                    weight_shape[1] = in_channels
                     params_dict["x_embedder.proj.weight"] = proj_weight.new_zeros(weight_shape)
                     params_dict["x_embedder.proj.weight"][:, :proj_weight.shape[1]] = proj_weight
 
-            if i==0:
-                print(params_dict["x_embedder.proj.weight"])
+            # if i==0:
+            #     print(params_dict["x_embedder.proj.weight"])
             # 更新 transformer_blocks 中的参数
             for layer_id in range(config.num_layers):
                 TRANSFORMER_IDENTICAL_WEIGHT = {
