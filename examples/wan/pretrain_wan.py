@@ -130,6 +130,9 @@ def model_provider(
     model = WanPipeline(
         wan_config=config_vast.models,
         config=config,
+        tokenizer_path=os.path.join(
+            os.path.dirname(config_vast.models.get("text_encoder_path")), "google/umt5-xxl"
+        ),
     )
     return model
 
