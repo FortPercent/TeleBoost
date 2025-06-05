@@ -4,6 +4,7 @@ from einops import rearrange
 from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
 import torch
 from megatron.core import mpu
+
 # from megatron.core.models.common.embeddings.rotary_pos_embedding import apply_rotary_pos_emb
 from diffusers.models.embeddings import apply_rotary_emb
 from megatron.core.transformer.attention import Attention, SelfAttention,CrossAttention
@@ -22,6 +23,7 @@ from megatron.core.transformer.attention import (
     SelfAttentionSubmodules,
 )
 from diffusers.models.normalization import FP32LayerNorm, LpNorm, RMSNorm
+
 # @dataclass
 # class WanAttentionSubmodules:
 #     linear_qkv: Union[ModuleSpec, type] = None
@@ -32,6 +34,7 @@ from diffusers.models.normalization import FP32LayerNorm, LpNorm, RMSNorm
 #     k_layernorm: Union[ModuleSpec, type] = None
 #     added_q_layernorm: Union[ModuleSpec, type] = None
 #     added_k_layernorm: Union[ModuleSpec, type] = None
+
 
 @dataclass
 class WanCrossAttentionSubmodules:
@@ -61,7 +64,6 @@ class WanSelfAttention(Attention):
         attn_mask_type=AttnMaskType.padding,
         eps: float = 1e-6,
         context_pre_only: bool = False,
-        cp_comm_type: str = None,
         model_comm_pgs: ModelCommProcessGroups = None,
     ):
         super().__init__(
@@ -70,7 +72,6 @@ class WanSelfAttention(Attention):
             layer_number=layer_number,
             attn_mask_type=attn_mask_type,
             attention_type="self",
-            #cp_comm_type=cp_comm_type,
         )
         self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
@@ -95,7 +96,11 @@ class WanSelfAttention(Attention):
         new_tensor_shape = mixed_qkv.size()[:-1] + (  # [1, 360] + (12, ())
             self.num_query_groups_per_partition,
             (
-                (self.num_attention_heads_per_partition // self.num_query_groups_per_partition + 2)
+                (
+                    self.num_attention_heads_per_partition
+                    // self.num_query_groups_per_partition
+                    + 2
+                )
                 * self.hidden_size_per_attention_head
             ),
         )
@@ -121,7 +126,9 @@ class WanSelfAttention(Attention):
             (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)
 
         # [sq, b, ng, np/ng * hn] -> [sq, b, np, hn]
-        query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
+        query = query.reshape(
+            query.size(0), query.size(1), -1, self.hidden_size_per_attention_head
+        )
         return query, key, value
 
     def get_query_key_value_tensors(self, hidden_states, key_value_states=None):
@@ -207,10 +214,14 @@ class WanSelfAttention(Attention):
             key = rope_apply(key, rotary_pos_emb, self.config.num_attention_heads)
 
         key = key.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
-        query = query.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
-        value = value.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        query = query.view(
+            key.shape[0], key.shape[1], -1, self.config.num_attention_heads
+        )
+        value = value.view(
+            key.shape[0], key.shape[1], -1, self.config.num_attention_heads
+        )
 
-        if mpu.get_context_parallel_world_size() > 1:
+        if mpu.get_tensor_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
 
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
@@ -242,7 +253,12 @@ class WanSelfAttention(Attention):
 
             torch.backends.cuda.enable_cudnn_sdp(False)
             hidden_states = F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                query,
+                key,
+                value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
             )  # b h s d
 
         # if mpu.get_context_parallel_group() is not None:
@@ -271,7 +287,6 @@ class WanCrossAttention(Attention):
         attn_mask_type=AttnMaskType.padding,
         eps: float = 1e-6,
         context_pre_only: bool = False,
-        cp_comm_type: str = None,
         model_comm_pgs: ModelCommProcessGroups = None,
     ):
         super().__init__(
@@ -280,7 +295,6 @@ class WanCrossAttention(Attention):
             layer_number=layer_number,
             attn_mask_type=attn_mask_type,
             attention_type="cross",
-            # cp_comm_type=cp_comm_type,
         )
 
         self.q_layernorm = build_module(
@@ -317,7 +331,11 @@ class WanCrossAttention(Attention):
         new_tensor_shape = mixed_qkv.size()[:-1] + (  # [1, 360] + (12, ())
             self.num_query_groups_per_partition,
             (
-                (self.num_attention_heads_per_partition // self.num_query_groups_per_partition + 2)
+                (
+                    self.num_attention_heads_per_partition
+                    // self.num_query_groups_per_partition
+                    + 2
+                )
                 * self.hidden_size_per_attention_head
             ),
         )
@@ -343,7 +361,9 @@ class WanCrossAttention(Attention):
             (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)
 
         # [sq, b, ng, np/ng * hn] -> [sq, b, np, hn]
-        query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
+        query = query.reshape(
+            query.size(0), query.size(1), -1, self.hidden_size_per_attention_head
+        )
         return query, key, value
 
     def get_query_key_value_tensors(self, hidden_states, key_value_states=None):
@@ -384,52 +404,12 @@ class WanCrossAttention(Attention):
             encoder_hidden_states_img = encoder_hidden_states[:, :257]
             encoder_hidden_states = encoder_hidden_states[:, 257:]
 
-        # hidden_states: [sq, b, h]
-
-        # For self attention we just duplicate the rotary_pos_emb if it isn't already
-        # if rotary_pos_emb is not None and not isinstance(rotary_pos_emb, tuple):
-        #     rotary_pos_emb = (rotary_pos_emb,) * 2
-
-        # =====================
-        # Query, Key, and Value
-        # =====================
-        # Get the query, key and value tensors based on the type of attention -
-        # self or cross attn.
-        # bs, img_seq_len, _, _ = img_q.shape
-        # kv = self.linear_kv(hidden_states)
-        # q=self.linear_q(encoder_hidden_states)
         query = self.linear_q(hidden_states)
-        key = self.linear_k(hidden_states)
-        value = self.linear_v(hidden_states)
-
-        # value = value.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        # query = query.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-        # key = key.view(hidden_states.shape[0], hidden_states.shape[1], -1, self.hidden_size_per_attention_head).transpose(1, 2)
-
-        # query, key, value = self.get_query_key_value_tensors(hidden_states) #(b,h,s,d)
+        key = self.linear_k(encoder_hidden_states)
+        value = self.linear_v(encoder_hidden_states)
 
         query = self.q_layernorm(query)
         key = self.k_layernorm(key)
-
-        # query = query.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
-        # key = key.unflatten(2, (self.config.num_attention_headss, -1)).transpose(1, 2)
-        # value = value.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
-        # bs, _, img_seq_len, _ = query.shape
-        # # ===================================================
-        # # Adjust key, value, and rotary_pos_emb for inference
-        # # ===================================================
-        # key, value, rotary_pos_emb, attn_mask_type = self._adjust_key_value_for_inference(
-        #     inference_params, key, value, rotary_pos_emb
-        # )
-
-        # if packed_seq_params is not None:
-        #     query = query.squeeze(1)
-        #     key = key.squeeze(1)
-        #     value = value.squeeze(1)
-
-        # ================================================
-        # relative positional embedding (rotary embedding)
-        # ================================================
 
         if rotary_pos_emb is not None:
             query = rope_apply(query, rotary_pos_emb)
@@ -437,47 +417,35 @@ class WanCrossAttention(Attention):
 
         hidden_states_img = None
         key_img = self.add_k_proj(encoder_hidden_states_img)
-        # key_img = self.norm_added_k(key_img)
         value_img = self.add_v_proj(encoder_hidden_states_img)
 
         key_img = self.added_k_layernorm(key_img)
 
-        # key_img = key_img.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
-        # value_img = value_img.unflatten(2, (self.config.num_attention_heads, -1)).transpose(1, 2)
-
-        # if mpu.get_context_parallel_group() is not None:
-        #     from yunchang.comm.all_to_all import SeqAllToAll4D
-        #     query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 1, 2)
-        #     key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),key,  1, 2)
-        #     value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(),value,  1, 2)
-
-        #     added_query = split_forward_gather_backward(added_query,mpu.get_context_parallel_group(), dim=1)
-        #     added_key = split_forward_gather_backward(added_key,mpu.get_context_parallel_group(), dim=1)
-        #     added_value= split_forward_gather_backward(added_value,mpu.get_context_parallel_group(), dim=1)
-        # TODO, can apply positional embedding to value_layer so it has
-        # absolute positional embedding.
-        # otherwise, only relative positional embedding takes effect
-        # value_layer = apply_rotary_pos_emb(value_layer, k_pos_emb)
-
         # ==================================
         # core attention computation
         # ==================================
-        key = key.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
-        query = query.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
-        value = value.view(key.shape[0], key.shape[1], -1, self.config.num_attention_heads)
+        key = key.view(key.shape[0], key.shape[1], self.config.num_attention_heads,-1)
+        query = query.view(
+            query.shape[0], query.shape[1],  self.config.num_attention_heads,-1
+        )
+        value = value.view(
+            value.shape[0], value.shape[1], self.config.num_attention_heads,-1,
+        )
         key_img = key_img.view(
-            key_img.shape[0], key_img.shape[1], -1, self.config.num_attention_heads
+            key_img.shape[0], key_img.shape[1],  self.config.num_attention_heads,-1
         )
         value_img = value_img.view(
-            value_img.shape[0], value_img.shape[1], -1, self.config.num_attention_heads
+            value_img.shape[0], value_img.shape[1],  self.config.num_attention_heads,-1
         )
-        if mpu.get_context_parallel_world_size() > 1:
+        if mpu.get_tensor_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
-
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
-            key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
-            value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
-
+            value = split_forward_gather_backward(
+                value, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
+            ) 
+            key = split_forward_gather_backward(
+                key, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
+            )  # b s n d
             key_img = split_forward_gather_backward(
                 key_img, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
             )  # b s n d
@@ -506,18 +474,29 @@ class WanCrossAttention(Attention):
             # query, key, value = [x.permute(1, 2, 0, 3).contiguous() for x in (query, key, value)] # sbhd -> bhsd
             torch.backends.cuda.enable_cudnn_sdp(False)
             hidden_states = F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                query,
+                key,
+                value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
             )
             hidden_states_img = F.scaled_dot_product_attention(
-                query, key_img, value_img, attn_mask=None, dropout_p=0.0, is_causal=False
+                query,
+                key_img,
+                value_img,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False,
             )
             hidden_states = hidden_states + hidden_states_img
-
         # # if mpu.get_context_parallel_group() is not None:
-        if mpu.get_context_parallel_world_size() > 1:
+        if mpu.get_tensor_context_parallel_world_size() > 1:
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
-            )
+        )
+        # print("after all to all",hidden_states.shape)
+        # print("&"*100)
         # b sub_n img_seq d
         #     encoder_hidden_states=gather_forward_split_backward(encoder_hidden_states, mpu.get_context_parallel_group(), 2) # b txt_seq n d
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()

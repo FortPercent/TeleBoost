@@ -2,8 +2,7 @@ import os
 
 # dst_size = (720, 480)
 dst_fps = 24
-dst_num_frames = 45
-
+dst_num_frames = 5
 # Temporary code for quick debugging
 debug = False # open
 if debug:

@@ -5,15 +5,16 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Megatron_VAST
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory"
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
@@ -37,9 +38,8 @@ TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
-
 TP=1
-CP=1
+CP=4
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 # GBS=8
@@ -77,7 +77,7 @@ TRAINING_ARGS=(
     --recompute-granularity full 
     --recompute-method block 
     --use-distributed-optimizer
-    --recompute-num-layers 3
+    --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
     # --distribute-saved-activations
@@ -99,10 +99,10 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 1000
+    --save-interval 100
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH 
     --save $CHECKPOINT_PATH 
+    --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
