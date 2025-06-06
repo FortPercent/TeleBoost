@@ -51,6 +51,7 @@ class WanParams:
     patch_size: Tuple[int] = (1, 2, 2)
     num_attention_heads: int = 40
     attention_head_dim: int = 128
+    activation_func: Callable = F.gelu
     in_channels: int = 36
     out_channels: int = 16
     text_dim: int = 4096
@@ -83,8 +84,8 @@ class WanVideoTransformer3DModel(VisionModule):
         self.image_dim = wan_config.image_dim
         self.added_kv_proj_dim = wan_config.added_kv_proj_dim
         self.num_layers = wan_config.num_layers
-        # args = get_args()
-        # self.num_layers = args.num_layers
+        args = get_args()
+        self.num_layers = args.num_layers
 
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         config.hidden_size = self.hidden_size

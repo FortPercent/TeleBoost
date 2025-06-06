@@ -22,6 +22,6 @@ def finish_grad_sync(self):
 
     print("finish grad sync")
     for bucket in self.buckets:
-        bucket.grad_data = bucket.grad_data.to(torch.float32)
+        #bucket.grad_data = bucket.grad_data.to(torch.float32)
         bucket.finish_grad_sync()
-        bucket.grad_data = bucket.grad_data.to(torch.bfloat16)
+        #bucket.grad_data = bucket.grad_data.to(torch.bfloat16)
