@@ -54,7 +54,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 40
+    --num-layers 5
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
@@ -64,7 +64,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --debug
+    # --debug
     --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
