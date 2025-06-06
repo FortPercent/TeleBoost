@@ -581,7 +581,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict[f'blocks.{layer_id}.cross_attention.k_layernorm.weight'] = (
                     state_dict_dit[f'blocks.{layer_id}.cross_attn.norm_k.weight']
                 )
-                params_dict[f'blocks.{layer_id}.cross_attention.added_k_layernorm.weight'] = (
+                params_dict[f'blocks.{layer_id}.cross_attention.norm_k_img.weight'] = (
                     state_dict_dit[f'blocks.{layer_id}.cross_attn.norm_k_img.weight']
                 )
                 params_dict[f'blocks.{layer_id}.cross_attention.linear_q.weight'] = state_dict_dit[
@@ -602,16 +602,16 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict[f'blocks.{layer_id}.cross_attention.linear_v.bias'] = state_dict_dit[
                     f'blocks.{layer_id}.cross_attn.k.bias'
                 ]
-                params_dict[f'blocks.{layer_id}.cross_attention.add_k_proj.weight'] = (
+                params_dict[f'blocks.{layer_id}.cross_attention.k_img.weight'] = (
                     state_dict_dit[f'blocks.{layer_id}.cross_attn.k_img.weight']
                 )
-                params_dict[f'blocks.{layer_id}.cross_attention.add_k_proj.bias'] = state_dict_dit[
+                params_dict[f'blocks.{layer_id}.cross_attention.k_img.bias'] = state_dict_dit[
                     f'blocks.{layer_id}.cross_attn.k_img.bias'
                 ]
-                params_dict[f'blocks.{layer_id}.cross_attention.add_v_proj.weight'] = (
+                params_dict[f'blocks.{layer_id}.cross_attention.v_img.weight'] = (
                     state_dict_dit[f'blocks.{layer_id}.cross_attn.v_img.weight']
                 )
-                params_dict[f'blocks.{layer_id}.cross_attention.add_v_proj.bias'] = state_dict_dit[
+                params_dict[f'blocks.{layer_id}.cross_attention.v_img.bias'] = state_dict_dit[
                     f'blocks.{layer_id}.cross_attn.v_img.bias'
                 ]
                 seg = config.ffn_dim // args.target_tensor_model_parallel_size
