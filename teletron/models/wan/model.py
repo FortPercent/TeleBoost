@@ -307,7 +307,7 @@ class WanVideoTransformer3DModel(VisionModule):
 
         # if encoder_hidden_states_image is not None:
         #     encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
-        if mpu.get_tensor_context_parallel_world_size() > 1:
+        if mpu.get_context_parallel_world_size() > 1:
             # length = x.shape[1]
             # set_origin_length(length)
             # eq_parallel_world_size = mpu.get_context_parallel_world_size()
@@ -346,7 +346,7 @@ class WanVideoTransformer3DModel(VisionModule):
                 if os.environ.get("PROFILE_MEMORY"):
                     profiler.record()
 
-        if mpu.get_tensor_context_parallel_world_size() > 1:
+        if mpu.get_context_parallel_world_size() > 1:
             hidden_states = gather_forward_split_backward(
                 hidden_states, mpu.get_context_parallel_group(), dim=1, grad_scale="up"
             )
