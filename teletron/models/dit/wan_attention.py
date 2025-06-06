@@ -41,13 +41,13 @@ class WanCrossAttentionSubmodules:
     linear_q: Union[ModuleSpec, type] = None
     linear_k: Union[ModuleSpec, type] = None
     linear_v: Union[ModuleSpec, type] = None
-    add_k_proj: Union[ModuleSpec, type] = None
-    add_v_proj: Union[ModuleSpec, type] = None
+    k_img: Union[ModuleSpec, type] = None
+    v_img: Union[ModuleSpec, type] = None
     core_attention: Union[ModuleSpec, type] = None
     linear_proj: Union[ModuleSpec, type] = None
     q_layernorm: Union[ModuleSpec, type] = None
     k_layernorm: Union[ModuleSpec, type] = None
-    added_k_layernorm: Union[ModuleSpec, type] = None
+    norm_k_img: Union[ModuleSpec, type] = None
 
 
 class WanSelfAttention(Attention):
@@ -221,7 +221,7 @@ class WanSelfAttention(Attention):
             key.shape[0], key.shape[1], -1, self.config.num_attention_heads
         )
 
-        if mpu.get_tensor_context_parallel_world_size() > 1:
+        if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
 
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
@@ -311,8 +311,8 @@ class WanCrossAttention(Attention):
             eps=self.config.layernorm_epsilon,
         )
 
-        self.added_k_layernorm = build_module(
-            submodules.added_k_layernorm,
+        self.norm_k_img = build_module(
+            submodules.norm_k_img,
             hidden_size=config.hidden_size,
             config=self.config,
             eps=self.config.layernorm_epsilon,
@@ -323,8 +323,8 @@ class WanCrossAttention(Attention):
         self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
-        self.add_k_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.add_v_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.k_img = nn.Linear(config.hidden_size, config.hidden_size)
+        self.v_img = nn.Linear(config.hidden_size, config.hidden_size)
 
     def _split_qkv(self, mixed_qkv):
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]
@@ -416,10 +416,10 @@ class WanCrossAttention(Attention):
             key = rope_apply(key, rotary_pos_emb)
 
         hidden_states_img = None
-        key_img = self.add_k_proj(encoder_hidden_states_img)
-        value_img = self.add_v_proj(encoder_hidden_states_img)
+        key_img = self.k_img(encoder_hidden_states_img)
+        value_img = self.v_img(encoder_hidden_states_img)
 
-        key_img = self.added_k_layernorm(key_img)
+        key_img = self.norm_k_img(key_img)
 
         # ==================================
         # core attention computation
@@ -437,7 +437,7 @@ class WanCrossAttention(Attention):
         value_img = value_img.view(
             value_img.shape[0], value_img.shape[1],  self.config.num_attention_heads,-1
         )
-        if mpu.get_tensor_context_parallel_world_size() > 1:
+        if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
             value = split_forward_gather_backward(
@@ -491,7 +491,7 @@ class WanCrossAttention(Attention):
             )
             hidden_states = hidden_states + hidden_states_img
         # # if mpu.get_context_parallel_group() is not None:
-        if mpu.get_tensor_context_parallel_world_size() > 1:
+        if mpu.get_context_parallel_world_size() > 1:
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
         )
