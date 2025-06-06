@@ -6,11 +6,9 @@ build
 *.egg-info
 *~
 slurm*
-logs
 .vscode
 ckpt
 ckpt*
-*.log
 *.pyc
 *.pt
 __pycache__/*
