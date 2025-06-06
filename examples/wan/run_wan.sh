@@ -7,16 +7,22 @@ export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export PYTHONPATH=
+# export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Megatron_VAST
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
+<<<<<<< HEAD
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory"
+=======
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+export MEMORY_SNAPSHOT=True
+export PROF_SAVE_PATH="./log_memory"
+>>>>>>> 4b3c0ed (cuda memory)
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
 echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 
@@ -104,7 +110,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 100
     --eval-interval 10000 
     --save $CHECKPOINT_PATH 
-    --load $CHECKPOINT_PATH 
+    # --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
