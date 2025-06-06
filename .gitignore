@@ -6,13 +6,13 @@ build
 *.egg-info
 *~
 slurm*
+logs
 .vscode
 ckpt
 ckpt*
+*.log
 *.pyc
-*.pt
 __pycache__/*
 tests/*
-*.pickle
 *.png
 debug/
