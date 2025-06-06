@@ -73,10 +73,55 @@ class WanSelfAttention(Attention):
             attn_mask_type=attn_mask_type,
             attention_type="self",
         )
-        self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        
+        self.linear_q = build_module(
+            submodules.linear_qkv,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_k = build_module(
+            submodules.linear_qkv,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_v = build_module(
+            submodules.linear_qkv,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_proj = build_module(
+            submodules.linear_proj,
+            self.query_projection_size,
+            self.config.hidden_size,
+            config=self.config,
+            init_method=self.config.output_layer_init_method,
+            bias=self.config.add_bias_linear,
+            input_is_parallel=True,
+            skip_bias_add=True,
+            is_expert=False,
+            tp_comm_buffer_name='proj',
+        )
         self.q_layernorm = build_module(
             submodules.q_layernorm,
             hidden_size=config.hidden_size,
@@ -318,13 +363,87 @@ class WanCrossAttention(Attention):
             eps=self.config.layernorm_epsilon,
         )
 
-        self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
-        self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.linear_q = build_module(
+            submodules.linear_q,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_k = build_module(
+            submodules.linear_k,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_v = build_module(
+            submodules.linear_v,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.linear_proj = build_module(
+            submodules.linear_proj,
+            self.query_projection_size,
+            self.config.hidden_size,
+            config=self.config,
+            init_method=self.config.output_layer_init_method,
+            bias=self.config.add_bias_linear,
+            input_is_parallel=True,
+            skip_bias_add=True,
+            is_expert=False,
+            tp_comm_buffer_name='proj',
+        )
+        self.k_img = build_module(
+            submodules.linear_v,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
+        self.v_img = build_module(
+            submodules.v_img,
+            self.config.hidden_size,
+            self.query_projection_size,
+            config=self.config,
+            init_method=self.config.init_method,
+            gather_output=False,
+            bias=self.config.add_qkv_bias,
+            skip_bias_add=False,
+            is_expert=False,
+            tp_comm_buffer_name='qkv',
+        )
 
-        self.k_img = nn.Linear(config.hidden_size, config.hidden_size)
-        self.v_img = nn.Linear(config.hidden_size, config.hidden_size)
+
+        # self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
+
+        # self.k_img = nn.Linear(config.hidden_size, config.hidden_size)
+        # self.v_img = nn.Linear(config.hidden_size, config.hidden_size)
 
     def _split_qkv(self, mixed_qkv):
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]

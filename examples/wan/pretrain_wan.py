@@ -54,9 +54,9 @@ class Config(dict):
             setattr(self, k, v)
 
 
-def get_batch(data_iterator):
+def get_batch(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs):
     # get batches based on the TP_CP rank you are on
-    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator)
+    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs)
     # batch = get_batch_on_this_tp_rank_vast(data_iterator)
     return batch
 
@@ -127,6 +127,7 @@ def model_provider(
     args = get_args()
     config = core_transformer_config_from_args(args)
     config_vast = load_config_vast()
+
     model = WanPipeline(
         wan_config=config_vast.models,
         config=config,
@@ -148,7 +149,7 @@ def loss_func(output_tensor):
     loss = loss.unsqueeze(0)
     return loss, {"loss": averaged_loss[0]}
 
-def forward_step(data_iterator, model: WanPipeline):
+def forward_step(data_iterator, model: WanPipeline,text_encoder,vae,image_encoder,prompter,tiler_kwargs):
     """Forward training step.
 
     Args:
@@ -163,7 +164,7 @@ def forward_step(data_iterator, model: WanPipeline):
 
     # Get the batch.
     timers('batch-generator', log_level=2).start()
-    batch = get_batch(data_iterator)
+    batch = get_batch(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs)
     timers('batch-generator').stop()
 
     output_tensor_list = model(batch)
