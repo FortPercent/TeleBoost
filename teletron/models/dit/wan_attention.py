@@ -401,8 +401,10 @@ class WanCrossAttention(Attention):
     ):
         encoder_hidden_states_img = None
         if self.add_k_proj is not None:
-            encoder_hidden_states_img = encoder_hidden_states[:, :257]
-            encoder_hidden_states = encoder_hidden_states[:, 257:]
+            T5_CONTEXT_TOKEN_NUMBER=512
+            image_context_length=encoder_hidden_states.shape[1]-T5_CONTEXT_TOKEN_NUMBER
+            encoder_hidden_states_img = encoder_hidden_states[:, :image_context_length]
+            encoder_hidden_states = encoder_hidden_states[:, image_context_length:]
 
         query = self.linear_q(hidden_states)
         key = self.linear_k(encoder_hidden_states)

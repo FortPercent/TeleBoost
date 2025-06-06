@@ -134,6 +134,10 @@ def model_provider(
             os.path.dirname(config_vast.models.get("text_encoder_path")), "google/umt5-xxl"
         ),
     )
+    if args.debug: 
+        from tensorwatch import watch_module_forward_backward
+        watch_module_forward_backward(model.transformer, use_megatron=True)
+    
     return model
 
 
