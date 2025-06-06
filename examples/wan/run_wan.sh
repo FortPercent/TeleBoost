@@ -65,6 +65,7 @@ GPT_MODEL_ARGS=(
 
 TRAINING_ARGS=(
     # --debug
+    --use-cpu-initialization
     --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
@@ -125,4 +126,4 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${DATA_ARGS[@]}    \
-    ${EVAL_AND_LOGGING_ARGS[@]} 
+    ${EVAL_AND_LOGGING_ARGS[@]} \
