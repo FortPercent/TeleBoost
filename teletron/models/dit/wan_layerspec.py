@@ -70,6 +70,8 @@ from megatron.core.tensor_parallel.mappings import (
 from megatron.core.transformer.dot_product_attention import DotProductAttention
 from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
 
+def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
+    return (x * (1 + scale) + shift)
 
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size: int, config, eps: float = 1e-6):
@@ -84,7 +86,13 @@ class RMSNorm(nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
+class GateModule(nn.Module):
+    def __init__(self,):
+        super().__init__()
 
+    def forward(self, x, gate, residual):
+        return x + gate * residual
+    
 class WanDiTLayer(TransformerLayer):
     """A double transformer layer.
 
@@ -121,8 +129,10 @@ class WanDiTLayer(TransformerLayer):
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 6, hidden_size) / hidden_size**0.5
         )
+        self.gate = GateModule()
+        
 
-    def forward(
+    def forward_back(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
@@ -131,23 +141,21 @@ class WanDiTLayer(TransformerLayer):
     ):
         # 1. Input normalization
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-            self.scale_shift_table + temb.float()
+            self.scale_shift_table + temb
         ).chunk(6, dim=1)
 
         # 1. Self-attention
         norm_hidden_states = (
-            self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
-        ).type_as(hidden_states)
+            self.norm1(hidden_states) * (1 + scale_msa) + shift_msa
+        )
         attn_output = self.self_attention(
             hidden_states=norm_hidden_states,
             rotary_pos_emb=rotary_emb,
             attention_mask=None,
         )
-        hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
-            hidden_states
-        )
+        hidden_states = (hidden_states + attn_output * gate_msa)
         # 2. Cross-attention
-        norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
+        norm_hidden_states = self.norm2(hidden_states)
         attn_output = self.cross_attention(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -156,16 +164,36 @@ class WanDiTLayer(TransformerLayer):
         norm_hidden_states = norm_hidden_states + attn_output
 
         # 3. Feed-forward
-        norm_hidden_states = (
-            self.norm3(norm_hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa
-        ).type_as(norm_hidden_states)
-        ff_output, bias = self.mlp(norm_hidden_states)
+        input_x = (
+            self.norm3(norm_hidden_states) * (1 + c_scale_msa) + c_shift_msa
+        )
+        ff_output, bias = self.mlp(input_x)
         ff_output = ff_output + bias
         norm_hidden_states = (
-            norm_hidden_states.float() + ff_output.float() * c_gate_msa
-        ).type_as(norm_hidden_states)
+            norm_hidden_states + ff_output * c_gate_msa
+        )
 
         return norm_hidden_states
+
+    def forward(self, x, context, t_mod, freqs):
+        # msa: multi-head self-attention  mlp: multi-layer perceptron
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.scale_shift_table.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
+        input_x = modulate(self.norm1(x), shift_msa, scale_msa)
+        x = self.gate(x, gate_msa, self.self_attention(
+            hidden_states=input_x,
+            rotary_pos_emb=freqs,
+            attention_mask=None))
+        x = x + self.cross_attention(
+            hidden_states=self.norm2(x),
+            encoder_hidden_states=context,
+            attention_mask=None)
+        input_x = modulate(self.norm3(x), shift_mlp, scale_mlp)
+        ff_output, bias = self.mlp(input_x)
+        ff_output = ff_output + bias
+        x = self.gate(x, gate_mlp, ff_output)
+        return x
+        
 
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict = None
