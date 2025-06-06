@@ -1,5 +1,7 @@
 import torch
-def start_grad_sync(self):
+
+
+def finish_grad_sync(self):
     """
     Initiates grad sync (all-reduce or reduce-scatter) communication operations
     for all buckets in the grad buffer.
@@ -8,7 +10,18 @@ def start_grad_sync(self):
     calls. When overlap_grad_reduce is set to False, calls synchronous
     communication ops.
     """
+
+
+    from megatron.training import get_args 
+    args = get_args()
+
+    if args.debug:
+        from tensorwatch import report_grad
+        report_grad(self.buckets)
+    
+
+    print("finish grad sync")
     for bucket in self.buckets:
         bucket.grad_data = bucket.grad_data.to(torch.float32)
-        bucket.start_grad_sync()
+        bucket.finish_grad_sync()
         bucket.grad_data = bucket.grad_data.to(torch.bfloat16)
