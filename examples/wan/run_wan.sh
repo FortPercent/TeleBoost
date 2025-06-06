@@ -14,15 +14,9 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Megatron_VAST
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
-<<<<<<< HEAD
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
-# export MEMORY_SNAPSHOT=True
-# export PROF_SAVE_PATH="./log_memory"
-=======
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 export MEMORY_SNAPSHOT=True
 export PROF_SAVE_PATH="./log_memory"
->>>>>>> 4b3c0ed (cuda memory)
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
 echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 
