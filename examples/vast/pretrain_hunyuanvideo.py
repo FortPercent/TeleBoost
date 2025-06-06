@@ -3,8 +3,7 @@ import os
 import json
 import torch
 import teletron
-# import teletron before megatron for monkey patching
-import teletron
+
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.training.arguments import core_transformer_config_from_args
@@ -115,6 +114,9 @@ def model_provider(
         config=config,
         config_vast=config_vast
     )
+    if args.debug: 
+        from tensorwatch import watch_module_forward_backward
+        watch_module_forward_backward(model, use_megatron=True)
     
     return model
 
@@ -148,6 +150,7 @@ def forward_step(data_iterator, model: HunyuanPipeline):
     return output_tensor_list, loss_func
 
 if __name__ == "__main__":
+    
     pretrain(
         train_valid_test_datasets_provider,
         model_provider,

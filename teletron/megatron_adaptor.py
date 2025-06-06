@@ -15,9 +15,9 @@
 def exe_adaptation():
     import megatron.core.distributed
     from teletron.core.distributed.distributed_data_parallel import DistributedDataParallel
-    from teletron.core.distributed.param_and_grad_buffer import start_grad_sync
+    from teletron.core.distributed.param_and_grad_buffer import finish_grad_sync
     megatron.core.distributed.DistributedDataParallel = DistributedDataParallel
-    megatron.core.distributed.param_and_grad_buffer.ParamAndGradBuffer.start_grad_sync = start_grad_sync
+    megatron.core.distributed.param_and_grad_buffer.ParamAndGradBuffer.finish_grad_sync = finish_grad_sync
 
     import megatron.core
     from teletron.core.parallel_state import initialize_model_parallel_decorators
