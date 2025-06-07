@@ -7,16 +7,16 @@ export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export PYTHONPATH=
+# export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Megatron_VAST
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
-# export MEMORY_SNAPSHOT=True
-# export PROF_SAVE_PATH="./log_memory"
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+export MEMORY_SNAPSHOT=True
+export PROF_SAVE_PATH="./log_memory"
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
 echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 
@@ -40,7 +40,7 @@ TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
 TP=1
-CP=1
+CP=8
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 # GBS=8
@@ -54,7 +54,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 40
+    --num-layers 5 #deprecated, please setting in WanParams
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
@@ -64,7 +64,8 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --debug
+    # --debug
+    --use-cpu-initialization
     --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
@@ -103,8 +104,8 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
-    --save $CHECKPOINT_PATH 
-    --load $CHECKPOINT_PATH 
+    # --save $CHECKPOINT_PATH 
+    # --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
@@ -125,4 +126,4 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${DATA_ARGS[@]}    \
-    ${EVAL_AND_LOGGING_ARGS[@]} 
+    ${EVAL_AND_LOGGING_ARGS[@]} \

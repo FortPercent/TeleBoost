@@ -69,18 +69,13 @@ class WanPipeline(nn.Module):
 
         print("Initializing Wanpipeline...")
 
-        self.vae = WanVideoVAE().to(device=torch.cuda.current_device())
-        self.tiler_kwargs = {
-            "tiled": wan_config.get("tiled", True),
-            "tile_size": wan_config.get("tile_size", (34, 34)),
-            "tile_stride": wan_config.get("tile_stride", (18, 16)),
-        }
-        self.text_encoder = WanTextEncoder()
-        self.image_encoder = WanImageEncoder()
-        self.prompter = WanPrompter()
-        self.prompter.fetch_models(self.text_encoder)
-        self.prompter.fetch_tokenizer(tokenizer_path)
-
+        # self.vae = WanVideoVAE().to(device=torch.cuda.current_device())
+        # self.tiler_kwargs = {
+        #     "tiled": wan_config.get("tiled", True),
+        #     "tile_size": wan_config.get("tile_size", (34, 34)),
+        #     "tile_stride": wan_config.get("tile_stride", (18, 16)),
+        # }
+        
         wanConfig = WanParams()
         self.config=config
         self.wan_config=wanConfig
@@ -99,55 +94,13 @@ class WanPipeline(nn.Module):
         print(f"wan dtype: {self.dtype}")
 
     def forward(self, batch):
-        if self.pre_process:
-            with torch.no_grad():
-                prompt_emb = self.encode_prompt(batch["dense_prompt"][0])
-                latents = self.encode_video(
-                    rearrange(batch["images"], "b t c h w -> b c t h w").to(
-                        dtype=self.dtype, device=torch.cuda.current_device()
-                    ),
-                    **self.tiler_kwargs,
-                )[0]
 
-                _, num_frames, _, height, width = batch["images"].shape
-                if 'raw_last_image' in batch:
-                    raw_first_image = batch["raw_first_image"]
-                    pil_first_image = to_pil_image(
-                        raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                    )
-                    raw_last_image = batch['raw_last_image']
-                    pil_last_image = to_pil_image(
-                        raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                    )
-                    image_emb = self.encode_first_last_image(
-                        pil_first_image, pil_last_image, num_frames, height, width
-                    )
-                else:
-                    raw_first_image = batch["raw_first_image"]
-                    pil_image = to_pil_image(
-                        raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                    )
-                    image_emb = self.encode_image(pil_image, num_frames, height, width)
-            latents = latents.unsqueeze(0).to(dtype=self.dtype, device=torch.cuda.current_device())
-
-            # Data
-            prompt_emb["context"] = prompt_emb["context"][0].to(
-                dtype=self.dtype, device=torch.cuda.current_device()
-            )
-            prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
-
-            if "clip_feature" in image_emb:
-                image_emb["clip_feature"] = (
-                    image_emb["clip_feature"][0]
-                    .to(dtype=self.dtype, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
-            if "y" in image_emb:
-                image_emb["y"] = (
-                    image_emb["y"][0]
-                    .to(dtype=self.dtype, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
+        latents = batch["latents"]
+        prompt_emb = {}
+        prompt_emb["context"] = batch["context"]
+        image_emb = {}
+        image_emb["clip_feature"] = batch["clip_feature"]
+        image_emb["y"] = batch["image_emb_y"]
 
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.flow_scheduler.num_train_timesteps, (1,))
@@ -159,7 +112,6 @@ class WanPipeline(nn.Module):
         broadcast_timesteps(noise)
         noisy_latents = self.flow_scheduler.add_noise(latents, noise, timestep)
         training_target = self.flow_scheduler.training_target(latents, noise, timestep)
-        # noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
         noise_pred = self.transformer(
             x=noisy_latents,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
             timestep=timestep,  # [263]
@@ -173,8 +125,6 @@ class WanPipeline(nn.Module):
             loss = torch.nn.functional.mse_loss(noise_pred.float(), training_target.float())
             loss = loss * self.flow_scheduler.training_weight(timestep)
 
-        # # offload
-        # self.vae.to(device="cpu")
         return [loss]
 
     def forward_vae(self, images):
