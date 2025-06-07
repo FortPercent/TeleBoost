@@ -69,7 +69,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
             import torch.distributed as dist
             rank = dist.get_rank()
             torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-    
+
     if mpu.get_tensor_context_parallel_rank() == 0:
         if data_iterator is not None:
            data = next(data_iterator)
@@ -202,7 +202,7 @@ def forward_vae(images):
 
 def encode_prompt(prompter,prompt, positive=True):
     prompt_emb = prompter.encode_prompt(
-        prompt, positive=positive, device=torch.cuda.current_device()
+        prompt, positive=positive#, device=torch.cuda.current_device()
     )
     return {"context": prompt_emb}
 
@@ -216,9 +216,9 @@ def encode_image(
     tile_size=(34, 34),
     tile_stride=(18, 16),
 ):
-    image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
+    image = preprocess_image(image.resize((width, height)))#.to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
-    msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
+    msk = torch.ones(1, num_frames, height // 8, width // 8)#, device=torch.cuda.current_device())
     msk[:, 1:] = 0
     msk = torch.concat(
         [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
@@ -230,17 +230,17 @@ def encode_image(
         dim=1,
     )
     y = self.vae.encode(
-        [vae_input.to(dtype=self.dtype, device=torch.cuda.current_device())],
-        device=torch.cuda.current_device(),
+        [vae_input.to(dtype=self.dtype)],#, device=torch.cuda.current_device())],
+        # device=torch.cuda.current_device(),
         tiled=tiled,
         tile_size=tile_size,
         tile_stride=tile_stride,
     )[0]
-    y = y.to(dtype=self.dtype, device=torch.cuda.current_device())
+    y = y.to(dtype=self.dtype)#, device=torch.cuda.current_device())
     y = torch.concat([msk, y])
     y = y.unsqueeze(0)
-    clip_context = clip_context.to(dtype=self.dtype, device=torch.cuda.current_device())
-    y = y.to(dtype=self.dtype, device=torch.cuda.current_device())
+    clip_context = clip_context.to(dtype=self.dtype)#, device=torch.cuda.current_device())
+    y = y.to(dtype=self.dtype)#, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
 
 def encode_first_last_image(
@@ -255,12 +255,8 @@ def encode_first_last_image(
     tile_size=(34, 34),
     tile_stride=(18, 16),
 ):
-    first_image = preprocess_image(pil_first_image.resize((width, height))).to(
-        torch.cuda.current_device()
-    )
-    last_image = preprocess_image(pil_last_image.resize((width, height))).to(
-        torch.cuda.current_device()
-    )
+    first_image = preprocess_image(pil_first_image.resize((width, height)))#.to(        torch.cuda.current_device())
+    last_image = preprocess_image(pil_last_image.resize((width, height)))#.to(torch.cuda.current_device())
     # if self.dit.has_image_pos_emb:
     #     clip_context = torch.cat([self.image_encoder.encode_image([first_image]),
     #                             self.image_encoder.encode_image([last_image])], dim=1)
@@ -273,7 +269,7 @@ def encode_first_last_image(
         ],
         dim=1,
     )
-    msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
+    msk = torch.ones(1, num_frames, height // 8, width // 8)#, device=torch.cuda.current_device())
     msk[:, 1:-1] = 0
     msk = torch.concat(
         [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
@@ -289,7 +285,7 @@ def encode_first_last_image(
         dim=1,
     )
     y = vae.encode(
-        [vae_input.to(dtype=torch.bfloat16, device=torch.cuda.current_device())],
+        [vae_input.to(dtype=torch.bfloat16)], device=torch.cuda.current_device())],
         device=torch.cuda.current_device(),
         tiled=tiled,
         tile_size=tile_size,
@@ -301,6 +297,9 @@ def encode_first_last_image(
     clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
+
+# def report_memory():
+
 
 def tensor2video(self, frames):
     frames = rearrange(frames, "C T H W -> T H W C")
