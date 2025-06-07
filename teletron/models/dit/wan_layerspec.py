@@ -167,7 +167,7 @@ class WanDiTLayer(TransformerLayer):
         input_x = (
             self.norm3(norm_hidden_states) * (1 + c_scale_msa) + c_shift_msa
         )
-        ff_output, bias = self.mlp(input_x)
+        ff_output, bias = self.mlp(input_x, return_bias=True)
         ff_output = ff_output + bias
         norm_hidden_states = (
             norm_hidden_states + ff_output * c_gate_msa
@@ -189,7 +189,10 @@ class WanDiTLayer(TransformerLayer):
             encoder_hidden_states=context,
             attention_mask=None)
         input_x = modulate(self.norm3(x), shift_mlp, scale_mlp)
-        ff_output, bias = self.mlp(input_x)
+        # ff_output, bias = self.mlp(input_x, return_bias=True)
+        ff_output, bias = self.mlp.linear_fc1(input_x, return_bias=True)
+        ff_output = ff_output + bias
+        ff_output, bias = self.mlp.linear_fc2(ff_output, return_bias=True)
         ff_output = ff_output + bias
         x = self.gate(x, gate_mlp, ff_output)
         return x

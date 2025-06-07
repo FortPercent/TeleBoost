@@ -519,7 +519,7 @@ class WanCrossAttention(Attention):
         rotary_pos_emb=None,
     ):
         encoder_hidden_states_img = None
-        if self.add_k_proj is not None:
+        if self.k_img is not None:
             T5_CONTEXT_TOKEN_NUMBER=512
             image_context_length=encoder_hidden_states.shape[1]-T5_CONTEXT_TOKEN_NUMBER
             encoder_hidden_states_img = encoder_hidden_states[:, :image_context_length]

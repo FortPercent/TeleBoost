@@ -127,9 +127,10 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
                     .to(dtype=dtype_wan, device=torch.cuda.current_device())
                     .unsqueeze(0)
                 )
-        print(type(prompt_emb),print(len(prompt_emb)),
-            type(image_emb),print(len(image_emb)),type(latents),print(latents.shape))
-        exit(0)
+        batch["context"] = prompt_emb["context"]
+        batch["clip_feature"] = image_emb["clip_feature"]
+        batch["image_emb_y"] = image_emb["y"]
+        batch["latents"] = latents
         for key, tensor in batch.items():
             if isinstance(tensor, torch.Tensor):
                 batch[key] = tensor.to(torch.cuda.current_device())
@@ -144,8 +145,10 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
         for key, tensor in batch.items():
             if isinstance(tensor, list):
                 torch.distributed.broadcast_object_list(tensor, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-            else:
+            elif isinstance(tensor, torch.Tensor):
                 _broadcast(tensor)
+            else:
+                raise NotImplementedError(f"Unsupported data type: {type(tensor)}")
 
     else:
         sizes_info_list = [None]
