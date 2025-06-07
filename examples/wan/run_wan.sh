@@ -40,7 +40,7 @@ TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
 TP=1
-CP=1
+CP=8
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 # GBS=8
@@ -54,7 +54,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 5
+    --num-layers 5 #deprecated, please setting in WanParams
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
@@ -104,7 +104,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
-    --save $CHECKPOINT_PATH 
+    # --save $CHECKPOINT_PATH 
     # --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000

@@ -899,9 +899,9 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                             output_state_dict[f'blocks.{layer_id}.self_attn.v.bias'] = val
                 if 'cross_attention' in key:
                     if 'weight' in key:
-                        if 'add_k_proj' in key:
+                        if 'k_img' in key:
                             output_state_dict[f'blocks.{layer_id}.cross_attn.k_img.weight'] = val
-                        elif 'add_v_proj' in key:
+                        elif 'v_img' in key:
                             output_state_dict[f'blocks.{layer_id}.cross_attn.v_img.weight'] = val
                         elif 'proj' in key:
                             output_state_dict[f'blocks.{layer_id}.cross_attn.o.weight'] = val

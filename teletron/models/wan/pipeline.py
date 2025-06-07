@@ -94,7 +94,13 @@ class WanPipeline(nn.Module):
         print(f"wan dtype: {self.dtype}")
 
     def forward(self, batch):
-        # if self.pre_process:
+
+        latents = batch["latents"]
+        prompt_emb = {}
+        prompt_emb["context"] = batch["context"]
+        image_emb = {}
+        image_emb["clip_feature"] = batch["clip_feature"]
+        image_emb["y"] = batch["image_emb_y"]
 
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.flow_scheduler.num_train_timesteps, (1,))
@@ -106,7 +112,6 @@ class WanPipeline(nn.Module):
         broadcast_timesteps(noise)
         noisy_latents = self.flow_scheduler.add_noise(latents, noise, timestep)
         training_target = self.flow_scheduler.training_target(latents, noise, timestep)
-        # noisy_latents, timestep=timestep, **prompt_emb, **extra_input, **image_emb,
         noise_pred = self.transformer(
             x=noisy_latents,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
             timestep=timestep,  # [263]
@@ -120,8 +125,6 @@ class WanPipeline(nn.Module):
             loss = torch.nn.functional.mse_loss(noise_pred.float(), training_target.float())
             loss = loss * self.flow_scheduler.training_weight(timestep)
 
-        # # offload
-        # self.vae.to(device="cpu")
         return [loss]
 
     def forward_vae(self, images):
