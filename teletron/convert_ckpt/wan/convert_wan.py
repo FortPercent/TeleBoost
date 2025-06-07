@@ -617,13 +617,13 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 seg = config.ffn_dim // args.target_tensor_model_parallel_size
                 params_dict[f'blocks.{layer_id}.mlp.linear_fc1.weight'] = state_dict_dit[
                     f'blocks.{layer_id}.ffn.0.weight'
-                ][seg * i : seg * (i + 1), :]
+                ]
                 params_dict[f'blocks.{layer_id}.mlp.linear_fc1.bias'] = state_dict_dit[
                     f'blocks.{layer_id}.ffn.0.bias'
-                ][seg * i : seg * (i + 1)]
+                ]
                 params_dict[f'blocks.{layer_id}.mlp.linear_fc2.weight'] = state_dict_dit[
                     f'blocks.{layer_id}.ffn.2.weight'
-                ][:, seg * i : seg * (i + 1)]
+                ]
                 params_dict[f'blocks.{layer_id}.mlp.linear_fc2.bias'] = state_dict_dit[
                     f'blocks.{layer_id}.ffn.2.bias'
                 ]
@@ -632,19 +632,19 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict[f'proj_out.bias'] = state_dict_dit['head.head.bias']
                 params_dict[f'scale_shift_table'] = state_dict_dit['head.modulation']
 
-                keys = list(params_dict.keys())
-                for k in keys:
-                    params_dict[f"transformer.{k}"] = params_dict.pop(k)
+            keys = list(params_dict.keys())
+            for k in keys:
+                params_dict[f"transformer.{k}"] = params_dict.pop(k)
 
-                # log.info("begin vae")
-                for param_name, param_tensor in state_dict_vae.items():
-                    params_dict[f"vae.{param_name}"] = param_tensor
-                # log.info("text encoder")
-                for param_name, param_tensor in state_dict_text_encoder.items():
-                    params_dict[f"text_encoder.{param_name}"] = param_tensor
-                # log.info("image_encoder")
-                for param_name, param_tensor in state_dict_image_encoder.items():
-                    params_dict[f"image_encoder.{param_name}"] = param_tensor
+            # log.info("begin vae")
+            for param_name, param_tensor in state_dict_vae.items():
+                params_dict[f"vae.{param_name}"] = param_tensor
+            # log.info("text encoder")
+            for param_name, param_tensor in state_dict_text_encoder.items():
+                params_dict[f"text_encoder.{param_name}"] = param_tensor
+            # log.info("image_encoder")
+            for param_name, param_tensor in state_dict_image_encoder.items():
+                params_dict[f"image_encoder.{param_name}"] = param_tensor
     for tp_rank in range(args.target_tensor_model_parallel_size):
         output_state_dict[tp_rank]["checkpoint_version"] = 3.0
         output_state_dict[tp_rank]["args"] = margs
