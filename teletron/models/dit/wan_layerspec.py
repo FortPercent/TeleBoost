@@ -93,6 +93,20 @@ class GateModule(nn.Module):
     def forward(self, x, gate, residual):
         return x + gate * residual
     
+
+class MLP_WAN(nn.Module):
+    def __init__(self, dim, ffn_dim):
+        super().__init__()
+        self.linear_fc1 = nn.Linear(dim, ffn_dim)
+        self.gelu =  nn.GELU(approximate='tanh')
+        self.linear_fc2 = nn.Linear(ffn_dim, dim)
+
+    def forward(self, x):
+        y = self.linear_fc1(x)
+        y = self.gelu(y)
+        y = self.linear_fc2(y)
+        return y
+    
 class WanDiTLayer(TransformerLayer):
     """A double transformer layer.
 
@@ -130,70 +144,27 @@ class WanDiTLayer(TransformerLayer):
             torch.randn(1, 6, hidden_size) / hidden_size**0.5
         )
         self.gate = GateModule()
+        # self.gelu = nn.GELU(approximate='tanh')
+        ffn_dim = self.mlp.linear_fc1.weight.shape[0]
+        del self.mlp
+        self.mlp = MLP_WAN(hidden_size, ffn_dim)
+
         
-
-    def forward_back(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        temb: torch.Tensor,
-        rotary_emb: torch.Tensor,
-    ):
-        # 1. Input normalization
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-            self.scale_shift_table + temb
-        ).chunk(6, dim=1)
-
-        # 1. Self-attention
-        norm_hidden_states = (
-            self.norm1(hidden_states) * (1 + scale_msa) + shift_msa
-        )
-        attn_output = self.self_attention(
-            hidden_states=norm_hidden_states,
-            rotary_pos_emb=rotary_emb,
-            attention_mask=None,
-        )
-        hidden_states = (hidden_states + attn_output * gate_msa)
-        # 2. Cross-attention
-        norm_hidden_states = self.norm2(hidden_states)
-        attn_output = self.cross_attention(
-            hidden_states=norm_hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            attention_mask=None,
-        )
-        norm_hidden_states = norm_hidden_states + attn_output
-
-        # 3. Feed-forward
-        input_x = (
-            self.norm3(norm_hidden_states) * (1 + c_scale_msa) + c_shift_msa
-        )
-        ff_output, bias = self.mlp(input_x, return_bias=True)
-        ff_output = ff_output + bias
-        norm_hidden_states = (
-            norm_hidden_states + ff_output * c_gate_msa
-        )
-
-        return norm_hidden_states
-
     def forward(self, x, context, t_mod, freqs):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.scale_shift_table.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
-        input_x = modulate(self.norm1(x), shift_msa, scale_msa)
+        input_x = modulate(self.norm1(x.float()), shift_msa, scale_msa)
         x = self.gate(x, gate_msa, self.self_attention(
-            hidden_states=input_x,
+            hidden_states=input_x.bfloat16(),
             rotary_pos_emb=freqs,
             attention_mask=None))
         x = x + self.cross_attention(
-            hidden_states=self.norm2(x),
+            hidden_states=self.norm2(x.float()).bfloat16(),
             encoder_hidden_states=context,
             attention_mask=None)
-        input_x = modulate(self.norm3(x), shift_mlp, scale_mlp)
-        # ff_output, bias = self.mlp(input_x, return_bias=True)
-        ff_output, bias = self.mlp.linear_fc1(input_x, return_bias=True)
-        ff_output = ff_output + bias
-        ff_output, bias = self.mlp.linear_fc2(ff_output, return_bias=True)
-        ff_output = ff_output + bias
+        input_x = modulate(self.norm3(x.float()), shift_mlp, scale_mlp)
+        ff_output = self.mlp(input_x.bfloat16())
         x = self.gate(x, gate_mlp, ff_output)
         return x
         

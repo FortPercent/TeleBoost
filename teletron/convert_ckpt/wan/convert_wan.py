@@ -319,7 +319,7 @@ def convert_module_cross_attention(meg_state_dict_dit, args):
                     .contiguous()
                 )
                 meg_state_dict_dit[f'blocks.{layer_id}.cross_attention.linear_v.bias'] = (
-                    meg_state_dict_dit[f'blocks.{layer_id}.cross_attn.k.bias']
+                    meg_state_dict_dit[f'blocks.{layer_id}.cross_attn.v.bias']
                     .view([num_heads, hidden_size_per_head])[
                         group_per_split * i : group_per_split * (i + 1)
                     ]
@@ -449,7 +449,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
         "tensor_model_parallel_size": args.target_tensor_model_parallel_size,
         "pipeline_model_parallel_size": args.target_pipeline_model_parallel_size,
     }
-    from wan.configs.wan_flf import config as globalConfig
+    #from wan.configs.wan_flf import config as globalConfig
     import types
 
     # from vast.models.dit.wan_dit import WanVideoVAE, WanModel, ModelManager
@@ -600,7 +600,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                     f'blocks.{layer_id}.cross_attn.v.weight'
                 ]
                 params_dict[f'blocks.{layer_id}.cross_attention.linear_v.bias'] = state_dict_dit[
-                    f'blocks.{layer_id}.cross_attn.k.bias'
+                    f'blocks.{layer_id}.cross_attn.v.bias'
                 ]
                 params_dict[f'blocks.{layer_id}.cross_attention.k_img.weight'] = (
                     state_dict_dit[f'blocks.{layer_id}.cross_attn.k_img.weight']
