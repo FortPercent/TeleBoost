@@ -57,7 +57,7 @@ class WanParams:
     text_dim: int = 4096
     freq_dim: int = 256
     ffn_dim: int = 13824
-    num_layers: int = 5
+    num_layers: int = 20
     cross_attn_norm: bool = True
     qk_norm: Optional[str] = "rms_norm_across_heads"
     eps: float = 1e-6
@@ -84,8 +84,6 @@ class WanVideoTransformer3DModel(VisionModule):
         self.image_dim = wan_config.image_dim
         self.added_kv_proj_dim = wan_config.added_kv_proj_dim
         self.num_layers = wan_config.num_layers
-        args = get_args()
-        self.num_layers = args.num_layers
 
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         config.hidden_size = self.hidden_size
