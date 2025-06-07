@@ -12,6 +12,7 @@ from typing import get_origin
 from einops import rearrange
 from torchvision.transforms.functional import to_pil_image
 import numpy as np
+import torch.distributed as dist
 def get_batch_on_this_tp_rank_vast(data_iterator):
     args = get_args()
     data_dict = ['images', 'prompt_embeds', 'prompt_masks', 'clip_text_embed', 'ref_mask', 'ref_images']
@@ -63,13 +64,28 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
     return batch
 
 
-def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs):
+def unpack_tensors(packed_tensor, intervals):
+    token_length = int(packed_tensor[0:1].item())
+    text_feature = packed_tensor[intervals[1]:intervals[2]]
+    rest_features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(3, len(intervals))])
+    return (token_length, text_feature,) + rest_features
+
+
+
+def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
     def _broadcast(item):
         if item is not None:
             import torch.distributed as dist
             rank = dist.get_rank()
             torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
     
+    transformer_dim = 4096
+    img_dim = 20
+    video_dim = 16
+    image_scale = 8
+    frame_scale = 4
+    clip_dim=768
+
     if mpu.get_tensor_context_parallel_rank() == 0:
         if data_iterator is not None:
            data = next(data_iterator)
@@ -80,56 +96,48 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
         type_info = {}
         batch=dict(data)
         dtype_wan = torch.bfloat16
-        with torch.no_grad():
-            prompt_emb = encode_prompt(prompter,batch["dense_prompt"][0])
-            latents = encode_video(vae,
-                rearrange(batch["images"], "b t c h w -> b c t h w").to(
-                    dtype=dtype_wan, device=torch.cuda.current_device()
-                ),
-                **tiler_kwargs,
-            )[0]
-            _, num_frames, _, height, width = batch["images"].shape
-            if 'raw_last_image' in batch:
-                raw_first_image = batch["raw_first_image"]
-                pil_first_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                raw_last_image = batch['raw_last_image']
-                pil_last_image = to_pil_image(
-                    raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                image_emb = encode_first_last_image(
-                    vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width
-                )
-            else:
-                raw_first_image = batch["raw_first_image"]
-                pil_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                image_emb = encode_image(pil_image, num_frames, height, width)
-            latents = latents.unsqueeze(0).to(dtype=dtype_wan, device=torch.cuda.current_device())
+        
+        image_size = data['images'].size()
+        
 
-            # Data
-            prompt_emb["context"] = prompt_emb["context"][0].to(
-                dtype=dtype_wan, device=torch.cuda.current_device()
-            )
-            prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
+        args = get_args()
+        if args.distributed_vae:
+            token_length_size = 1
+            transformer_embedding_size = max_length* transformer_dim
+            clip_embedding_size = (max_length+2)*1280
+            first_img_embedding_size = img_dim *2*(image_size[3]//image_scale)*(image_size[4]//image_scale)
+            video_embedding_size = video_dim *( image_size[1]//frame_scale + 1)*(image_size[3]//image_scale)*(image_size[4]//image_scale)
+            
+            recv_tensor = torch.empty((token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size ), device=torch.cuda.current_device(), dtype=torch.bfloat16)
 
-            if "clip_feature" in image_emb:
-                image_emb["clip_feature"] = (
-                    image_emb["clip_feature"][0]
-                    .to(dtype=dtype_wan, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
-            if "y" in image_emb:
-                image_emb["y"] = (
-                    image_emb["y"][0]
-                    .to(dtype=dtype_wan, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
-        batch["context"] = prompt_emb["context"]
-        batch["clip_feature"] = image_emb["clip_feature"]
-        batch["image_emb_y"] = image_emb["y"]
+            intervals = [0, 
+                        token_length_size, 
+                        token_length_size + transformer_embedding_size, 
+                        token_length_size + transformer_embedding_size +clip_embedding_size,
+                        token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size,
+                        token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size 
+                        ]
+
+            from teletron.core.parallel_state import get_comm_pair
+            comm_pair = get_comm_pair()
+            
+            # print("tensor shape: ", prompt_ids[0].size(1))
+            req = dist.irecv(recv_tensor, comm_pair.producer, tag = 0)
+            req.wait()
+
+            token_length, context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals)
+            context = context.view(1, token_length, transformer_dim)
+            clip_feature = clip_feature.view(1, token_length+2, 1280)
+            img_y = img_y.view(1, img_dim, 2, image_size[3]//image_scale, image_size[4]//image_scale)
+            latents = latents.view(1, video_dim, image_size[1]//frame_scale + 1, image_size[3]//image_scale, image_size[4]//image_scale)
+        else:
+            # TODO: remove use fix data
+            pass
+
+
+        batch["context"] = context
+        batch["clip_feature"] = clip_feature
+        batch["image_emb_y"] = img_y
         batch["latents"] = latents
         for key, tensor in batch.items():
             if isinstance(tensor, torch.Tensor):
