@@ -81,8 +81,8 @@ class WanPipeline(nn.Module):
         self.wan_config=wanConfig
         print("Initialize WanVideoTransformer3DModel")
         self.transformer = WanVideoTransformer3DModel(wanConfig, config)
-
-        # watch_module_forward(self.transformer)
+        # from tensorwatch import watch_module_forward_backward
+        # watch_module_forward_backward(self.transformer, use_megatron=True)
         print("WanVideoTransformer3DModel Initialized")
         # self.vae_scale_factor = 2 ** (len(self.vae.params.ch_mult))
 
@@ -102,6 +102,15 @@ class WanPipeline(nn.Module):
         image_emb["clip_feature"] = batch["clip_feature"]
         image_emb["y"] = batch["image_emb_y"]
 
+        # TODO: for fixing input, tobe deleted
+        saved_input = torch.load("/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/temp_input/inputdict.pt", map_location=f"cuda:{torch.cuda.current_device()}")
+        noisy_latents = saved_input['noisy_latents']
+        prompt_emb = saved_input['prompt_emb']
+        timestep = saved_input['timestep']
+        extra_input = saved_input['extra_input']
+        image_emb = saved_input['image_emb']
+        latents = noisy_latents
+
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.flow_scheduler.num_train_timesteps, (1,))
         timestep = self.flow_scheduler.timesteps[timestep_id].to(
@@ -112,6 +121,14 @@ class WanPipeline(nn.Module):
         broadcast_timesteps(noise)
         noisy_latents = self.flow_scheduler.add_noise(latents, noise, timestep)
         training_target = self.flow_scheduler.training_target(latents, noise, timestep)
+        
+        
+        # TODO: for fixing input, tobe deleted
+        torch.manual_seed(1234)
+        noisy_latents = torch.randn_like(noisy_latents)
+        training_target = torch.randn_like(training_target)
+        timestep = torch.randint_like(timestep, 0, 1000)
+
         noise_pred = self.transformer(
             x=noisy_latents,  # [1, 2, 16, 28, 48] -> [1, 16, 2, 28, 48]
             timestep=timestep,  # [263]
