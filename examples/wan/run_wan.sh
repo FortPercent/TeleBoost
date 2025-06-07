@@ -40,7 +40,7 @@ TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
 TP=1
-CP=8
+CP=1
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 # GBS=8
@@ -64,12 +64,12 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    # --debug
-    --use-cpu-initialization
+    # # --debug
+    # --use-cpu-initialization
     --task-type wan_flf
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
-    --train-iters 10000
+    --train-iters 1
     --weight-decay 1e-2
     --init-method-std 0.006 
     --clip-grad 0.0
