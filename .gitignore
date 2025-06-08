@@ -21,3 +21,4 @@ debug/
 tensorwatch_data
 tensorwatch_data_back
 log_memory
+*.pt
