@@ -438,7 +438,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained(args.hf_ckpt_path)
-    config.num_layers = 30 # TODO
+    config.num_layers = 1 # TODO
 
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
@@ -637,14 +637,14 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict[f"transformer.{k}"] = params_dict.pop(k)
 
             # log.info("begin vae")
-            for param_name, param_tensor in state_dict_vae.items():
-                params_dict[f"vae.{param_name}"] = param_tensor
-            # log.info("text encoder")
-            for param_name, param_tensor in state_dict_text_encoder.items():
-                params_dict[f"text_encoder.{param_name}"] = param_tensor
-            # log.info("image_encoder")
-            for param_name, param_tensor in state_dict_image_encoder.items():
-                params_dict[f"image_encoder.{param_name}"] = param_tensor
+            # for param_name, param_tensor in state_dict_vae.items():
+            #     params_dict[f"vae.{param_name}"] = param_tensor
+            # # log.info("text encoder")
+            # for param_name, param_tensor in state_dict_text_encoder.items():
+            #     params_dict[f"text_encoder.{param_name}"] = param_tensor
+            # # log.info("image_encoder")
+            # for param_name, param_tensor in state_dict_image_encoder.items():
+            #     params_dict[f"image_encoder.{param_name}"] = param_tensor
     for tp_rank in range(args.target_tensor_model_parallel_size):
         output_state_dict[tp_rank]["checkpoint_version"] = 3.0
         output_state_dict[tp_rank]["args"] = margs
