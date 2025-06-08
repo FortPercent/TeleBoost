@@ -1,5 +1,7 @@
 HF_CKPT_PATH="/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer"
 SOURCE_CKPT_PATH="/workspace/Wan2___1-FLF2V-14B-480P-init"
+#SOURCE_CKPT_PATH="/nvfile-heatstorage/yxy/ccg/vast2/work_dirs/prone10_lowerlr/models/checkpoint_epoch_1_step_5000"
+TARGET_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_30"
 TARGET_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1"
 TP=1
 PP=1
