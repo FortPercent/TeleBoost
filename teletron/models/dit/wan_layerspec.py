@@ -54,7 +54,7 @@ from megatron.core.transformer.transformer_layer import (
     TransformerLayerSubmodules,
 )
 from megatron.core.utils import make_viewless_tensor
-
+import torch.nn.functional as F
 from teletron.models.dit.wan_attention import (
     WanCrossAttention,
     WanSelfAttention,
@@ -72,6 +72,19 @@ from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParall
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
     return (x * (1 + scale) + shift)
+
+class WANFP32LayerNorm(nn.LayerNorm):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        # origin_dtype = inputs.dtype
+        return F.layer_norm(
+            inputs.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        ) #.to(origin_dtype)
+
+
 
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size: int, config, eps: float = 1e-6):
@@ -129,16 +142,16 @@ class WanDiTLayer(TransformerLayer):
             config=config, submodules=submodules, layer_number=layer_number
         )
 
-        self.norm1 = FP32LayerNorm(hidden_size, eps, elementwise_affine=False)
+        self.norm1 = WANFP32LayerNorm(hidden_size, eps, elementwise_affine=False)
         self.norm2 = (
-            FP32LayerNorm(hidden_size, eps, elementwise_affine=True)
+            WANFP32LayerNorm(hidden_size, eps, elementwise_affine=True)
             if cross_attn_norm
             else nn.Identity()
         )
 
         # 3. Feed-forward
         # self.ffn = FeedForward(hidden_size, inner_dim=config.ffn_dim, activation_fn="gelu-approximate")
-        self.norm3 = FP32LayerNorm(hidden_size, eps, elementwise_affine=False)
+        self.norm3 = WANFP32LayerNorm(hidden_size, eps, elementwise_affine=False)
 
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 6, hidden_size) / hidden_size**0.5
@@ -154,16 +167,22 @@ class WanDiTLayer(TransformerLayer):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.scale_shift_table.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
-        input_x = modulate(self.norm1(x.float()), shift_msa, scale_msa)
+        norm1_out = self.norm1(x.float())
+        #norm1_out = torch.ones_like(norm1_out)
+        input_x = modulate(norm1_out, shift_msa, scale_msa)
         x = self.gate(x, gate_msa, self.self_attention(
             hidden_states=input_x.bfloat16(),
             rotary_pos_emb=freqs,
             attention_mask=None))
+        norm2_out = self.norm2(x.float())
+        #norm2_out = torch.ones_like(norm2_out)
         x = x + self.cross_attention(
-            hidden_states=self.norm2(x.float()).bfloat16(),
+            hidden_states=norm2_out.bfloat16(),
             encoder_hidden_states=context,
             attention_mask=None)
-        input_x = modulate(self.norm3(x.float()), shift_mlp, scale_mlp)
+        norm3_out = self.norm3(x.float())
+        #norm3_out = torch.ones_like(norm3_out)
+        input_x = modulate(norm3_out, shift_mlp, scale_mlp)
         ff_output = self.mlp(input_x.bfloat16())
         x = self.gate(x, gate_mlp, ff_output)
         return x

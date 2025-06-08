@@ -16,3 +16,6 @@ __pycache__/*
 tests/*
 *.png
 debug/
+tensorwatch_data
+tensorwatch_data_back
+log_memory

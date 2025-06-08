@@ -774,8 +774,8 @@ def convert_checkpoint_from_megatron_to_transformers(args):
 
     dir_path = os.path.dirname(args.load_path)
     config = GPT2Config.from_pretrained(dir_path)
-    config.num_layers = 20
-    config.num_single_layers = 40
+    config.num_layers = 16
+    config.num_single_layers = 32
 
     output_state_dict = {}
 
@@ -963,7 +963,9 @@ def convert_checkpoint_from_megatron_to_transformers(args):
                     else:
                         output_state_dict['transformer_blocks.' + str(layer_id) + '.attn.to_out.0.bias']=val
         # if key.startswith("transformer.single_transformer_blocks"):
-        if key.startswith("transformer.single_transformer_blocks"):
+        
+        if key.startswith("single_transformer_blocks"):
+            #import ipdb; ipdb.set_trace()
             key_list = key.split('.')
             # layer_id = int(key_list[2])
             layer_id = int(key_list[1])

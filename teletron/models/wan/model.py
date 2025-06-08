@@ -57,7 +57,7 @@ class WanParams:
     text_dim: int = 4096
     freq_dim: int = 256
     ffn_dim: int = 13824
-    num_layers: int = 20
+    num_layers: int = 30
     cross_attn_norm: bool = True
     qk_norm: Optional[str] = "rms_norm_across_heads"
     eps: float = 1e-6
@@ -160,15 +160,11 @@ class WanVideoTransformer3DModel(VisionModule):
         )
 
         # 4. Output norm & projection
-        self.norm_out = FP32LayerNorm(
-            self.inner_dim, self.eps, elementwise_affine=False
-        )
-        self.proj_out = nn.Linear(
-            self.inner_dim, out_channels * math.prod(self.patch_size)
-        )
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, self.inner_dim) / self.inner_dim**0.5
-        )
+
+        self.norm_out = FP32LayerNorm(self.inner_dim, eps=self.eps, elementwise_affine=False)
+        self.proj_out = nn.Linear(self.inner_dim, out_channels * math.prod(self.patch_size))
+        self.scale_shift_table = nn.Parameter(torch.randn(1, 2, self.inner_dim) / self.inner_dim**0.5)
+
 
         print("Wan3DModel Init Finish!")
 
@@ -349,22 +345,12 @@ class WanVideoTransformer3DModel(VisionModule):
             hidden_states = gather_forward_split_backward(
                 hidden_states, mpu.get_context_parallel_group(), dim=1, grad_scale="up"
             )
-        # 5. Output norm, projection & unpatchify
-        shift, scale = (self.scale_shift_table.to(t.device) + t.unsqueeze(1)).chunk(
-            2, dim=1
-        )
 
-        # # Move the shift and scale tensors to the same device as hidden_states.
-        # # When using multi-GPU inference via accelerate these will be on the
-        # # first device rather than the last device, which hidden_states ends up
-        # # on.
-        # shift = shift.to(hidden_states.device)
-        # scale = scale.to(hidden_states.device)
+        shift, scale = (self.scale_shift_table.to(dtype=t.dtype, device=t.device) + t).chunk(2, dim=1)
+        norm_out_temp = self.norm_out(hidden_states.float())
+        norm_out_temp = torch.ones_like(norm_out_temp)
+        hidden_states = (self.proj_out((norm_out_temp * (1 + scale) + shift).bfloat16()))
 
-        hidden_states = (
-            self.norm_out(hidden_states.float()) * (1 + scale) + shift
-        ).type_as(hidden_states)
-        hidden_states = self.proj_out(hidden_states)
 
         hidden_states = self.unpatchify(hidden_states, (f, h, w))
         if not return_dict:
