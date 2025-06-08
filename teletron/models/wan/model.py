@@ -57,7 +57,7 @@ class WanParams:
     text_dim: int = 4096
     freq_dim: int = 256
     ffn_dim: int = 13824
-    num_layers: int = 30
+    num_layers: int = 1
     cross_attn_norm: bool = True
     qk_norm: Optional[str] = "rms_norm_across_heads"
     eps: float = 1e-6
@@ -348,7 +348,7 @@ class WanVideoTransformer3DModel(VisionModule):
 
         shift, scale = (self.scale_shift_table.to(dtype=t.dtype, device=t.device) + t).chunk(2, dim=1)
         norm_out_temp = self.norm_out(hidden_states.float())
-        norm_out_temp = torch.ones_like(norm_out_temp)
+        #norm_out_temp = torch.ones_like(norm_out_temp)
         hidden_states = (self.proj_out((norm_out_temp * (1 + scale) + shift).bfloat16()))
 
 
