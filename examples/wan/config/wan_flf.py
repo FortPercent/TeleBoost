@@ -2,7 +2,7 @@ import os
 
 # dst_size = (720, 480)
 dst_fps = 24
-dst_num_frames = 5
+dst_num_frames = 81
 # Temporary code for quick debugging
 debug = False # open
 if debug:
@@ -209,7 +209,7 @@ config = dict(
     ### 优化器optimizer配置
     optimizers=dict(
         type="AdamW",
-        lr=2e-5,
+        lr=1e-6,
     ),
     ### 学习率scheduler配置
     schedulers=dict(
