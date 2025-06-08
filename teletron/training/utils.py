@@ -69,8 +69,12 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
             import torch.distributed as dist
             rank = dist.get_rank()
             torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-    
+
+
     if mpu.get_tensor_context_parallel_rank() == 0:
+
+        def return_cpu():
+            return "cpu"
         if data_iterator is not None:
            data = next(data_iterator)
         else:
@@ -80,54 +84,75 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encod
         type_info = {}
         batch=dict(data)
         dtype_wan = torch.bfloat16
-        with torch.no_grad():
-            prompt_emb = encode_prompt(prompter,batch["dense_prompt"][0])
-            latents = encode_video(vae,
-                rearrange(batch["images"], "b t c h w -> b c t h w").to(
-                    dtype=dtype_wan, device=torch.cuda.current_device()
-                ),
-                **tiler_kwargs,
-            )[0]
-            _, num_frames, _, height, width = batch["images"].shape
-            if 'raw_last_image' in batch:
-                raw_first_image = batch["raw_first_image"]
-                pil_first_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                raw_last_image = batch['raw_last_image']
-                pil_last_image = to_pil_image(
-                    raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                image_emb = encode_first_last_image(
-                    vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width
-                )
-            else:
-                raw_first_image = batch["raw_first_image"]
-                pil_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                image_emb = encode_image(pil_image, num_frames, height, width)
-            latents = latents.unsqueeze(0).to(dtype=dtype_wan, device=torch.cuda.current_device())
 
-            # Data
-            prompt_emb["context"] = prompt_emb["context"][0].to(
-                dtype=dtype_wan, device=torch.cuda.current_device()
-            )
-            prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
+        # origin_get_device = torch.cuda.current_device
+        # torch.cuda.current_device = return_cpu
+        # vae = vae.cpu()
+        # import time 
+        # time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        # print(f"{time_str}: start data preprocess")
 
-            if "clip_feature" in image_emb:
-                image_emb["clip_feature"] = (
-                    image_emb["clip_feature"][0]
-                    .to(dtype=dtype_wan, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
-            if "y" in image_emb:
-                image_emb["y"] = (
-                    image_emb["y"][0]
-                    .to(dtype=dtype_wan, device=torch.cuda.current_device())
-                    .unsqueeze(0)
-                )
-        batch["context"] = prompt_emb["context"]
+        # with torch.no_grad():
+        #     prompt_emb = encode_prompt(prompter,batch["dense_prompt"][0])
+        #     latents = encode_video(vae,
+        #         rearrange(batch["images"], "b t c h w -> b c t h w").to(
+        #             dtype=dtype_wan, device=torch.cuda.current_device()
+        #         ),
+        #         **tiler_kwargs,
+        #     )[0]
+        #     _, num_frames, _, height, width = batch["images"].shape
+        #     if 'raw_last_image' in batch:
+        #         raw_first_image = batch["raw_first_image"]
+        #         pil_first_image = to_pil_image(
+        #             raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         raw_last_image = batch['raw_last_image']
+        #         pil_last_image = to_pil_image(
+        #             raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         image_emb = encode_first_last_image(
+        #             vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width
+        #         )
+        #     else:
+        #         raw_first_image = batch["raw_first_image"]
+        #         pil_image = to_pil_image(
+        #             raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         image_emb = encode_image(pil_image, num_frames, height, width)
+        #     latents = latents.unsqueeze(0).to(dtype=dtype_wan, device=torch.cuda.current_device())
+
+        #     # Data
+        #     prompt_emb["context"] = prompt_emb["context"][0].to(
+        #         dtype=dtype_wan, device=torch.cuda.current_device()
+        #     )
+        #     prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
+
+        #     if "clip_feature" in image_emb:
+        #         image_emb["clip_feature"] = (
+        #             image_emb["clip_feature"][0]
+        #             .to(dtype=dtype_wan, device=torch.cuda.current_device())
+        #             .unsqueeze(0)
+        #         )
+        #     if "y" in image_emb:
+        #         image_emb["y"] = (
+        #             image_emb["y"][0]
+        #             .to(dtype=dtype_wan, device=torch.cuda.current_device())
+        #             .unsqueeze(0)
+        #         )
+        
+        saved_input = torch.load("/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/temp_input/inputdict.pt", map_location=f"cuda:{torch.cuda.current_device()}")
+        noisy_latents = saved_input['noisy_latents']
+        prompt_emb = saved_input['prompt_emb']
+        timestep = saved_input['timestep']
+        extra_input = saved_input['extra_input']
+        image_emb = saved_input['image_emb']
+        latents = noisy_latents
+
+        # time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        # print(f"{time_str}: finish_data_preprocess")
+        # torch.cuda.current_device = origin_get_device
+
+        batch["context"] = prompt_emb['context']
         batch["clip_feature"] = image_emb["clip_feature"]
         batch["image_emb_y"] = image_emb["y"]
         batch["latents"] = latents
@@ -301,6 +326,9 @@ def encode_first_last_image(
     clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
+
+# def report_memory():
+
 
 def tensor2video(self, frames):
     frames = rearrange(frames, "C T H W -> T H W C")

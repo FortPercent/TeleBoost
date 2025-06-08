@@ -236,6 +236,7 @@ class WanSelfAttention(Attention):
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
             key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
             value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
+            torch.cuda.empty_cache()
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
@@ -275,6 +276,7 @@ class WanSelfAttention(Attention):
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
             )  # b img_seq sub_n d
+            torch.cuda.empty_cache()
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()
         hidden_states = self.linear_proj(hidden_states)
         # hidden_states=hidden_states+bias
@@ -468,6 +470,7 @@ class WanCrossAttention(Attention):
             value_img = split_forward_gather_backward(
                 value_img, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
             )  # b s n d
+            torch.cuda.empty_cache()
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
@@ -510,7 +513,8 @@ class WanCrossAttention(Attention):
         if mpu.get_context_parallel_world_size() > 1:
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
-        )
+            )
+            torch.cuda.empty_cache()
         # print("after all to all",hidden_states.shape)
         # print("&"*100)
         # b sub_n img_seq d
