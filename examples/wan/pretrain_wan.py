@@ -10,7 +10,9 @@ from megatron.core import mpu
 
 from megatron.training import get_args, get_timers, get_tokenizer, pretrain, print_rank_0,get_model
 from megatron.legacy.data.data_samplers import build_pretraining_data_loader
-from megatron.training import pretrain
+# from megatron.training import pretrain
+from teletron.core.training import pretrain
+from teletron.models.wan.wan_producer import producer_process
 from vast.train.configs.config import load_config
 from megatron.training.utils import (
     average_losses_across_data_parallel_group
@@ -55,9 +57,9 @@ class Config(dict):
             setattr(self, k, v)
 
 
-def get_batch(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs):
+def get_batch(data_iterator):
     # get batches based on the TP_CP rank you are on
-    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs)
+    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator, 512)
     # batch = get_batch_on_this_tp_rank_vast(data_iterator)
     return batch
 
@@ -93,6 +95,9 @@ def extra_args_provider(parser):
     group.add_argument("--debug", action="store_true")
     group.add_argument("--debug_dir", type=str, default="./logs")
     group.add_argument("--sanity-check", action="store_true")
+
+    group.add_argument("--distributed-vae", action="store_true")
+    group.add_argument("--distributed-vae-world-size", type=int, default=0,required=False)
 
     group = parser.add_argument_group(title='training')
     group.add_argument("--task-type", type=str, choices=['wan_flf'], default="wan_flf")
@@ -150,7 +155,7 @@ def loss_func(output_tensor):
     loss = loss.unsqueeze(0)
     return loss, {"loss": averaged_loss[0]}
 
-def forward_step(data_iterator, model: WanPipeline,text_encoder,vae,image_encoder,prompter,tiler_kwargs):
+def forward_step(data_iterator, model: WanPipeline):
     """Forward training step.
 
     Args:
@@ -165,7 +170,7 @@ def forward_step(data_iterator, model: WanPipeline,text_encoder,vae,image_encode
 
     # Get the batch.
     timers('batch-generator', log_level=2).start()
-    batch = get_batch(data_iterator,text_encoder,vae,image_encoder,prompter,tiler_kwargs)
+    batch = get_batch(data_iterator)
     timers('batch-generator').stop()
 
     output_tensor_list = model(batch)
@@ -208,6 +213,7 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
+        producer_process=producer_process,
         extra_args_provider=extra_args_provider,
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'}
     )
