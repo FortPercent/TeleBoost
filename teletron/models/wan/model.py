@@ -91,7 +91,7 @@ class WanVideoTransformer3DModel(VisionModule):
         config.num_attention_heads = self.num_attention_heads
         # TODO: Assume not use GQA
         config.num_query_groups = config.num_attention_heads
-        config.use_cpu_initialization = True
+        # config.use_cpu_initialization = True
         config.hidden_dropout = 0
         config.attention_dropout = 0
         config.layernorm_epsilon = 1e-6
