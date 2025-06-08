@@ -77,19 +77,28 @@ class WanSelfAttention(Attention):
         self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.q_layernorm = build_module(
-            submodules.q_layernorm,
-            hidden_size=config.hidden_size,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
-        )
+        # self.q_layernorm = build_module(
+        #     submodules.q_layernorm,
+        #     hidden_size=config.hidden_size,
+        #     config=self.config,
+        #     eps=self.config.layernorm_epsilon,
+        # )
 
-        self.k_layernorm = build_module(
-            submodules.k_layernorm,
-            hidden_size=config.hidden_size,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
+        # self.k_layernorm = build_module(
+        #     submodules.k_layernorm,
+        #     hidden_size=config.hidden_size,
+        #     config=self.config,
+        #     eps=self.config.layernorm_epsilon,
+        # )
+        
+        self.q_layernorm = RMSNorm(
+            config.hidden_size, 
+            eps=self.config.layernorm_epsilon
         )
+        self.k_layernorm = RMSNorm(
+            config.hidden_size, 
+            eps=self.config.layernorm_epsilon
+        ) 
 
     def _split_qkv(self, mixed_qkv):
         # [sq, b, hp] --> [sq, b, ng, (np/ng + 2) * hn]
@@ -297,25 +306,30 @@ class WanCrossAttention(Attention):
             attention_type="cross",
         )
 
-        self.q_layernorm = build_module(
-            submodules.q_layernorm,
-            hidden_size=config.hidden_size,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
-        )
+        # self.q_layernorm = build_module(
+        #     submodules.q_layernorm,
+        #     hidden_size=config.hidden_size,
+        #     config=self.config,
+        #     eps=self.config.layernorm_epsilon,
+        # )
+        # self.k_layernorm = build_module(
+        #     submodules.k_layernorm,
+        #     hidden_size=config.hidden_size,
+        #     config=self.config,
+        #     eps=self.config.layernorm_epsilon,
+        # )
 
-        self.k_layernorm = build_module(
-            submodules.k_layernorm,
-            hidden_size=config.hidden_size,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
+        self.q_layernorm = RMSNorm(
+            config.hidden_size, 
+            eps=self.config.layernorm_epsilon
         )
-
-        self.norm_k_img = build_module(
-            submodules.norm_k_img,
-            hidden_size=config.hidden_size,
-            config=self.config,
-            eps=self.config.layernorm_epsilon,
+        self.k_layernorm = RMSNorm(
+            config.hidden_size, 
+            eps=self.config.layernorm_epsilon
+        )
+        self.norm_k_img = RMSNorm(
+            config.hidden_size, 
+            eps=self.config.layernorm_epsilon
         )
 
         self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
