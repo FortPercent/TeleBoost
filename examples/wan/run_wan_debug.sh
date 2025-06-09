@@ -5,15 +5,16 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_wxe
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/vast
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yuc/teletron-wan/Megatron_wxe
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/t2v/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
+
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 export MEMORY_SNAPSHOT=True
 export PROF_SAVE_PATH="./log_memory"
@@ -34,13 +35,13 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 echo '$WORLD_SIZE' $WORLD_SIZE
 
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1
-CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_10
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
 TP=1
-CP=1
+CP=2
 MBS=1
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 # GBS=8
@@ -83,12 +84,14 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
-    # --distribute-saved-activations
+    # --distribute-saved-activati1010ons
 )
 
 MODEL_PARALLEL_ARGS=(
     --tensor-model-parallel-size ${TP}
     --context-parallel-size ${CP}
+    --distributed-vae
+    --distributed-vae-world-size 1
 )
 DATA_ARGS=(
     --dataset-type VastDataset
@@ -105,7 +108,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 100
     --eval-interval 10000 
     # --save $CHECKPOINT_PATH 
-    --load $CHECKPOINT_PATH 
+    #--load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
