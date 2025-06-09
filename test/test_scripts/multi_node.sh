@@ -11,9 +11,11 @@ export NCCL_DEBUG=INFO&&export NCCL_ALGO=RING
 if [ "$RANK" -eq 0 ] || [ "$RANK" -eq 1 ]; then
     # compute node for train
     export NUM_TRAIN_GPUS=8
+    export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 elif [ "$RANK" -eq 2 ]; then
     # process node for data
     export NUM_TRAIN_GPUS=4
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
 else
     # dirty code
     echo "Unsupported RANK value: $RANK"
@@ -27,4 +29,4 @@ cp -r /nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/ /workspace/
 cd /nvfile-heatstorage/yxy/code/Teletron
 pip install -r requirements.txt
 
-bash examples/wan/run_wan.sh $NUM_TRAIN_GPUS
+bash examples/wan/run_wan_multi.sh $NUM_TRAIN_GPUS
