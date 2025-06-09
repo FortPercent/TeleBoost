@@ -100,7 +100,7 @@ def extra_args_provider(parser):
     group.add_argument("--distributed-vae-world-size", type=int, default=0,required=False)
 
     group = parser.add_argument_group(title='training')
-    group.add_argument("--task-type", type=str, choices=['wan_flf'], default="wan_flf")
+    group.add_argument("--task-type", type=str, choices=['wan_flf', 'wan_i2v_prone'], default="wan_flf")
     return parser
 
 # def init(
