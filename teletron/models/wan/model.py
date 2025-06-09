@@ -66,6 +66,7 @@ class WanParams:
     image_dim: int = 1280
     added_kv_proj_dim: int = 5120
     rope_max_seq_len: int = 1024
+    has_image_pos_emb: bool = False
 
 
 class WanVideoTransformer3DModel(VisionModule):
@@ -86,6 +87,7 @@ class WanVideoTransformer3DModel(VisionModule):
         self.image_dim = wan_config.image_dim
         self.added_kv_proj_dim = wan_config.added_kv_proj_dim
         self.num_layers = wan_config.num_layers
+        self.has_image_pos_emb = wan_config.has_image_pos_emb
 
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         config.hidden_size = self.hidden_size
@@ -104,6 +106,7 @@ class WanVideoTransformer3DModel(VisionModule):
             if isinstance(config.attention_dropout, tuple)
             else config.attention_dropout
         )
+        config.has_image_pos_emb = self.has_image_pos_emb
         transformer_config = config
 
         super().__init__(transformer_config)
@@ -147,7 +150,8 @@ class WanVideoTransformer3DModel(VisionModule):
             nn.SiLU(), nn.Linear(self.inner_dim, self.inner_dim * 6)
         )
 
-        self.img_emb = MLP(self.image_dim, self.inner_dim)
+        # if self.has_image_input: TODO, align
+        self.img_emb = MLP(self.image_dim, self.inner_dim, has_image_pos_emb=self.has_image_pos_emb)
         self.freqs = precompute_freqs_cis_3d(self.attention_head_dim)
 
         # 3. Transformer blocks
