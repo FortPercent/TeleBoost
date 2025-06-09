@@ -34,6 +34,7 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 echo '$WORLD_SIZE' $WORLD_SIZE
 
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_30
 # CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_20
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
