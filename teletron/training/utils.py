@@ -66,6 +66,8 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
 
 def unpack_tensors(packed_tensor, intervals):
     token_length = int(packed_tensor[0:1].item())
+    token_length = 512
+    print("!!!!!!!!!!!!consumer token_length", token_length)
     text_feature = packed_tensor[intervals[1]:intervals[2]]
     rest_features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(3, len(intervals))])
     return (token_length, text_feature,) + rest_features

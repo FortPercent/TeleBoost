@@ -55,6 +55,7 @@ def pack_tensors(tensors_to_flatten):
     context_dim = context_tensor.size(2)
     # [context, img_clip_feature, img_emb_y, latents]
     token_length = context_tensor.size(1)
+    print("!!!!!!!!!!!!1producer token_length", token_length)
 
     t_length = torch.empty(1, dtype=torch.bfloat16, device=torch.cuda.current_device())
     t_length[0] = token_length
