@@ -8,7 +8,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yuc/teletron-wan/Megatron_wxe
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yuc/teletron-wan/Megatron_wxe
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/t2v/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
@@ -68,7 +69,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     # # --debug
     # --use-cpu-initialization
-    --task-type wan_flf
+    --task-type wan_i2v_prone
     --micro-batch-size ${MBS}
     # --global-batch-size ${GBS}
     --train-iters 10000
@@ -109,7 +110,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 100
     --eval-interval 10000 
     # --save $CHECKPOINT_PATH 
-    # --load $CHECKPOINT_PATH 
+    --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 

@@ -100,12 +100,9 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
         batch=dict(data)
         dtype_wan = torch.bfloat16
         
-        image_size = list(data['images'].size())
-        # TODO: dirty code to fix frames
-        image_size[1] = 81
-        #print("image_size: ", image_size)
-        #raise NotImplementedError("image_size: ", image_size)
-        #
+        image_size = data['images'].size()
+        # image_size[1] = 81
+        
 
         args = get_args()
         if args.distributed_vae:
@@ -135,7 +132,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
             token_length, context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals)
             context = context.view(1, token_length, transformer_dim)
             clip_feature = clip_feature.view(1, token_length+2, 1280)
-            img_y = img_y.view(1, img_dim, image_size[1]//frame_scale + 1, image_size[3]//image_scale, image_size[4]//image_scale)
+            img_y = img_y.view(1, img_dim, ( image_size[1]//frame_scale + 1), image_size[3]//image_scale, image_size[4]//image_scale)
             latents = latents.view(1, video_dim, image_size[1]//frame_scale + 1, image_size[3]//image_scale, image_size[4]//image_scale)
         else:
             # TODO: remove use fix data
