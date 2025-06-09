@@ -59,7 +59,7 @@ class WanParams:
     text_dim: int = 4096
     freq_dim: int = 256
     ffn_dim: int = 13824
-    num_layers: int = 30
+    num_layers: int = 1
     cross_attn_norm: bool = True
     qk_norm: Optional[str] = "rms_norm_across_heads"
     eps: float = 1e-6
@@ -314,10 +314,12 @@ class WanVideoTransformer3DModel(VisionModule):
                 length = length + pad_size
             set_target_length(length)
             x = pad_for_context_parallel(x, 1)
-            freqs_cos,freqs_sin=freqs
-            freqs_cos = pad_for_context_parallel(freqs_cos, 0)
-            freqs_sin = pad_for_context_parallel(freqs_sin, 0)
-            freqs=(freqs_cos,freqs_sin)
+            # import pdb; pdb.set_trace()
+            # freqs_cos,freqs_sin=freqs
+            # freqs_cos = pad_for_context_parallel(freqs_cos, 0)
+            # freqs_sin = pad_for_context_parallel(freqs_sin, 0)
+            freqs = pad_for_context_parallel(freqs, 0)
+            # freqs=(freqs_cos,freqs_sin)
 
             from teletron.core.tensor_parallel.mappings import (
                 split_forward_gather_backward,
