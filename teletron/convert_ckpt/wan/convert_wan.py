@@ -92,7 +92,7 @@ def get_element_from_dict_by_path(d, path):
 # return
 
 
-def get_vast_wan_state_dict():
+def get_vast_wan_state_dict(dit_path):
     from vast.models.dit.wan_dit import ModelManager
     from vast.pipelines.wan.wan_video import WanVideoPipeline
 
@@ -103,13 +103,15 @@ def get_vast_wan_state_dict():
     image_encoder_path = (
         "/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
     )
-    dit_path = "/workspace/Wan2___1-FLF2V-14B-480P-init"
+    #dit_path = "/workspace/Wan2___1-FLF2V-14B-480P-init"
 
     model_path = [text_encoder_path, vae_path, image_encoder_path]
     dit_path_all = [
-        os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".safetensors")
+        os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth")
     ]
+
     dit_path_all = sorted(dit_path_all)
+    
 
     model_path.append(dit_path_all)
     model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
@@ -494,7 +496,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # pipe = WanVideoPipeline.from_model_manager(model_manager)
 
     state_dict_dit, state_dict_vae, state_dict_text_encoder, state_dict_image_encoder = (
-        get_vast_wan_state_dict()
+        get_vast_wan_state_dict(args.load_path)
     )
     # state_dict_dit ,state_dict_vae, state_dict_text_encoder, state_dict_image_encoder = get_megatron_wan_state_dict(args)
 
