@@ -34,6 +34,8 @@ def load_config_vast():
         from config.hunyuanvideo_t2i_wanvae import config
     elif args.task_type == "wan_flf":
         from config.wan_flf import config
+    elif args.task_type == "wan_i2v_prone":
+        from config.prone10_lowerlr import config
     else:
         return None
     config_vast = load_config(config)
