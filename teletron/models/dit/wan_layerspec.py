@@ -104,7 +104,6 @@ class GateModule(nn.Module):
         super().__init__()
 
     def forward(self, x, gate, residual):
-        gate * residual
         return x + gate * residual
     
 
