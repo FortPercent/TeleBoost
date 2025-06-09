@@ -3,7 +3,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
@@ -34,9 +34,7 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
 
-CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1
-#CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_30
-# CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_20
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
