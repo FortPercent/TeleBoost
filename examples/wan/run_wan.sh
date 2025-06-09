@@ -109,7 +109,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 100
     --eval-interval 10000 
     # --save $CHECKPOINT_PATH 
-    --load $CHECKPOINT_PATH 
+    # --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
