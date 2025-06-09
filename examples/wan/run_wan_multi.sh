@@ -69,7 +69,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     # # --debug
     # --use-cpu-initialization
-    --task-type wan_flf
+    --task-type wan_i2v_prone
     --micro-batch-size ${MBS}
     # --global-batch-size ${GBS}
     --train-iters 30000
@@ -77,7 +77,7 @@ TRAINING_ARGS=(
     --init-method-std 0.006 
     --clip-grad 0.0
     --bf16
-    --lr 1e-6
+    --lr 1e-5
     --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full 

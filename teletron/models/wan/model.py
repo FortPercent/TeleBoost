@@ -308,7 +308,7 @@ class WanVideoTransformer3DModel(VisionModule):
         if mpu.get_context_parallel_world_size() > 1:
             length = x.shape[1]
             set_origin_length(length)
-            eq_parallel_world_size = mpu.get_context_parallel_world_size()
+            seq_parallel_world_size = mpu.get_context_parallel_world_size()
             if length % seq_parallel_world_size != 0:
                 pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
                 length = length + pad_size
