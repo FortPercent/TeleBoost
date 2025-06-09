@@ -13,6 +13,7 @@ from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from teletron.core.tensor_parallel.mappings import split_forward_gather_backward, gather_forward_split_backward
+from teletron.core.context_parallel.pad import pad_for_context_parallel, remove_pad_for_context_parallel, remove_pad_with_encoder_for_context_parallel
 import torch.nn as nn
 from teletron.core.process_groups_config import ModelCommProcessGroups
 
@@ -236,6 +237,10 @@ class WanSelfAttention(Attention):
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
             key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
             value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
+            query,key,value = map(
+                lambda x: remove_pad_for_context_parallel(x, dim=2),
+                [query,key,value]
+            )
             torch.cuda.empty_cache()
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
@@ -276,6 +281,7 @@ class WanSelfAttention(Attention):
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
             )  # b img_seq sub_n d
+            hidden_states = pad_for_context_parallel(hidden_states, 1)
             torch.cuda.empty_cache()
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()
         hidden_states = self.linear_proj(hidden_states)
