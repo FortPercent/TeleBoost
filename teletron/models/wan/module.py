@@ -27,7 +27,7 @@ class WanImageEmbedding(torch.nn.Module):
         return hidden_states
 
 class MLP(torch.nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, has_image_pos_emb):
         super().__init__()
         self.proj = torch.nn.Sequential(
             nn.LayerNorm(in_dim),
@@ -36,10 +36,13 @@ class MLP(torch.nn.Module):
             nn.Linear(in_dim, out_dim),
             nn.LayerNorm(out_dim)
         )
-        self.emb_pos = torch.nn.Parameter(torch.zeros((1, 514, 1280)))
+        self.has_image_pos_emb = has_image_pos_emb
+        if has_image_pos_emb:
+            self.emb_pos = torch.nn.Parameter(torch.zeros((1, 514, 1280)))
 
     def forward(self, x):
-        x = x + self.emb_pos.to(dtype=x.dtype, device=x.device)
+        if self.has_image_pos_emb:
+            x = x + self.emb_pos.to(dtype=x.dtype, device=x.device)
         return self.proj(x)
 class WanTimeTextImageEmbedding(nn.Module):
     def __init__(
