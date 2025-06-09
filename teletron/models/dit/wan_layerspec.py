@@ -104,6 +104,7 @@ class GateModule(nn.Module):
         super().__init__()
 
     def forward(self, x, gate, residual):
+        gate * residual
         return x + gate * residual
     
 
@@ -170,6 +171,9 @@ class WanDiTLayer(TransformerLayer):
         norm1_out = self.norm1(x.float())
         #norm1_out = torch.ones_like(norm1_out)
         input_x = modulate(norm1_out, shift_msa, scale_msa)
+        print("x",x.shape)
+        print("gate_msa",gate_msa.shape)
+        print("input_x",input_x.shape)
         x = self.gate(x, gate_msa, self.self_attention(
             hidden_states=input_x.bfloat16(),
             rotary_pos_emb=freqs,
@@ -184,6 +188,9 @@ class WanDiTLayer(TransformerLayer):
         #norm3_out = torch.ones_like(norm3_out)
         input_x = modulate(norm3_out, shift_mlp, scale_mlp)
         ff_output = self.mlp(input_x.bfloat16())
+        print("x",x.shape)
+        print("ff_output",ff_output.shape)
+        print("gate_mlp",gate_mlp.shape)
         x = self.gate(x, gate_mlp, ff_output)
         return x
         
