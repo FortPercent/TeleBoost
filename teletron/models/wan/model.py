@@ -313,7 +313,7 @@ class WanVideoTransformer3DModel(VisionModule):
                 pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
                 length = length + pad_size
             set_target_length(length)
-            hidden_states = pad_for_context_parallel(hidden_states, 1)
+            x = pad_for_context_parallel(x, 1)
             freqs_cos,freqs_sin=freqs
             freqs_cos = pad_for_context_parallel(freqs_cos, 0)
             freqs_sin = pad_for_context_parallel(freqs_sin, 0)
