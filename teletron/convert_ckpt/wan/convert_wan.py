@@ -107,7 +107,7 @@ def get_vast_wan_state_dict(dit_path):
 
     model_path = [text_encoder_path, vae_path, image_encoder_path]
     dit_path_all = [
-        os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth")
+        os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth") or f.endswith(".safetensors")
     ]
 
     dit_path_all = sorted(dit_path_all)
@@ -137,6 +137,9 @@ def update_params_with_identical_weights(params_dict, state_dict, weight_keys):
     for ori_key in weight_keys:
         if ori_key in state_dict:  # 确保 key 在 state_dict 中存在
             params_dict[ori_key] = state_dict[ori_key]
+        # dirty code for pos
+        # elif "emb_pos" in ori_key:
+        #     params_dict[ori_key] = torch.zeros((1, 514, 1280), dtype=torch.bfloat16)
 
 
 def update_dit_params(state_dict_dit, args=None):
@@ -440,7 +443,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained(args.hf_ckpt_path)
-    config.num_layers = 30 # TODO
+    config.num_layers = 30  # TODO
 
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
