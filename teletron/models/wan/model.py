@@ -314,10 +314,12 @@ class WanVideoTransformer3DModel(VisionModule):
                 length = length + pad_size
             set_target_length(length)
             x = pad_for_context_parallel(x, 1)
-            freqs_cos,freqs_sin=freqs
-            freqs_cos = pad_for_context_parallel(freqs_cos, 0)
-            freqs_sin = pad_for_context_parallel(freqs_sin, 0)
-            freqs=(freqs_cos,freqs_sin)
+            # import pdb; pdb.set_trace()
+            # freqs_cos,freqs_sin=freqs
+            # freqs_cos = pad_for_context_parallel(freqs_cos, 0)
+            # freqs_sin = pad_for_context_parallel(freqs_sin, 0)
+            freqs = pad_for_context_parallel(freqs, 0)
+            # freqs=(freqs_cos,freqs_sin)
 
             from teletron.core.tensor_parallel.mappings import (
                 split_forward_gather_backward,

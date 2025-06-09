@@ -238,7 +238,7 @@ class WanSelfAttention(Attention):
             key = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), key, 2, 1)
             value = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), value, 2, 1)
             query,key,value = map(
-                lambda x: remove_pad_for_context_parallel(x, dim=2),
+                lambda x: remove_pad_for_context_parallel(x, dim=1),
                 [query,key,value]
             )
             torch.cuda.empty_cache()
@@ -278,10 +278,10 @@ class WanSelfAttention(Attention):
 
         # if mpu.get_context_parallel_group() is not None:
         if mpu.get_context_parallel_world_size() > 1:
+            hidden_states = pad_for_context_parallel(hidden_states, 2)
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
             )  # b img_seq sub_n d
-            hidden_states = pad_for_context_parallel(hidden_states, 1)
             torch.cuda.empty_cache()
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3).contiguous()
         hidden_states = self.linear_proj(hidden_states)
@@ -464,10 +464,7 @@ class WanCrossAttention(Attention):
         if mpu.get_context_parallel_world_size() > 1:
             from yunchang.comm.all_to_all import SeqAllToAll4D
             query = SeqAllToAll4D.apply(mpu.get_context_parallel_group(), query, 2, 1)
-            query = map(
-                lambda x: remove_pad_for_context_parallel(x, dim=2),
-                [query]
-            )
+            query = remove_pad_for_context_parallel(query, dim=1)
             value = split_forward_gather_backward(
                 value, mpu.get_context_parallel_group(), dim=2, grad_scale="down"
             ) 
@@ -521,7 +518,7 @@ class WanCrossAttention(Attention):
             hidden_states = hidden_states + hidden_states_img
         # # if mpu.get_context_parallel_group() is not None:
         if mpu.get_context_parallel_world_size() > 1:
-            hidden_states = pad_for_context_parallel(hidden_states, 1)
+            hidden_states = pad_for_context_parallel(hidden_states, 2)
             hidden_states = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), hidden_states, 2, 1
             )
