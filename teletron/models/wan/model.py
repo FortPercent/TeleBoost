@@ -36,6 +36,8 @@ from teletron.models.wan.module import (
     MLP,
 )
 
+from teletron.core.context_parallel.pad import pad_for_context_parallel, remove_pad_for_context_parallel, set_origin_length, set_target_length
+
 from torch import nn
 import math
 from diffusers.utils import logging
@@ -304,18 +306,19 @@ class WanVideoTransformer3DModel(VisionModule):
         # if encoder_hidden_states_image is not None:
         #     encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
         if mpu.get_context_parallel_world_size() > 1:
-            # length = x.shape[1]
-            # set_origin_length(length)
-            # eq_parallel_world_size = mpu.get_context_parallel_world_size()
-            # if length % seq_parallel_world_size != 0:
-            #     pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
-            #     length = length + pad_size
-            # set_target_length(length)
-            # hidden_states = pad_for_context_parallel(hidden_states, 1)
-            # freqs_cos,freqs_sin=freqs
-            # freqs_cos = pad_for_context_parallel(freqs_cos, 0)
-            # freqs_sin = pad_for_context_parallel(freqs_sin, 0)
-            # freqs=(freqs_cos,freqs_sin)
+            length = x.shape[1]
+            set_origin_length(length)
+            eq_parallel_world_size = mpu.get_context_parallel_world_size()
+            if length % seq_parallel_world_size != 0:
+                pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
+                length = length + pad_size
+            set_target_length(length)
+            hidden_states = pad_for_context_parallel(hidden_states, 1)
+            freqs_cos,freqs_sin=freqs
+            freqs_cos = pad_for_context_parallel(freqs_cos, 0)
+            freqs_sin = pad_for_context_parallel(freqs_sin, 0)
+            freqs=(freqs_cos,freqs_sin)
+
             from teletron.core.tensor_parallel.mappings import (
                 split_forward_gather_backward,
                 gather_forward_split_backward,
@@ -346,6 +349,7 @@ class WanVideoTransformer3DModel(VisionModule):
             hidden_states = gather_forward_split_backward(
                 hidden_states, mpu.get_context_parallel_group(), dim=1, grad_scale="up"
             )
+            hidden_states = remove_pad_for_context_parallel(hidden_states, 1)
 
         shift, scale = (self.scale_shift_table.to(dtype=t.dtype, device=t.device) + t).chunk(2, dim=1)
         norm_out_temp = self.norm_out(hidden_states.float())
