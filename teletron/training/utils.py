@@ -64,14 +64,15 @@ def get_batch_on_this_tp_rank_vast(data_iterator):
     return batch
 
 
-def unpack_tensors(packed_tensor, intervals):
-    token_length = int(packed_tensor[0:1].item())
-    token_length = 512
-    print("!!!!!!!!!!!!consumer token_length", token_length)
-    text_feature = packed_tensor[intervals[1]:intervals[2]]
-    rest_features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(3, len(intervals))])
-    return (token_length, text_feature,) + rest_features
+# def unpack_tensors(packed_tensor, intervals):
+#     token_length = int(packed_tensor[0:1].item())
+#     text_feature = packed_tensor[intervals[1]:intervals[2]]
+#     rest_features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(3, len(intervals))])
+#     return (token_length, text_feature,) + rest_features
 
+def unpack_tensors(packed_tensor, intervals):
+    features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))])
+    return features
 
 
 def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
@@ -89,9 +90,6 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
     clip_dim=768
 
     if mpu.get_tensor_context_parallel_rank() == 0:
-
-        def return_cpu():
-            return "cpu"
         if data_iterator is not None:
            data = next(data_iterator)
         else:
@@ -101,44 +99,83 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
         type_info = {}
         batch=dict(data)
         dtype_wan = torch.bfloat16
-        
-        image_size = data['images'].size()
-        # image_size[1] = 81
-        
+
+        from teletron.core.parallel_state import get_comm_pair
+        comm_pair = get_comm_pair()
+
+        tensors_info = torch.empty((16), device=torch.cuda.current_device(), dtype=torch.int32)
+        req = dist.irecv(tensors_info, comm_pair.producer, tag=0)
+        req.wait()
+        print(f"size info: {tensors_info}")
 
         args = get_args()
         if args.distributed_vae:
-            token_length_size = 1
-            transformer_embedding_size = max_length* transformer_dim
-            clip_embedding_size = (max_length+2)*1280
-            first_img_embedding_size = img_dim *( image_size[1]//frame_scale + 1)*(image_size[3]//image_scale)*(image_size[4]//image_scale)
-            video_embedding_size = video_dim *( image_size[1]//frame_scale + 1)*(image_size[3]//image_scale)*(image_size[4]//image_scale)
-            
-            recv_tensor = torch.empty((token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size ), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+            transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
+            clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
+            first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
+            video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
+
+            recv_tensor = torch.empty(( transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size ), device=torch.cuda.current_device(), dtype=torch.bfloat16)
 
             intervals = [0, 
-                        token_length_size, 
-                        token_length_size + transformer_embedding_size, 
-                        token_length_size + transformer_embedding_size +clip_embedding_size,
-                        token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size,
-                        token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size 
+                        transformer_embedding_size, 
+                        transformer_embedding_size +clip_embedding_size,
+                        transformer_embedding_size +clip_embedding_size +first_img_embedding_size,
+                        transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size 
                         ]
 
-            from teletron.core.parallel_state import get_comm_pair
-            comm_pair = get_comm_pair()
+            
             
             # print("tensor shape: ", prompt_ids[0].size(1))
             req = dist.irecv(recv_tensor, comm_pair.producer, tag = 0)
             req.wait()
 
-            token_length, context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals)
-            context = context.view(1, token_length, transformer_dim)
-            clip_feature = clip_feature.view(1, token_length+2, 1280)
-            img_y = img_y.view(1, img_dim, ( image_size[1]//frame_scale + 1), image_size[3]//image_scale, image_size[4]//image_scale)
-            latents = latents.view(1, video_dim, image_size[1]//frame_scale + 1, image_size[3]//image_scale, image_size[4]//image_scale)
+            context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals)
+            context = context.view(tensors_info[0] , tensors_info[1] , tensors_info[2])
+            clip_feature = clip_feature.view(tensors_info[3] , tensors_info[4] , tensors_info[5])
+            img_y = img_y.view(tensors_info[6] , tensors_info[7] , tensors_info[8] , tensors_info[9] , tensors_info[10])
+            latents = latents.view(tensors_info[11] , tensors_info[12] , tensors_info[13] , tensors_info[14] , tensors_info[15])
         else:
-            # TODO: remove use fix data
             pass
+        
+        # image_size = data['images'].size()
+        # # image_size[1] = 81
+
+
+        
+
+        # args = get_args()
+        # if args.distributed_vae:
+        #     token_length_size = 1
+        #     transformer_embedding_size = max_length* transformer_dim
+        #     clip_embedding_size = (max_length+2)*1280
+        #     first_img_embedding_size = img_dim *( image_size[1]//frame_scale + 1)*(image_size[3]//image_scale)*(image_size[4]//image_scale)
+        #     video_embedding_size = video_dim *( image_size[1]//frame_scale + 1)*(image_size[3]//image_scale)*(image_size[4]//image_scale)
+            
+        #     recv_tensor = torch.empty((token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size ), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+
+        #     intervals = [0, 
+        #                 token_length_size, 
+        #                 token_length_size + transformer_embedding_size, 
+        #                 token_length_size + transformer_embedding_size +clip_embedding_size,
+        #                 token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size,
+        #                 token_length_size + transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size 
+        #                 ]
+
+            
+            
+        #     # print("tensor shape: ", prompt_ids[0].size(1))
+        #     req = dist.irecv(recv_tensor, comm_pair.producer, tag = 0)
+        #     req.wait()
+
+        #     token_length, context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals)
+        #     context = context.view(1, token_length, transformer_dim)
+        #     clip_feature = clip_feature.view(1, token_length+2, 1280)
+        #     img_y = img_y.view(1, img_dim, ( image_size[1]//frame_scale + 1), image_size[3]//image_scale, image_size[4]//image_scale)
+        #     latents = latents.view(1, video_dim, image_size[1]//frame_scale + 1, image_size[3]//image_scale, image_size[4]//image_scale)
+        # else:
+        #     # TODO: remove use fix data
+        #     pass
 
 
         batch["context"] = context
@@ -152,6 +189,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
             sizes_info[key] = tensor.size() if tensor is not None and isinstance(tensor, torch.Tensor)  else len(tensor)
             type_info[key] = tensor.dtype if tensor is not None and isinstance(tensor, torch.Tensor) else type(tensor)
 
+        print("sizes_info: ", sizes_info)
         # Step 2: 广播大小信息
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
         type_info = torch.distributed.broadcast_object_list([type_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
@@ -315,9 +353,6 @@ def encode_first_last_image(
     clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
-
-# def report_memory():
-
 
 def tensor2video(self, frames):
     frames = rearrange(frames, "C T H W -> T H W C")

@@ -31,8 +31,7 @@ from vast.pipelines.wan.wan_video import WanVideoPipeline
 # --- 配置参数 ---
 # 定义每个消费者将处理的Tensor数量
 NUM_ITEMS_PER_CONSUMER = 100000
-# 定义传输的Tensor形状
-TENSOR_SHAPE = (46800, 3072) # 适中的大小
+
 
 # 生产者为每个消费者维护的GPU端队列的最大容量
 MAX_QUEUE_PER_CONSUMER_ON_PRODUCER = 2 # 用户要求的队列大小
@@ -55,7 +54,6 @@ def pack_tensors(tensors_to_flatten):
     context_dim = context_tensor.size(2)
     # [context, img_clip_feature, img_emb_y, latents]
     token_length = context_tensor.size(1)
-    print("!!!!!!!!!!!!1producer token_length", token_length)
 
     t_length = torch.empty(1, dtype=torch.bfloat16, device=torch.cuda.current_device())
     t_length[0] = token_length
@@ -81,6 +79,11 @@ def pack_tensors(tensors_to_flatten):
     
     # raise NotImplementedError
 
+def get_tensors_size(tensor_list:list, device):
+    size_info = ()
+    for item in tensor_list:
+        size_info += item.size()
+    return torch.tensor(size_info, dtype=torch.int32, device=device)
 
 def producer_process(rank, world_size,build_train_valid_test_data_iterators, train_valid_test_dataset_provider, 
                 train_ds=None, ):
@@ -114,14 +117,14 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
     #print("dit_world_size: ", dit_world_size)
     producer_size = world_size - dit_world_size
     #print(f"producer nums: {producer_size}")
-    rank = rank - dit_world_size
+    # rank = rank - dit_world_size
     
     torch.manual_seed(1234)
     
-    device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() and dist.get_backend() == 'nccl' else "cpu")
+    # device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() and dist.get_backend() == 'nccl' else "cpu")
     #print(f"生产者 (Rank {rank}) 运行于设备: {device}")
     
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
     # torch.manual_seed(rank + int(time.time()))
 
     # load vae
@@ -183,45 +186,62 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
         
     #print("train_data_iterators: ", train_data_iterators)
 
-    producer_gpu_queues = {
+    consumers_data_queues = {
+        crank.consumer: collections.deque() for crank in comm_pairs
+    }
+    consumers_size_queues = {
         crank.consumer: collections.deque() for crank in comm_pairs
     }
 
     items_initiated_send_for_consumer = {crank.consumer: 0 for crank in comm_pairs}
 
-    send_requests_in_flight = []
+    send_size_in_flight = []
+    send_features_in_flight = []
 
     try:
         while any(items_initiated_send_for_consumer[crank.consumer] < NUM_ITEMS_PER_CONSUMER for crank in comm_pairs):
             # time.sleep(5)
             # continue
         # while True:
-            new_send_requests_in_flight = []
-            for req_list, cr, item_idx_req, tensor2send in send_requests_in_flight:
-                if req_list.is_completed() is True:
 
-                    del tensor2send
+            # new_send_size_in_flight = []
+            # for req_list, cr, item_idx_req, tensor2send in send_size_in_flight:
+            #     if req_list.is_completed() is True:
+
+            #         del tensor2send
                     
+            #     else:
+            #         new_send_size_in_flight.append((req_list, cr, item_idx_req, tensor2send))
+            # send_size_in_flight = new_send_size_in_flight
+
+            new_send_size_in_flight = []
+            for req, cr, item_idx_req, size2send in send_size_in_flight:
+                if req.is_completed() is True:
+                    del size2send
+                    tensor2send = consumers_data_queues[cr].popleft()
+                    req_data = dist.isend(tensor=tensor2send, dst=cr, tag=1)
+                    send_features_in_flight.append((req_data, cr, item_idx_req, tensor2send))
                 else:
-                    new_send_requests_in_flight.append((req_list, cr, item_idx_req, tensor2send))
-            send_requests_in_flight = new_send_requests_in_flight
+                    new_send_size_in_flight.append((req, cr, item_idx_req, size2send))
+            send_size_in_flight = new_send_size_in_flight
 
 
-            for current_consumer_rank in comm_pairs:
+            for current_comm_pair in comm_pairs:
      
-                items_in_queue = len(producer_gpu_queues[current_consumer_rank.consumer])
+                items_in_queue = len(consumers_data_queues[current_comm_pair.consumer])
                 
-                total_managed_for_consumer = items_initiated_send_for_consumer[current_consumer_rank.consumer] + items_in_queue
-                # print(f"Rank:{current_consumer_rank.consumer}, items_in_queue: {items_in_queue}", flush=True)
+                total_managed_for_consumer = items_initiated_send_for_consumer[current_comm_pair.consumer] + items_in_queue
+                # print(f"Rank:{current_comm_pair.consumer}, items_in_queue: {items_in_queue}", flush=True)
                 
                 if items_in_queue < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
                     
-                    data = next(train_data_iterators[current_consumer_rank.consumer]) 
+                    data = next(train_data_iterators[current_comm_pair.consumer]) 
                     batch = dict(data)
                     prompt_emb, image_emb, latents = get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder)
                     context = prompt_emb['context']
                     img_clip_feature = image_emb["clip_feature"]
                     img_emb_y = image_emb["y"]
+                    consumer_size_info = get_tensors_size((context, img_clip_feature, img_emb_y, latents), device=torch.cuda.current_device())
                     tensor_to_send = pack_tensors([context, img_clip_feature, img_emb_y, latents])
 
 
@@ -241,34 +261,42 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                     #print("t2 shape: ", t2.shape)
                     #print("t_length: ", t_length)
                     #print("t3 shape: ", t3.shape)
+                    consumers_size_queues[current_comm_pair.consumer].append(consumer_size_info)
+                    consumers_data_queues[current_comm_pair.consumer].append(tensor_to_send)
+                    # print(f"Rank{current_comm_pair.consumer}:prompt: {t2[10*4096: 10*4096+10]}, {t2.shape}, t4: {t4.shape}", flush=True)
+                    # print(f"Rank{current_comm_pair.consumer}: first img: {t4[:5]}, prompt{t2[52:57]} lenght: {t_length[0]}, clip{t3[:5]}, latents{t1[:5]}")
+                    #print(f"Consumer rank:{current_comm_pair.consumer}, prompt: {result[0]}", flush=True)
                     
-                    producer_gpu_queues[current_consumer_rank.consumer].append(tensor_to_send)
-                    # print(f"Rank{current_consumer_rank.consumer}:prompt: {t2[10*4096: 10*4096+10]}, {t2.shape}, t4: {t4.shape}", flush=True)
-                    # print(f"Rank{current_consumer_rank.consumer}: first img: {t4[:5]}, prompt{t2[52:57]} lenght: {t_length[0]}, clip{t3[:5]}, latents{t1[:5]}")
-                    #print(f"Consumer rank:{current_consumer_rank.consumer}, prompt: {result[0]}", flush=True)
-                    
-            for current_consumer_rank in comm_pairs:
+            for current_comm_pair in comm_pairs:
                 outstanding_sends_for_this_consumer = sum(
-                    1 for _, cr, _, _ in send_requests_in_flight if cr == current_consumer_rank.consumer
+                    1 for _, cr, _, _ in send_size_in_flight if cr == current_comm_pair.consumer
                 )
-                #print(f"Rank:{current_consumer_rank.consumer}, outstanding_sends_for_this_consumer: {outstanding_sends_for_this_consumer}", flush=True)
+                #print(f"Rank:{current_comm_pair.consumer}, outstanding_sends_for_this_consumer: {outstanding_sends_for_this_consumer}", flush=True)
 
-                if producer_gpu_queues[current_consumer_rank.consumer] and \
+                if consumers_size_queues[current_comm_pair.consumer] and \
                     outstanding_sends_for_this_consumer < MAX_OUTSTANDING_SENDS_PER_CONSUMER:
                     
-                    batch_to_send = producer_gpu_queues[current_consumer_rank.consumer].popleft()
-                    current_item_idx_to_send = items_initiated_send_for_consumer[current_consumer_rank.consumer]
-                    
-                    req = dist.isend(tensor=batch_to_send, dst=current_consumer_rank.consumer, tag=1)
-                    # print(f"Rank{current_consumer_rank.producer}发送数据到Rank{current_consumer_rank.consumer}, tensor shape: {(batch_to_send.size(0) - 2995200 - 769)/4096}")
+                    size_to_send = consumers_size_queues[current_comm_pair.consumer].popleft()
+                    current_item_idx_to_send = items_initiated_send_for_consumer[current_comm_pair.consumer]
+                    print(f"Rank{current_comm_pair.producer}发送数据到Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
+                    req = dist.isend(tensor=size_to_send, dst=current_comm_pair.consumer, tag=1)
+                    # print(f"Rank{current_comm_pair.producer}发送数据到Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
                     #print("prompt shape: ", (batch_to_send.size(0) - 2995200 - 768 - 1)/4096)
-                    send_requests_in_flight.append((req, current_consumer_rank.consumer, current_item_idx_to_send, batch_to_send))
-                    items_initiated_send_for_consumer[current_consumer_rank.consumer] += 1
+                    send_size_in_flight.append((req, current_comm_pair.consumer, current_item_idx_to_send, size_to_send))
+                    items_initiated_send_for_consumer[current_comm_pair.consumer] += 1
+
+                new_send_features_in_flight = []
+                for req, cr, item_idx_req, tensor2send in send_features_in_flight:
+                    if req.is_completed() is True:
+                        del tensor2send
+                    else:
+                        new_send_features_in_flight.append((req, cr, item_idx_req, tensor2send))
+                send_features_in_flight = new_send_features_in_flight
 
             time.sleep(0.05)
 
 
-        for req_obj, cr, item_idx_req,_ in send_requests_in_flight:
+        for req_obj, cr, item_idx_req,_ in send_size_in_flight:
             req_obj.wait()
 
         dist.barrier(group=get_world_group())
