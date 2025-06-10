@@ -7,8 +7,8 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_t
 
 HF_CKPT_PATH="/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer"
 SOURCE_CKPT_PATH="/workspace/Wan2___1-FLF2V-14B-480P-init"
-SOURCE_CKPT_PATH="/nvfile-heatstorage/yxy/ccg/tele_pipe/ckpts"
-TARGET_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_30"
+SOURCE_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_30_step100/origin"
+TARGET_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_30_step100"
 #TARGET_CKPT_PATH="/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_tp1_pp1_layer_1"
 TP=1
 PP=1
