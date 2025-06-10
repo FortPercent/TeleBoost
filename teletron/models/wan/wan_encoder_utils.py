@@ -63,11 +63,13 @@ def encode_image(
     image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
     msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
-    msk[:, 1:] = 0
+    # print("msk create shape:", 1, num_frames, height // 8, width // 8 ) # 1, 81, 56, 98
+    msk[:, 1:] = 0 # 1, 1:81, 56, 98
     msk = torch.concat(
         [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
-    )
-    msk = msk.view(1, msk.shape[1] // 4, 4, height // 8, width // 8)
+    ) # 1, 4, 56, 98; # 1, 80, 56, 98 => 1, 84, 56, 98
+    # print("msk view shape:", 1, msk.shape[1] // 4, 4, height // 8, width // 8)
+    msk = msk.view(1, msk.shape[1] // 4, 4, height // 8, width // 8) # 1, 21, 4, 56, 98
     msk = msk.transpose(1, 2)[0]
     vae_input = torch.concat(
         [image.transpose(0, 1), torch.zeros(3, num_frames - 1, height, width).to(image.device)],

@@ -106,7 +106,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
         tensors_info = torch.empty((16), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer, tag=0)
         req.wait()
-        print(f"size info: {tensors_info}")
+        # print(f"size info: {tensors_info}")
 
         args = get_args()
         if args.distributed_vae:
