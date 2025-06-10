@@ -189,7 +189,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
             sizes_info[key] = tensor.size() if tensor is not None and isinstance(tensor, torch.Tensor)  else len(tensor)
             type_info[key] = tensor.dtype if tensor is not None and isinstance(tensor, torch.Tensor) else type(tensor)
 
-        print("sizes_info: ", sizes_info)
+        # print("sizes_info: ", sizes_info)
         # Step 2: 广播大小信息
         sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
         type_info = torch.distributed.broadcast_object_list([type_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())

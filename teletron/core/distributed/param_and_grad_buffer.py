@@ -20,7 +20,7 @@ def finish_grad_sync(self):
         report_grad(self.buckets)
     
 
-    print("finish grad sync")
+    # print("finish grad sync")
     for bucket in self.buckets:
         #bucket.grad_data = bucket.grad_data.to(torch.float32)
         bucket.finish_grad_sync()
