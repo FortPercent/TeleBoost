@@ -48,36 +48,12 @@ def cleanup_dist():
         print("进程组未初始化或已被销毁。")
 
 def pack_tensors(tensors_to_flatten):
-
-    max_length = 512
-    context_tensor = tensors_to_flatten[0]
-    context_dim = context_tensor.size(2)
-    # [context, img_clip_feature, img_emb_y, latents]
-    token_length = context_tensor.size(1)
-
-    t_length = torch.empty(1, dtype=torch.bfloat16, device=torch.cuda.current_device())
-    t_length[0] = token_length
-
     context_tensor = torch.flatten(tensors_to_flatten[0])
-    if max_length > token_length:
-        
-        context_tensor = torch.nn.functional.pad(context_tensor, (0, (max_length - token_length) * context_dim), value=0.0)
-
     clip_tensor = torch.flatten(tensors_to_flatten[1])
     img_tensor = torch.flatten(tensors_to_flatten[2])
     latents_tensor = torch.flatten(tensors_to_flatten[3])
-
-    result =  torch.cat((t_length,context_tensor, clip_tensor, img_tensor, latents_tensor), dim=0)
-    # print("packed tensor: ", result.shape)
+    result = torch.cat((context_tensor, clip_tensor, img_tensor, latents_tensor), dim=0)
     return result
-
-
-
-    # for item in tensors_to_flatten:
-    #     print(item.shape)
-
-    
-    # raise NotImplementedError
 
 def get_tensors_size(tensor_list:list, device):
     size_info = ()
@@ -285,13 +261,13 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                     send_size_in_flight.append((req, current_comm_pair.consumer, current_item_idx_to_send, size_to_send))
                     items_initiated_send_for_consumer[current_comm_pair.consumer] += 1
 
-                new_send_features_in_flight = []
-                for req, cr, item_idx_req, tensor2send in send_features_in_flight:
-                    if req.is_completed() is True:
-                        del tensor2send
-                    else:
-                        new_send_features_in_flight.append((req, cr, item_idx_req, tensor2send))
-                send_features_in_flight = new_send_features_in_flight
+            new_send_features_in_flight = []
+            for req, cr, item_idx_req, tensor2send in send_features_in_flight:
+                if req.is_completed() is True:
+                    del tensor2send
+                else:
+                    new_send_features_in_flight.append((req, cr, item_idx_req, tensor2send))
+            send_features_in_flight = new_send_features_in_flight
 
             time.sleep(0.05)
 
