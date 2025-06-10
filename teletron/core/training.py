@@ -48,7 +48,7 @@ def setup_model_and_optimizer_decorators(setup_model_and_optimizer):
         if args.load is not None or args.pretrained_checkpoint is not None:
             timers('load-checkpoint', log_level=0).start(barrier=True)
             args.iteration, args.num_floating_point_operations_so_far = load_checkpoint(
-                model, optimizer, opt_param_scheduler, strict=False)
+                model, optimizer, opt_param_scheduler, strict=True)
             timers('load-checkpoint').stop(barrier=True)
             timers.log(['load-checkpoint'])
         else:
