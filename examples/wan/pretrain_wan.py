@@ -60,7 +60,7 @@ class Config(dict):
 
 def get_batch(data_iterator):
     # get batches based on the TP_CP rank you are on
-    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator, 512)
+    batch = get_batch_on_this_tp_cp_rank_vast(data_iterator)
     # batch = get_batch_on_this_tp_rank_vast(data_iterator)
     return batch
 

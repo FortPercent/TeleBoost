@@ -8,11 +8,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yuc/teletron-wan/Megatron_wxe
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/t2v/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/wxe/teleai_data_tool/
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/ccg/vast2
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
@@ -34,7 +33,7 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
 
-CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1_step100
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
