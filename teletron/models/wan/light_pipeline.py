@@ -28,21 +28,21 @@ class TeletronWanPipeline(WanVideoPipeline):
         # self.pre_process = mpu.is_pipeline_first_stage()
         self.post_process = True
         self.device = torch.cuda.current_device()
-        self.text_encoder = WanTextEncoder()
-        self.image_encoder = WanImageEncoder()
-        self.prompter = WanPrompter()
-        self.prompter.fetch_models(self.text_encoder)
-        self.prompter.fetch_tokenizer(tokenizer_path)
+        # self.text_encoder = WanTextEncoder()
+        # self.image_encoder = WanImageEncoder()
+        # self.prompter = WanPrompter()
+        # self.prompter.fetch_models(self.text_encoder)
+        # self.prompter.fetch_tokenizer(tokenizer_path)
 
-        self.vae = WanVideoVAE().to(device=torch.cuda.current_device())
-        self.tiler_kwargs = {
-            "tiled": wan_config.get("tiled", True),
-            "tile_size": wan_config.get("tile_size", (34, 34)),
-            "tile_stride": wan_config.get("tile_stride", (18, 16)),
-        }
-        self.vae.requires_grad_(False)
-        self.text_encoder.requires_grad_(False)
-        self.image_encoder.requires_grad_(False)
+        # self.vae = WanVideoVAE().to(device=torch.cuda.current_device())
+        # self.tiler_kwargs = {
+        #     "tiled": wan_config.get("tiled", True),
+        #     "tile_size": wan_config.get("tile_size", (34, 34)),
+        #     "tile_stride": wan_config.get("tile_stride", (18, 16)),
+        # }
+        # self.vae.requires_grad_(False)
+        # self.text_encoder.requires_grad_(False)
+        # self.image_encoder.requires_grad_(False)
         
         wanConfig = WanParams()
         self.config=config
@@ -67,67 +67,73 @@ class TeletronWanPipeline(WanVideoPipeline):
     #         return self.forward(batch)
 
     def __call__(self, batch):
-        with torch.no_grad():
-            prompt_emb = self.encode_prompt(batch["dense_prompt"][0])
-            latents = self.encode_video(
-                rearrange(batch["images"], "b t c h w -> b c t h w").to(
-                    dtype=self.dtype, device=torch.cuda.current_device()
-                ),
-                **self.tiler_kwargs,
-            )[0]
+        # with torch.no_grad():
+        #     prompt_emb = self.encode_prompt(batch["dense_prompt"][0])
+        #     latents = self.encode_video(
+        #         rearrange(batch["images"], "b t c h w -> b c t h w").to(
+        #             dtype=self.dtype, device=torch.cuda.current_device()
+        #         ),
+        #         **self.tiler_kwargs,
+        #     )[0]
 
-            _, num_frames, _, height, width = batch["images"].shape
-            if "raw_last_image" in batch:
-                raw_first_image = batch["raw_first_image"]
-                pil_first_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                raw_last_image = batch['raw_last_image']
-                pil_last_image = to_pil_image(
-                    raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                )
-                image_emb = self.encode_first_last_image(
-                    pil_first_image, pil_last_image, num_frames, height, width
-                )
-            else:
-                raw_first_image = batch["raw_first_image"]
-                pil_image = to_pil_image(
-                    raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-                ).cuda()
-                image_emb = self.encode_image(pil_image, num_frames, height, width)
+        #     _, num_frames, _, height, width = batch["images"].shape
+        #     if "raw_last_image" in batch:
+        #         raw_first_image = batch["raw_first_image"]
+        #         pil_first_image = to_pil_image(
+        #             raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         raw_last_image = batch['raw_last_image']
+        #         pil_last_image = to_pil_image(
+        #             raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         image_emb = self.encode_first_last_image(
+        #             pil_first_image, pil_last_image, num_frames, height, width
+        #         )
+        #     else:
+        #         raw_first_image = batch["raw_first_image"]
+        #         pil_image = to_pil_image(
+        #             raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        #         )
+        #         image_emb = self.encode_image(pil_image, num_frames, height, width)
         
         
-        latents = latents.unsqueeze(0).to(
-            dtype=self.dtype, device=torch.cuda.current_device()
-        )
+        # latents = latents.unsqueeze(0).to(
+        #     dtype=self.dtype, device=torch.cuda.current_device()
+        # )
 
-        # Data
-        prompt_emb["context"] = prompt_emb["context"][0].to(
-            dtype=self.dtype, device=torch.cuda.current_device()
-        )
-        prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
+        # # Data
+        # prompt_emb["context"] = prompt_emb["context"][0].to(
+        #     dtype=self.dtype, device=torch.cuda.current_device()
+        # )
+        # prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
 
-        if "clip_feature" in image_emb:
-            image_emb["clip_feature"] = (
-                image_emb["clip_feature"][0]
-                .to(dtype=self.dtype, device=torch.cuda.current_device())
-                .unsqueeze(0)
-            )
-        if "y" in image_emb:
-            image_emb["y"] = (
-                image_emb["y"][0]
-                .to(dtype=self.dtype, device=torch.cuda.current_device())
-                .unsqueeze(0)
-            )
+        # if "clip_feature" in image_emb:
+        #     image_emb["clip_feature"] = (
+        #         image_emb["clip_feature"][0]
+        #         .to(dtype=self.dtype, device=torch.cuda.current_device())
+        #         .unsqueeze(0)
+        #     )
+        # if "y" in image_emb:
+        #     image_emb["y"] = (
+        #         image_emb["y"][0]
+        #         .to(dtype=self.dtype, device=torch.cuda.current_device())
+        #         .unsqueeze(0)
+        #     )
 
-        saved_input = torch.load("/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/temp_input/inputdict.pt", map_location=f"cuda:{torch.cuda.current_device()}")
-        noisy_latents = saved_input['noisy_latents']
-        prompt_emb = saved_input['prompt_emb']
-        timestep = saved_input['timestep']
-        extra_input = saved_input['extra_input']
-        image_emb = saved_input['image_emb']
-        latents = noisy_latents
+        # saved_input = torch.load("/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/temp_input/inputdict.pt", map_location=f"cuda:{torch.cuda.current_device()}")
+        # noisy_latents = saved_input['noisy_latents']
+        # prompt_emb = saved_input['prompt_emb']
+        # timestep = saved_input['timestep']
+        # extra_input = saved_input['extra_input']
+        # image_emb = saved_input['image_emb']
+        # latents = noisy_latents
 
+        latents = batch["latents"]
+        prompt_emb = {}
+        prompt_emb["context"] = batch["context"]
+        image_emb = {}
+        image_emb["clip_feature"] = batch["clip_feature"]
+        image_emb["y"] = batch["image_emb_y"]
 
         noise = torch.randn_like(latents)
         timestep_id = torch.randint(0, self.flow_scheduler.num_train_timesteps, (1,))
