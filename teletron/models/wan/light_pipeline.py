@@ -47,7 +47,7 @@ class TeletronWanPipeline(WanVideoPipeline):
         wanConfig = WanParams()
         self.config=config
         self.wan_config = wanConfig
-        wanConfig.num_layers = 1
+        # wanConfig.num_layers = 1
 
         self.transformer = TeletronWanModel(wanConfig)
         # from tensorwatch import watch_module_forward_backward
