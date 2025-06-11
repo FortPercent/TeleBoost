@@ -24,24 +24,7 @@ log = logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True),logging.FileHandler("convert.log")]
 )or logging.getLogger(__name__)
 
-###
-@torch.inference_mode()
-def get_megatron_wan_state_dict(args):
-    checkpoint_dir = args.load_path
-    latest_file = os.path.join(checkpoint_dir, "latest_checkpointed_iteration.txt")
-
-    with open(latest_file, 'r') as f:
-        iteration = f.read().strip()
-    
-    iteration_dir = os.path.join(checkpoint_dir, iteration)
-    if not iteration.startswith('release'):
-        print(f"Not a release checkpoint: {iteration}")
-        return None
-    model_file = os.path.join(iteration_dir, "mp_rank_00", "model_optim_rng.pt")
-    
-    checkpoint = torch.load(model_file, map_location='cpu', weights_only=False)
-    return [checkpoint['model']]
-        
+      
 @torch.inference_mode()
 def get_vast_wan_state_dict(args):
     from vast.models.dit.wan_dit import ModelManager
@@ -74,11 +57,55 @@ def get_vast_wan_state_dict(args):
 
 
 def convert_checkpoint_from_megatron_to_transformers(args):
-    src_dict = get_megatron_wan_state_dict(args)
-    dst_dict = [{}, {}, {}, {}]
-    update_all_params(src_dict, dst_dict)
+    
+    os.makedirs(args.save_path, exist_ok=True)
 
-    return save_to_trans_tensor(dst_dict, args)
+    sub_dirs = os.listdir(args.load_path)
+    possible_sub_dirs = ["mp_rank_00", "mp_rank_00_000"]
+    for sub_dir in possible_sub_dirs:
+        if sub_dir in sub_dirs:
+            rank0_checkpoint_name = [
+                i for i in os.listdir(os.path.join(args.load_path, sub_dir)) if 'rng' in i
+            ][0]
+            rank0_checkpoint_path = os.path.join(args.load_path, sub_dir, rank0_checkpoint_name)
+            break
+
+    print(f"Loading Megatron-LM checkpoint arguments from: {rank0_checkpoint_path}")
+    state_dict = torch.load(rank0_checkpoint_path, map_location="cpu")
+    output_state_dict = state_dict['model']
+
+    filename_pattern = 'diffusion_pytorch_model{suffix}.bin'
+    state_dict_split = split_torch_state_dict_into_shards(
+        output_state_dict, max_shard_size="50GB", filename_pattern=filename_pattern
+    )
+
+    if not os.path.exists(args.save_path):
+        os.system(f'mkdir -p {args.save_path}')
+
+    for filename, tensors in state_dict_split.filename_to_tensors.items():
+        shard = {tensor: output_state_dict[tensor].contiguous() for tensor in tensors}
+        filepath = os.path.join(args.save_path, filename)
+        torch.save(shard, filepath)
+
+    if state_dict_split.is_sharded:
+        index = {
+            "metadata": state_dict_split.metadata,
+            "weight_map": state_dict_split.tensor_to_filename,
+        }
+        with open(
+            os.path.join(args.save_path, "diffusion_pytorch_model.safetensors.index.json"), "w"
+        ) as f:
+            f.write(json.dumps(index, indent=2))
+
+        print(f"Sharded model saved successfully with index file at {args.save_path}")
+    else:
+        print(f"Model small enough, saved without sharding in {args.save_path}/{WEIGHTS_NAME}")
+
+    # config_path = '/'.join(args.load_path.split('/')[:-1])
+    # os.system("cp -rf " + config_path + "/config.json " + args.save_path)
+    print("Conversion from Megatron-LM to Transformers is done!")
+    print("Saved to: ", args.save_path)
+
 
 def convert_checkpoint_from_transformers_to_megatron(args):
     src_dict = get_vast_wan_state_dict(args)
@@ -90,6 +117,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
     # update_image_encoder_params(src_dict, dst_dict)
 
     return save_to_meg_tensor(dst_dict, args)
+
 
 def save_to_meg_tensor(dst_dict, args):
     checkpoint = args.save_path
@@ -143,27 +171,6 @@ def save_to_meg_tensor(dst_dict, args):
 
     log.info("Save all tensor")
 
-def save_to_trans_tensor(dst_dict, args):
-    checkpoint = '/nvfile-heatstorage/teleai-infra/wxy/Teletron/teletron/convert_ckpt'
-    os.makedirs(args.save_path, exist_ok=True)
-    model_names = ["transformer", "vae", "text_encoder", "image_encoder"]
-
-    for i, state_dict in enumerate(dst_dict):
-        model_path = os.path.join(args.save_path, f"{model_names[i]}.pt")
-        torch.save(state_dict, model_path)
-        log.info(f"Saved {model_names[i]} tensor to {model_path}")
-
-def update_all_params(src_dict, dst_dict):
-    import ipdb; ipdb.set_trace()
-    for key,value in src_dict[0].items():
-        if key.startswith('transformer.'):
-            dst_dict[0][key[12:]] = value
-        elif key.startswith('vae.'):
-            dst_dict[1][key[4:]] = value
-        elif key.startswith('text_encoder.'):
-            dst_dict[2][key[13:]] = value
-        elif key.startswith('image_encoder.'):
-            dst_dict[3][key[14:]] = value
 
 def update_dit_params(src_dict, dst_dict, args):
     index = 0    
@@ -309,7 +316,6 @@ def main():
     parser = add_extra_args(parser)
     args = parser.parse_args()
     log_args(args)
-
     if args.convert_checkpoint_from_megatron_to_transformers:
         convert_checkpoint_from_megatron_to_transformers(args)
     else:
