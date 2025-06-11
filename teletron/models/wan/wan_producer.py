@@ -1,7 +1,3 @@
-# train_data_iterator, valid_data_iterator, test_data_iterator \
-#             = build_train_valid_test_data_iterators(
-#                 train_valid_test_dataset_provider)
-
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -61,13 +57,20 @@ def get_tensors_size(tensor_list:list, device):
         size_info += item.size()
     return torch.tensor(size_info, dtype=torch.int32, device=device)
 
-def producer_process(rank, world_size,build_train_valid_test_data_iterators, train_valid_test_dataset_provider, 
-                train_ds=None, ):
-    # assert prompter is not None
-    # assert vae is not None
-
-    model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
-    model_path = ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
+def producer_process(
+        rank, 
+        world_size,
+        build_train_valid_test_data_iterators, 
+        train_valid_test_dataset_provider, 
+        train_ds=None, 
+    ):
+    
+    model_manager = ModelManager(torch_dtype=torch.float32, device="cpu")
+    model_path = [
+        '/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
+        '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
+        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth'
+    ]
 
     model_manager.load_models(model_path)
     pipe = WanVideoPipeline.from_model_manager(model_manager)
@@ -87,46 +90,12 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
     }
 
     args = get_args()
-    import os
-    #print(f"生产者的 world size: {world_size}")
     dit_world_size = args.dit_world_size
-    #print("dit_world_size: ", dit_world_size)
     producer_size = world_size - dit_world_size
-    #print(f"producer nums: {producer_size}")
-    # rank = rank - dit_world_size
-    
     torch.manual_seed(1234)
-    
-    # device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() and dist.get_backend() == 'nccl' else "cpu")
-    #print(f"生产者 (Rank {rank}) 运行于设备: {device}")
-    
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
-    # torch.manual_seed(rank + int(time.time()))
-
-    # load vae
-    # vae = ImagesVAE(config['models']['vae_path'], vae_slicing=args.vae_slicing, vae_tiling=args.vae_tiling,device=device)
-
-    # tf_embed_model = PromptToTransformerEmbedding(
-    #                                             model_name=config['models']['PromptToTransformerEmbedding']['model_name'],
-    #                                             model_path = config['models']['PromptToTransformerEmbedding']['model_path'],
-    #                                             max_length=config['models']['PromptToTransformerEmbedding']['max_length'],
-    #                                             with_attention_mask=config['models']['PromptToTransformerEmbedding']['with_attention_mask'],
-    #                                             padding=config['models']['PromptToTransformerEmbedding']['padding'],
-    #                                             device=device)
-    
-    # cp_embed_model = PromptToClipEmbedding(
-    #     model_path=config['models']['clip_path'],
-    #     device=device
-    # )
-
-    #print(f"args model path: {config.models.vae_path}{config.models.transformer_path}{config.models.clip_path}")
-    #print(f"args model path: {config['models']['vae_path']}{config['models']['transformer_path']}{config['models']['clip_path']}")
-
 
     from teletron.core.parallel_state import get_comm_pair
     comm_pairs = get_comm_pair()
-    #print(f"Rank:{rank}, comm_pairs: {comm_pairs}", flush=True)
-
     consumers_data = torch.zeros(
         (len(comm_pairs), 1), dtype=int, device=torch.cuda.current_device()
     )
@@ -143,8 +112,6 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                 consumers_queue.remove(ccs_req)
         time.sleep(0.1)
 
-    #print(f"Rank{rank} consumer iteration: {consumers_data}")
-
     args.iteration = consumers_data[0][0]
 
     train_data_iterators = {comm_pair.consumer: None for comm_pair in comm_pairs}
@@ -160,8 +127,6 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                     dp_size = comm_pair.dp_size, 
                     train_ds_prev =train_ds )
         
-    #print("train_data_iterators: ", train_data_iterators)
-
     consumers_data_queues = {
         crank.consumer: collections.deque() for crank in comm_pairs
     }
@@ -176,20 +141,6 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
 
     try:
         while any(items_initiated_send_for_consumer[crank.consumer] < NUM_ITEMS_PER_CONSUMER for crank in comm_pairs):
-            # time.sleep(5)
-            # continue
-        # while True:
-
-            # new_send_size_in_flight = []
-            # for req_list, cr, item_idx_req, tensor2send in send_size_in_flight:
-            #     if req_list.is_completed() is True:
-
-            #         del tensor2send
-                    
-            #     else:
-            #         new_send_size_in_flight.append((req_list, cr, item_idx_req, tensor2send))
-            # send_size_in_flight = new_send_size_in_flight
-
             new_send_size_in_flight = []
             for req, cr, item_idx_req, size2send in send_size_in_flight:
                 if req.is_completed() is True:
@@ -201,14 +152,12 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                     new_send_size_in_flight.append((req, cr, item_idx_req, size2send))
             send_size_in_flight = new_send_size_in_flight
 
-
             for current_comm_pair in comm_pairs:
      
                 items_in_queue = len(consumers_data_queues[current_comm_pair.consumer])
                 
                 total_managed_for_consumer = items_initiated_send_for_consumer[current_comm_pair.consumer] + items_in_queue
-                # print(f"Rank:{current_comm_pair.consumer}, items_in_queue: {items_in_queue}", flush=True)
-                
+
                 if items_in_queue < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
                     
                     data = next(train_data_iterators[current_comm_pair.consumer]) 
@@ -219,45 +168,22 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
                     img_emb_y = image_emb["y"]
                     consumer_size_info = get_tensors_size((context, img_clip_feature, img_emb_y, latents), device=torch.cuda.current_device())
                     tensor_to_send = pack_tensors([context, img_clip_feature, img_emb_y, latents])
-
-
-
-                    ############### original code #############################
-                    # t1 = torch.flatten(vae(data['images'].cuda()))
-                    # t2 = torch.flatten(tf_embed_model(data['prompt']).to(torch.bfloat16))
-                    # token_length = t2.size(0)//4096
-                    # t_length = torch.empty(1, dtype=torch.bfloat16, device=device)
-                    # t_length[0] = token_length
-                    # t2 = torch.nn.functional.pad(t2, (0, 4096*(config['models']['PromptToTransformerEmbedding']['max_length'] - token_length)), value=0.0)
-                    # t3 = torch.flatten(cp_embed_model(data['prompt']).to(torch.bfloat16))
-                    # t4 = torch.flatten(vae(data['first_ref_image'].cuda()))
-                    # result = torch.cat((t_length,t2, t3, t4, t1), dim=0)
-                    ###########################################################################
-                    # padded_t = torch.nn.functional.pad(t2, (0, target_len - current_length), value=0.0)
-                    #print("t2 shape: ", t2.shape)
-                    #print("t_length: ", t_length)
-                    #print("t3 shape: ", t3.shape)
                     consumers_size_queues[current_comm_pair.consumer].append(consumer_size_info)
                     consumers_data_queues[current_comm_pair.consumer].append(tensor_to_send)
-                    # print(f"Rank{current_comm_pair.consumer}:prompt: {t2[10*4096: 10*4096+10]}, {t2.shape}, t4: {t4.shape}", flush=True)
-                    # print(f"Rank{current_comm_pair.consumer}: first img: {t4[:5]}, prompt{t2[52:57]} lenght: {t_length[0]}, clip{t3[:5]}, latents{t1[:5]}")
-                    #print(f"Consumer rank:{current_comm_pair.consumer}, prompt: {result[0]}", flush=True)
-                    
+ 
             for current_comm_pair in comm_pairs:
                 outstanding_sends_for_this_consumer = sum(
                     1 for _, cr, _, _ in send_size_in_flight if cr == current_comm_pair.consumer
                 )
-                #print(f"Rank:{current_comm_pair.consumer}, outstanding_sends_for_this_consumer: {outstanding_sends_for_this_consumer}", flush=True)
 
                 if consumers_size_queues[current_comm_pair.consumer] and \
                     outstanding_sends_for_this_consumer < MAX_OUTSTANDING_SENDS_PER_CONSUMER:
                     
                     size_to_send = consumers_size_queues[current_comm_pair.consumer].popleft()
                     current_item_idx_to_send = items_initiated_send_for_consumer[current_comm_pair.consumer]
-                    print(f"Rank{current_comm_pair.producer}发送数据到Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
+                    print(f"Rank{current_comm_pair.producer} send data to Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
                     req = dist.isend(tensor=size_to_send, dst=current_comm_pair.consumer, tag=1)
-                    # print(f"Rank{current_comm_pair.producer}发送数据到Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
-                    #print("prompt shape: ", (batch_to_send.size(0) - 2995200 - 768 - 1)/4096)
+
                     send_size_in_flight.append((req, current_comm_pair.consumer, current_item_idx_to_send, size_to_send))
                     items_initiated_send_for_consumer[current_comm_pair.consumer] += 1
 
@@ -278,7 +204,6 @@ def producer_process(rank, world_size,build_train_valid_test_data_iterators, tra
         dist.barrier(group=get_world_group())
 
     except Exception as e:
-        #print(f"producer (Rank {rank}) error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
     finally:
