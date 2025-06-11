@@ -25,6 +25,7 @@ from megatron.training.global_vars import (
 )
 
 from teletron.models.wan.pipeline import WanPipeline
+from teletron.models.wan.light_pipeline import TeletronWanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 from teletron.datasets.utils import train_valid_test_datasets_provider, load_config_vast
 
@@ -134,7 +135,7 @@ def model_provider(
     config = core_transformer_config_from_args(args)
     config_vast = load_config_vast()
 
-    model = WanPipeline(
+    model = TeletronWanPipeline(
         wan_config=config_vast.models,
         config=config,
         tokenizer_path=os.path.join(
