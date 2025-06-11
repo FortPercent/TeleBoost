@@ -75,7 +75,7 @@ def unpack_tensors(packed_tensor, intervals):
     return features
 
 
-def get_batch_on_this_tp_cp_rank_vast(data_iterator,max_length):
+def get_batch_on_this_tp_cp_rank_vast(data_iterator):
     def _broadcast(item):
         if item is not None:
             import torch.distributed as dist
