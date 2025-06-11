@@ -187,7 +187,7 @@ config = dict(
                         embedding_keys=[
                             "raw_first_image", 
                         ],  
-                        #dst_size=dst_size,
+                        dst_size=dst_size,
                     ),
                 ],
             ),
@@ -202,10 +202,10 @@ config = dict(
         ),
     ),
     models=dict(
-        text_encoder_path="/workspace/Wan2.1-I2V-14B-720P/models_t5_umt5-xxl-enc-bf16.pth",
-        vae_path="/workspace/Wan2.1-I2V-14B-720P/Wan2.1_VAE.pth",
-        image_encoder_path="/workspace/Wan2.1-I2V-14B-720P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
-        dit_path="/workspace/Wan2.1-I2V-14B-720P", 
+        text_encoder_path="/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+        vae_path="workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+        image_encoder_path="/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+        dit_path="/workspace/Wan2___1-I2V-14B-480P", 
         tiled=True, 
         tile_size=(34, 34),
         tile_stride=(18, 16), 
