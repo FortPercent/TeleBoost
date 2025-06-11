@@ -36,7 +36,7 @@ log.critical("This is a critical message")
 @torch.inference_mode()
 def get_megatron_wan_state_dict():
     import torch
-    from megatron.core.models.wan.model import WanParams, WanVideoTransformer3DModel
+    from megatron.core.models.wan.light_pipeline import WanParams, WanVideoTransformer3DModel
     from megatron.training.arguments import core_transformer_config_from_args
     from megatron.training import get_args
     from vast.models.dit.wan_dit import WanTextEncoder

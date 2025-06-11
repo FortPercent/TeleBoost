@@ -24,7 +24,6 @@ from megatron.training.global_vars import (
     get_timers,
 )
 
-from teletron.models.wan.pipeline import WanPipeline
 from teletron.models.wan.light_pipeline import TeletronWanPipeline
 from teletron.training.utils import get_batch_on_this_tp_cp_rank_vast
 from teletron.datasets.utils import train_valid_test_datasets_provider, load_config_vast
@@ -130,17 +129,14 @@ def extra_args_provider(parser):
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True, parallel_output=True
-) -> WanPipeline:
+) -> TeletronWanPipeline:
     args = get_args()
     config = core_transformer_config_from_args(args)
     config_vast = load_config_vast()
 
     model = TeletronWanPipeline(
-        wan_config=config_vast.models,
         config=config,
-        tokenizer_path=os.path.join(
-            os.path.dirname(config_vast.models.get("text_encoder_path")), "google/umt5-xxl"
-        ),
+        config_vast=config_vast.models
     )
     if args.debug: 
         from tensorwatch import watch_module_forward_backward
@@ -156,7 +152,7 @@ def loss_func(output_tensor):
     loss = loss.unsqueeze(0)
     return loss, {"loss": averaged_loss[0]}
 
-def forward_step(data_iterator, model: WanPipeline):
+def forward_step(data_iterator, model: TeletronWanPipeline):
     """Forward training step.
 
     Args:
