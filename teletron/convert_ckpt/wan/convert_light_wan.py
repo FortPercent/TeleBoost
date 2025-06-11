@@ -67,11 +67,13 @@ def get_megatron_wan_state_dict():
         
 
 @torch.inference_mode()
-def get_vast_wan_state_dict():
+def get_vast_wan_state_dict(args):
     from vast.models.dit.wan_dit import ModelManager
     from vast.pipelines.wan.wan_video import WanVideoPipeline
 
-    dit_path = "/workspace/Wan2___1-FLF2V-14B-480P-init"
+    #dit_path = "/workspace/Wan2___1-FLF2V-14B-480P-init"
+    dit_path = args.load_path
+    dit_path = [os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth")]
     vae_path = "/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth"
     image_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
     text_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth"
@@ -79,7 +81,7 @@ def get_vast_wan_state_dict():
     model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
     model_manager.load_models([
         text_encoder_path, vae_path, image_encoder_path, 
-        *[os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".safetensors")]
+        *dit_path
     ])
 
     pipe = WanVideoPipeline.from_model_manager(model_manager)
@@ -90,8 +92,8 @@ def get_vast_wan_state_dict():
     state_dict_image_encoder = pipe.image_encoder.state_dict()
     return [state_dict_dit, state_dict_vae, state_dict_text_encoder, state_dict_image_encoder]
 
-def convert_checkpoint_from_transformers_to_megatron_bak():
-    src_dict = get_vast_wan_state_dict()
+def convert_checkpoint_from_transformers_to_megatron_bak(args):
+    src_dict = get_vast_wan_state_dict(args)
     # dst_dict = get_megatron_wan_state_dict()
     dst_dict = [{}, {}, {}, {}]
 
@@ -114,7 +116,7 @@ def save_to_tensor(dst_dict):
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained("/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer")
-    config.num_layers = 1
+    config.num_layers = 30
 
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
@@ -148,7 +150,6 @@ def save_to_tensor(dst_dict):
         checkpoint_dir = os.path.join(release_dir, checkpoint_dir)
         os.makedirs(checkpoint_dir, exist_ok=True)
         checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-        breakpoint()
         torch.save(output_state_dict[tp_rank], checkpoint_path)
 
     log.info("Save all tensor")
@@ -312,6 +313,7 @@ def main():
     }
     parser = argparse.ArgumentParser()
     parser = add_extra_args(parser)
+    args = parser.parse_args()
 
     import os
     os.environ["MASTER_ADDR"] = "localhost"
@@ -319,9 +321,7 @@ def main():
 
     # initialize_megatron(extra_args_provider=add_extra_args, args_defaults=args_defaults)
 
-
-
-    convert_checkpoint_from_transformers_to_megatron_bak()
+    convert_checkpoint_from_transformers_to_megatron_bak(args)
 
 
 if __name__ == "__main__":
