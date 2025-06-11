@@ -23,60 +23,41 @@ log = logging.basicConfig(
     datefmt="[%X]",
     handlers=[RichHandler(rich_tracebacks=True),logging.FileHandler("convert.log")]
 )or logging.getLogger(__name__)
+
 ###
-
-
-log.debug("This is a debug message")
-log.info("This is an info message")
-log.warning("This is a warning message")
-log.error("This is an error message")
-log.critical("This is a critical message")
-
-
 @torch.inference_mode()
-def get_megatron_wan_state_dict():
-    import torch
-    from megatron.core.models.wan.model import WanParams, WanVideoTransformer3DModel
-    from megatron.training.arguments import core_transformer_config_from_args
-    from megatron.training import get_args
-    from vast.models.dit.wan_dit import WanTextEncoder
-    from vast.models.dit.wan_dit import WanVideoVAE
-    from vast.models.dit.wan_dit import WanImageEncoder
-    import torch.nn.init as init
+def get_megatron_wan_state_dict(args):
+    meg_path = args.load_path
+    checkpoint_dir = '/nvfile-heatstorage/teleai-infra/wxy/wxe/Megatron_VAST/checkpoint'
+    latest_file = os.path.join(checkpoint_dir, "latest_checkpointed_iteration.txt")
 
-    args = get_args()  
-    args.init_method = init.xavier_uniform_  # Note the underscore! This is the callable.  
-    args.output_layer_init_method = init.xavier_uniform
-    args.window_size = (1,1) 
-    args.gated_linear_unit = False  # Or True if your model needs GLU
-    args.activation_func = "gelu" 
-    wanConfig = WanParams()
-
-
-    transformer = WanVideoTransformer3DModel(wanConfig, args)
-    text_encoder = WanTextEncoder()
-    image_encoder = WanImageEncoder()
-    vae = WanVideoVAE()
-
-    state_dict_dit = transformer.state_dict()
-    state_dict_image_encoder = image_encoder.state_dict()
-    state_dict_text_encoder =text_encoder.state_dict()
-    state_dict_vae = vae.state_dict()
-
-    return [state_dict_dit, state_dict_image_encoder, state_dict_text_encoder, state_dict_vae]
+    with open(latest_file, 'r') as f:
+        iteration = f.read().strip()
+    
+    iteration_dir = os.path.join(checkpoint_dir, iteration)
+    if not iteration.startswith('release'):
+        print(f"Not a release checkpoint: {iteration}")
+        return None
+    model_file = os.path.join(iteration_dir, "mp_rank_00", "model_optim_rng.pt")
+    
+    checkpoint = torch.load(model_file, map_location='cpu', weights_only=False)
+    return [checkpoint['model']]
         
-
 @torch.inference_mode()
 def get_vast_wan_state_dict(args):
     from vast.models.dit.wan_dit import ModelManager
     from vast.pipelines.wan.wan_video import WanVideoPipeline
 
-    #dit_path = "/workspace/Wan2___1-FLF2V-14B-480P-init"
     dit_path = args.load_path
     dit_path = [os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth")]
     vae_path = "/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth"
     image_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
     text_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth"
+
+    log.info(f"dit path: {dit_path}")
+    log.info(f"vae_path: {vae_path}")
+    log.info(f"image_encoder_path: {image_encoder_path}")
+    log.info(f"text_encoder_path: {text_encoder_path}")
 
     model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
     model_manager.load_models([
@@ -92,9 +73,16 @@ def get_vast_wan_state_dict(args):
     state_dict_image_encoder = pipe.image_encoder.state_dict()
     return [state_dict_dit, state_dict_vae, state_dict_text_encoder, state_dict_image_encoder]
 
-def convert_checkpoint_from_transformers_to_megatron_bak(args):
+
+def convert_checkpoint_from_megatron_to_transformers(args):
+    src_dict = get_megatron_wan_state_dict(args)
+    dst_dict = [{}, {}, {}, {}]
+    update_all_params(src_dict, dst_dict)
+
+    return save_to_trans_tensor(dst_dict, args)
+
+def convert_checkpoint_from_transformers_to_megatron(args):
     src_dict = get_vast_wan_state_dict(args)
-    # dst_dict = get_megatron_wan_state_dict()
     dst_dict = [{}, {}, {}, {}]
 
     update_dit_params(src_dict, dst_dict)
@@ -102,17 +90,18 @@ def convert_checkpoint_from_transformers_to_megatron_bak(args):
     update_text_encoder_params(src_dict, dst_dict)
     update_image_encoder_params(src_dict, dst_dict)
 
-    return save_to_tensor(dst_dict)
+    return save_to_meg_tensor(dst_dict, args)
 
-def save_to_tensor(dst_dict):
-    os.makedirs('./checkpoint', exist_ok=True)
-    os.system("cp -rf " + "/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer" + "/*.json " + './checkpoint')
+def save_to_meg_tensor(dst_dict, args):
+    checkpoint = args.save_path
+    os.makedirs(checkpoint, exist_ok=True)
+    os.system("cp -rf " + "/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer" + "/*.json " + checkpoint)
 
-    tracker_filepath = os.path.join('./checkpoint', "latest_checkpointed_iteration.txt")
+    tracker_filepath = os.path.join(checkpoint, "latest_checkpointed_iteration.txt")
     with open(tracker_filepath, "w") as f:
         f.write("release")
 
-    release_dir = os.path.join('./checkpoint', "release")
+    release_dir = os.path.join(checkpoint, "release")
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained("/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer")
@@ -154,7 +143,27 @@ def save_to_tensor(dst_dict):
 
     log.info("Save all tensor")
 
+def save_to_trans_tensor(dst_dict, args):
+    checkpoint = '/nvfile-heatstorage/teleai-infra/wxy/Teletron/teletron/convert_ckpt'
+    os.makedirs(args.save_path, exist_ok=True)
+    model_names = ["transformer", "vae", "text_encoder", "image_encoder"]
 
+    for i, state_dict in enumerate(dst_dict):
+        model_path = os.path.join(args.save_path, f"{model_names[i]}.pt")
+        torch.save(state_dict, model_path)
+        log.info(f"Saved {model_names[i]} tensor to {model_path}")
+
+def update_all_params(src_dict, dst_dict):
+    import ipdb; ipdb.set_trace()
+    for key,value in src_dict[0].items():
+        if key.startswith('transformer.'):
+            dst_dict[0][key[12:]] = value
+        elif key.startswith('vae.'):
+            dst_dict[1][key[4:]] = value
+        elif key.startswith('text_encoder.'):
+            dst_dict[2][key[13:]] = value
+        elif key.startswith('image_encoder.'):
+            dst_dict[3][key[14:]] = value
 
 def update_dit_params(src_dict, dst_dict, args=None):
     index = 0    
@@ -164,31 +173,6 @@ def update_dit_params(src_dict, dst_dict, args=None):
     meg_state_dict = {}
     import re
     replacement_rules = [
-        # (r'head\.modulation', r'scale_shift_table'),
-        # (r'head\.head.weight', r'proj_out.weight'),
-        # (r'head\.head.bias', r'proj_out.bias'),        
-        # (r'\.modulation',  r'.scale_shift_table'),
-        # # self-attention block
-        # (r'\.self_attn\.q\.', r'.self_attention.linear_q.'),
-        # (r'\.self_attn\.k\.', r'.self_attention.linear_k.'),
-        # (r'\.self_attn\.v\.', r'.self_attention.linear_v.'),                
-        # (r'\.self_attn\.o\.', r'.self_attention.linear_proj.'),
-        # (r'\.self_attn\.norm_q\.', r'.self_attention.q_layernorm.'),
-        # (r'\.self_attn\.norm_k\.', r'.self_attention.k_layernorm.'),
-        # # cross-attention block
-        # (r'\.cross_attn\.q\.', r'.cross_attention.linear_q.'),
-        # (r'\.cross_attn\.k\.', r'.cross_attention.linear_k.'),
-        # (r'\.cross_attn\.v\.', r'.cross_attention.linear_v.'),
-        # (r'\.cross_attn\.o\.', r'.cross_attention.linear_proj.'),
-        # (r'\.cross_attn\.norm_q\.', r'.cross_attention.q_layernorm.'),
-        # (r'\.cross_attn\.norm_k\.', r'.cross_attention.k_layernorm.'),
-        # (r'\.cross_attn\.k_img\.', r'.cross_attention.add_k_proj.'),
-        # (r'\.cross_attn\.v_img\.', r'.cross_attention.add_v_proj.'),
-        # (r'\.cross_attn\.norm_k_img\.', r'.cross_attention.added_k_layernorm.'),
-        # # FFN block
-        # (r'\.norm3\.', r'.norm2.'),
-        # (r'\.ffn.0\.', r'.mlp.linear_fc1.'),
-        # (r'\.ffn.2\.', r'.mlp.linear_fc2.'),
         # add transformer to all block
         (r'^', 'transformer.'),
     ]
@@ -286,9 +270,17 @@ def add_extra_args(parser):
             "Only used when converting a Megatron checkpoint to a Transformers checkpoint."
         ),
     )
-
     return parser
 
+def log_args(args):
+    logging.info("=" * 50)
+    logging.info("CONVERSION ARGUMENTS")
+    logging.info("=" * 50)
+    
+    for key, value in vars(args).items():
+        logging.info(f"{key}: {value}")
+    
+    logging.info("=" * 50)
 
 def main():
     args_defaults = {
@@ -314,14 +306,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser = add_extra_args(parser)
     args = parser.parse_args()
+    log_args(args)
 
-    import os
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12345"
-
-    # initialize_megatron(extra_args_provider=add_extra_args, args_defaults=args_defaults)
-
-    convert_checkpoint_from_transformers_to_megatron_bak(args)
+    if args.convert_checkpoint_from_megatron_to_transformers:
+        convert_checkpoint_from_megatron_to_transformers(args)
+    else:
+        convert_checkpoint_from_transformers_to_megatron(args)
 
 
 if __name__ == "__main__":
