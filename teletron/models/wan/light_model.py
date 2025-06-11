@@ -50,8 +50,6 @@ class TeletronWanModel(WanModel):
             
             return reduced_grad
         
-        # def get_layer_param_name(key, weight=True, bias=True, num_layers=None):
-
         # layers with input sequence that is not parallel do not need to reduce its gradient.
         self.wgrad_not_to_reduce = [
             "head.head.weight",
@@ -132,7 +130,6 @@ class TeletronWanModel(WanModel):
             # pad if sequence len cannot be divided by CP size
             length = x.shape[1]
             set_origin_length(length)
-            use_padding = False
             seq_parallel_world_size = mpu.get_context_parallel_world_size()
             if length % seq_parallel_world_size != 0:
                 pad_size = seq_parallel_world_size - (length % seq_parallel_world_size)
@@ -140,7 +137,6 @@ class TeletronWanModel(WanModel):
                 set_target_length(length)
                 x = pad_for_context_parallel(x, 1)
                 freqs = pad_for_context_parallel(freqs, 0)
-            
             
 
             from teletron.core.tensor_parallel.mappings import (
