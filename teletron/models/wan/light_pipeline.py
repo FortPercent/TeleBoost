@@ -114,3 +114,8 @@ class TeletronWanPipeline(nn.Module):
         # self.input_tensor = input_tensor
         # self.transformer.set_input_tensor(input_tensor)
         pass
+
+
+    def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
+        """Customized state_dict"""
+        return self.transformer.state_dict(prefix=prefix, keep_vars=keep_vars)
