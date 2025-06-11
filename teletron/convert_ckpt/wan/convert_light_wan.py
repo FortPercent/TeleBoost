@@ -27,8 +27,7 @@ log = logging.basicConfig(
 ###
 @torch.inference_mode()
 def get_megatron_wan_state_dict(args):
-    meg_path = args.load_path
-    checkpoint_dir = '/nvfile-heatstorage/teleai-infra/wxy/wxe/Megatron_VAST/checkpoint'
+    checkpoint_dir = args.load_path
     latest_file = os.path.join(checkpoint_dir, "latest_checkpointed_iteration.txt")
 
     with open(latest_file, 'r') as f:
