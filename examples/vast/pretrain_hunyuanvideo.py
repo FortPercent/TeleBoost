@@ -75,6 +75,9 @@ def extra_args_provider(parser):
     group.add_argument("--debug_dir", type=str, default="./logs")
     group.add_argument("--sanity-check", action="store_true")
 
+    group.add_argument("--distributed-vae", action="store_true")
+    group.add_argument("--distributed-vae-world-size", type=int, default=0,required=False)
+
     group = parser.add_argument_group(title='training')
     group.add_argument("--task-type", type=str, choices=['i2v', 't2v', 'i2v_multimask', 'i2vhy_token_replace', 't2i_wanvae'], default="i2v")
     return parser
