@@ -8,7 +8,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/ccg/vast2
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
@@ -22,7 +22,7 @@ echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
 # MASTER_ADDR='127.0.0.1'
 echo '$MASTER_ADDR'$MASTER_ADDR
-MASTER_PORT='11115'
+MASTER_PORT='11116'
 NNODES=${WORLD_SIZE:-'1'}
 NNODES=1
 
@@ -54,7 +54,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 1 #deprecated, please setting in WanParams
+    --num-layers 1 
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          

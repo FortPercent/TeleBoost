@@ -1,13 +1,12 @@
 import torch 
 import torch.distributed as dist
-from einops import rearrange
+import torch.nn.functional as F
+from torch import nn
 from megatron.core import mpu
-from vast.pipelines.wan.wan_video import WanVideoPipeline
+from megatron.training import get_args
 from vast.schedulers.flow_match import FlowMatchScheduler
-from teletron.models.wan.model import WanParams
-import numpy as np 
 from teletron.models.wan.light_model import TeletronWanModel
-
+from typing import Callable, Optional, Tuple
 
 def broadcast_timesteps(input: torch.Tensor):
     tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
@@ -15,23 +14,55 @@ def broadcast_timesteps(input: torch.Tensor):
         dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
 
-class TeletronWanPipeline(WanVideoPipeline):
-    def __init__(self, wan_config, config, tokenizer_path=None):
-        super().__init__(device="cuda", torch_dtype=torch.bfloat16, tokenizer_path=tokenizer_path)
+class WanParams:
+    patch_size: Tuple[int] = (1, 2, 2)
+    num_attention_heads: int = 40
+    attention_head_dim: int = 128
+    activation_func: Callable = F.gelu
+    in_channels: int = 36
+    out_channels: int = 16
+    text_dim: int = 4096
+    freq_dim: int = 256
+    ffn_dim: int = 13824
+    num_layers: int = 40
+    cross_attn_norm: bool = True
+    qk_norm: Optional[str] = "rms_norm_across_heads"
+    eps: float = 1e-6
+    image_dim: int = 1280
+    added_kv_proj_dim: int = 5120
+    rope_max_seq_len: int = 1024
+    has_image_input: bool = True
+    has_image_pos_emb: bool = False
+
+
+
+class TeletronWanPipeline(nn.Module):
+    def __init__(self, config, config_vast):
+        super().__init__()
+        self.config = config
+        self.config_vast = config_vast
         self.post_process = True
         self.device = torch.cuda.current_device()
-        
+
+        args = get_args()
         wanConfig = WanParams()
-        self.config=config
-        self.wan_config = wanConfig
-        # self.wan_config.num_layers = 1
+        wanConfig.num_layers = args.num_layers
+
+        if args.task_type == "wan_i2v_prone":
+            wanConfig.has_image_input = True
+            wanConfig.has_image_pos_emb = False
+        elif args.task_type == "wan_flf":
+            wanConfig.has_image_input = True
+            wanConfig.has_image_pos_emb = True
+        else:
+            raise NotImplementedError(f"Unknown task type: {args.task_type}")
 
         self.transformer = TeletronWanModel(wanConfig)
-        # from tensorwatch import watch_module_forward_backward
-        # watch_module_forward_backward(self.transformer, use_megatron=True)
         self.transformer.requires_grad_(True)
 
-        self.flow_scheduler_config = wan_config.get("scheduler", dict())
+        # from tensorwatch import watch_module_forward_backward
+        # watch_module_forward_backward(self.transformer, use_megatron=True)
+
         self.flow_scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)
         self.flow_scheduler.set_timesteps(1000, training=True)
 
@@ -65,7 +96,7 @@ class TeletronWanPipeline(WanVideoPipeline):
             **image_emb,
             return_dict=False,
             use_gradient_checkpointing=True
-        )[0]
+        )
         if self.post_process:
             loss = torch.nn.functional.mse_loss(
                 noise_pred.float(), training_target.float()
@@ -78,12 +109,7 @@ class TeletronWanPipeline(WanVideoPipeline):
     def prepare_extra_input(self, latents=None):
         return {}
     
-    
-    def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
-        """Customized state_dict"""
-        return self.transformer.state_dict(prefix=prefix, keep_vars=keep_vars)
-
-
+        
     def set_input_tensor(self, input_tensor):
         # self.input_tensor = input_tensor
         # self.transformer.set_input_tensor(input_tensor)

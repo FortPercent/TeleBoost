@@ -53,7 +53,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 30 #deprecated, please setting in WanParams
+    --num-layers 30 
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
