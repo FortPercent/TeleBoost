@@ -66,7 +66,7 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --task-type $TASK_TYPE
+    --task-type i2v
     --micro-batch-size ${MBS}
     --global-batch-size ${GBS}
     --train-iters 100000
