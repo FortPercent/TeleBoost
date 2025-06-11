@@ -44,7 +44,7 @@ class ContextParallelAttentionModule(AttentionModule):
         x = F.scaled_dot_product_attention(q, k, v)
         # print("after sdpa", x.shape)
         if mpu.get_context_parallel_world_size() > 1:
-            if x.shape[1] % mpu.get_context_parallel_world_size() != 0:
+            if x.shape[2] % mpu.get_context_parallel_world_size() != 0:
                 x = pad_for_context_parallel(x, 2)
             x = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), x, 2, 1
@@ -87,7 +87,7 @@ class ContextParallelCrossAttentionModule(AttentionModule):
         x = F.scaled_dot_product_attention(q, k, v)
         # print("after sdpa", x.shape)
         if mpu.get_context_parallel_world_size() > 1:
-            if x.shape[1] % mpu.get_context_parallel_world_size() != 0:
+            if x.shape[2] % mpu.get_context_parallel_world_size() != 0:
                 x = pad_for_context_parallel(x, 2)
             x = SeqAllToAll4D.apply(
                 mpu.get_context_parallel_group(), x, 2, 1
