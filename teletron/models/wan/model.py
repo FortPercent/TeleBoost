@@ -66,6 +66,7 @@ class WanParams:
     image_dim: int = 1280
     added_kv_proj_dim: int = 5120
     rope_max_seq_len: int = 1024
+    has_image_input: bool = True
     has_image_pos_emb: bool = False
 
 
