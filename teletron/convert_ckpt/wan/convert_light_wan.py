@@ -97,26 +97,27 @@ def convert_checkpoint_from_transformers_to_megatron_bak(args):
     # dst_dict = get_megatron_wan_state_dict()
     dst_dict = [{}, {}, {}, {}]
 
-    update_dit_params(src_dict, dst_dict)
-    update_vae_params(src_dict, dst_dict)
-    update_text_encoder_params(src_dict, dst_dict)
-    update_image_encoder_params(src_dict, dst_dict)
+    update_dit_params(src_dict, dst_dict, args)
+    # update_vae_params(src_dict, dst_dict)
+    # update_text_encoder_params(src_dict, dst_dict)
+    # update_image_encoder_params(src_dict, dst_dict)
 
-    return save_to_tensor(dst_dict)
+    return save_to_tensor(dst_dict, args)
 
-def save_to_tensor(dst_dict):
-    os.makedirs('./checkpoint', exist_ok=True)
-    os.system("cp -rf " + "/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer" + "/*.json " + './checkpoint')
+def save_to_tensor(dst_dict, args):
+    save_path = args.save_path
+    os.makedirs(save_path, exist_ok=True)
+    os.system("cp -rf " + "/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer" + "/*.json " + save_path)
 
-    tracker_filepath = os.path.join('./checkpoint', "latest_checkpointed_iteration.txt")
+    tracker_filepath = os.path.join(save_path, "latest_checkpointed_iteration.txt")
     with open(tracker_filepath, "w") as f:
         f.write("release")
 
-    release_dir = os.path.join('./checkpoint', "release")
+    release_dir = os.path.join(save_path, "release")
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained("/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer")
-    config.num_layers = 30
+    config.num_layers = args.num_layers
 
     megatron_args = {
         "attention_head_dim": config.attention_head_dim,
@@ -134,6 +135,7 @@ def save_to_tensor(dst_dict):
         setattr(margs, k, v)
 
     output_state_dict = []
+    pp_rank = 0
     for tp_rank in range(megatron_args["tensor_model_parallel_size"]):
         output_state_dict.append(OrderedDict({
             "args": margs,  
@@ -156,7 +158,7 @@ def save_to_tensor(dst_dict):
 
 
 
-def update_dit_params(src_dict, dst_dict, args=None):
+def update_dit_params(src_dict, dst_dict, args):
     index = 0    
     src_dit = src_dict[index]
     dst_dit = dst_dict[index].copy()
@@ -164,40 +166,16 @@ def update_dit_params(src_dict, dst_dict, args=None):
     meg_state_dict = {}
     import re
     replacement_rules = [
-        # (r'head\.modulation', r'scale_shift_table'),
-        # (r'head\.head.weight', r'proj_out.weight'),
-        # (r'head\.head.bias', r'proj_out.bias'),        
-        # (r'\.modulation',  r'.scale_shift_table'),
-        # # self-attention block
-        # (r'\.self_attn\.q\.', r'.self_attention.linear_q.'),
-        # (r'\.self_attn\.k\.', r'.self_attention.linear_k.'),
-        # (r'\.self_attn\.v\.', r'.self_attention.linear_v.'),                
-        # (r'\.self_attn\.o\.', r'.self_attention.linear_proj.'),
-        # (r'\.self_attn\.norm_q\.', r'.self_attention.q_layernorm.'),
-        # (r'\.self_attn\.norm_k\.', r'.self_attention.k_layernorm.'),
-        # # cross-attention block
-        # (r'\.cross_attn\.q\.', r'.cross_attention.linear_q.'),
-        # (r'\.cross_attn\.k\.', r'.cross_attention.linear_k.'),
-        # (r'\.cross_attn\.v\.', r'.cross_attention.linear_v.'),
-        # (r'\.cross_attn\.o\.', r'.cross_attention.linear_proj.'),
-        # (r'\.cross_attn\.norm_q\.', r'.cross_attention.q_layernorm.'),
-        # (r'\.cross_attn\.norm_k\.', r'.cross_attention.k_layernorm.'),
-        # (r'\.cross_attn\.k_img\.', r'.cross_attention.add_k_proj.'),
-        # (r'\.cross_attn\.v_img\.', r'.cross_attention.add_v_proj.'),
-        # (r'\.cross_attn\.norm_k_img\.', r'.cross_attention.added_k_layernorm.'),
-        # # FFN block
-        # (r'\.norm3\.', r'.norm2.'),
-        # (r'\.ffn.0\.', r'.mlp.linear_fc1.'),
-        # (r'\.ffn.2\.', r'.mlp.linear_fc2.'),
-        # add transformer to all block
         (r'^', 'transformer.'),
     ]
     for src_key in src_dit.keys():
+        if "blocks" in src_key:
+            if int(src_key.split(".")[1]) >= args.num_layers:
+                continue
         dst_key = src_key
         for pattern, repl in replacement_rules:
             dst_key = re.sub(pattern, repl, dst_key)
         meg_state_dict[dst_key] = src_dit[src_key]
-
     dst_dict[index] = meg_state_dict
     
 
@@ -275,6 +253,7 @@ def add_extra_args(parser):
     group.add_argument("--hf-ckpt-path", type=str)
     group.add_argument("--load-path", type=str)
     group.add_argument("--save-path", type=str)
+    group.add_argument("--num-layers", type=int)
     group.add_argument("--target-params-dtype", type=str)
     group.add_argument(
         "--max_shard_size",
