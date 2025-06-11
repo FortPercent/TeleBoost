@@ -33,8 +33,8 @@ class TeletronWanModel(WanModel):
             patch_size=wanConfig.patch_size,
             num_heads=wanConfig.num_attention_heads,
             num_layers=wanConfig.num_layers,
-            has_image_input=True,
-            has_image_pos_emb=True
+            has_image_input=wanConfig.has_image_input,
+            has_image_pos_emb=wanConfig.has_image_pos_emb
         )
         self.wan_config = wanConfig
 
