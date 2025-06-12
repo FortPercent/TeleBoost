@@ -26,7 +26,7 @@ python convert_hunyuanvideo.py  \
 
 
 ### convert hunyuanvideo with wanvae
-# WAN_VAE_PRETRAINED_PATH="/workspace/Wan2.1-I2V-14B-720P-Diffusers/vae" 
+# WAN_VAE_PRETRAINED_PATH="/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/vae" 
 # python convert_hunyuanvideo_t2i.py  \
 #     --load ${SOURCE_CKPT_PATH} \
 #     --save ${TARGET_CKPT_PATH} \
