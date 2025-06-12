@@ -111,6 +111,7 @@ class HunyuanPipeline(nn.Module):
                     latents.shape,
                     device=torch.cuda.current_device(),
                 )
+                broadcast_timesteps(noise)
 
                 def expand_tensor_to_dims(tensor, ndim):
                     while len(tensor.shape) < ndim:
