@@ -19,14 +19,10 @@ import torch
 import json
 import types
 from collections import OrderedDict
-from diffusers import AutoencoderKLHunyuanVideo
-from vast.train.configs.config import load_config
 from transformers import AutoModelForCausalLM, GPT2Config
 from diffusers.utils import WEIGHTS_NAME,WEIGHTS_INDEX_NAME
 from diffusers import AutoencoderKLWan
 from huggingface_hub import DDUFEntry, create_repo, split_torch_state_dict_into_shards
-# from transformers.modeling_utils import WEIGHTS_INDEX_NAME, WEIGHTS_NAME, shard_checkpoint
-from hunyuanvideo.configs.hunyuanvideo_t2i_wanvae import config as globalConfig
 import numpy as np
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
@@ -383,8 +379,6 @@ def convert_checkpoint_from_transformers_to_megatron(args):
         "pipeline_model_parallel_size": args.target_pipeline_model_parallel_size
     }
 
-    global_config = load_config(globalConfig)
-
     margs = types.SimpleNamespace()
 
     for k, v in megatron_args.items():
@@ -697,7 +691,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 params_dict[f"transformer.{k}"] = params_dict.pop(k)
             
 
-            print("begin vae")
+            # print("begin vae")
             for param_name, param_tensor in vae_dict.items():
                 params_dict[f"vae.{param_name}"] = param_tensor
 
@@ -707,6 +701,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                     # 通过 file 参数将输出写入文件
                     print(f"layer_name: {param_name}, param.shape: {param_tensor.shape}", file=f)
 
+    print("finish convert from ", args.load_path)
     for tp_rank in range(args.target_tensor_model_parallel_size):
         output_state_dict[tp_rank]["checkpoint_version"] = 3.0
         output_state_dict[tp_rank]["args"] = margs
@@ -720,6 +715,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
         os.makedirs(checkpoint_dir, exist_ok=True)
         checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
         torch.save(clone_state_dict(output_state_dict[tp_rank]), checkpoint_path)
+        print("save ckpt tp ", checkpoint_path)
+    print("with layers:", config.num_layers, config.num_single_layers)
 
 def update_params_with_identical_weights(params_dict, state_dict, weight_keys):
     for ori_key in weight_keys:

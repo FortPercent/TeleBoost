@@ -695,7 +695,8 @@ def convert_checkpoint_from_transformers_to_megatron(args):
                 for param_name, param_tensor in params_dict.items():
                     # 通过 file 参数将输出写入文件
                     print(f"layer_name: {param_name}, param.shape: {param_tensor.shape}", file=f)
-
+                    
+    print("finish convert from ", args.load_path)
     for tp_rank in range(args.target_tensor_model_parallel_size):
         output_state_dict[tp_rank]["checkpoint_version"] = 3.0
         output_state_dict[tp_rank]["args"] = margs
@@ -712,7 +713,7 @@ def convert_checkpoint_from_transformers_to_megatron(args):
         print("save ckpt to", checkpoint_path)
     print("with layers:", config.num_layers, config.num_single_layers)
 
-    
+
 def update_params_with_identical_weights(params_dict, state_dict, weight_keys):
     for ori_key in weight_keys:
         if ori_key in state_dict:  # 确保 key 在 state_dict 中存在
