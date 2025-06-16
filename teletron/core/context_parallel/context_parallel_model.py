@@ -15,7 +15,7 @@ class ContextParallelModelManager():
     
     def split_input(self, x):
         # assert x is not parallel
-        if x % self.cp_size != 0 :
+        if x.shape[self.split_dim] % self.cp_size != 0 :
             self.origin_length = x.shape[self.split_dim]
             self.padded_length = self.origin_length + self.cp_size - \
                 (self.origin_length % self.cp_size)
