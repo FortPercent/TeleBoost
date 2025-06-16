@@ -5,13 +5,18 @@ from multiprocessing import Process
 import multiprocessing as mp 
 import argparse
 from unit_test.test_utils import spawn
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG,
+format='%(asctime)s - %(levelname)s - %(message)s')
 
-def success(q):
+def success(rank, world_size, q):
+    logging.info(f"hello rank{rank}")
     q.put("True")
 
 
-def fail(q):
+def fail(rank, world_size, q):
     q.put("False")
 
 
