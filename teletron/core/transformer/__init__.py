@@ -1,1 +1,1 @@
-from .transformer_block import TransformerModel
+from .transformer_block import TransformerGeneralMixin

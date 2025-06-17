@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from megatron.core import mpu
@@ -6,6 +7,9 @@ from teletron.core.context_parallel.mappings import split_forward_gather_backwar
         gather_forward_split_backward
 
 class ContextParallelMixin:
+
+    def enable_context_parallel(self, attn_module: nn.Module):
+        attn_module.forward = self.forward_attn
     
     def split_input(self, x):
         # assert x is not parallel
@@ -40,6 +44,7 @@ class ContextParallelMixin:
     
     def remove_pad_for_context_parallel(self, tensor):
         return tensor.narrow(self.gather_dim, 0, self.origin_length)
+
 
     def forward_attn(self, q, k, v):
         # print("in attention qkv", q.shape, k.shape, v.shape)
