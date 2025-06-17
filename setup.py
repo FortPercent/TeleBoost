@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from setuptools import setup, find_packages
 
 def read_readme():
@@ -51,3 +52,8 @@ setup(
     zip_safe=False,
     python_requires=">=3.8"
 )
+=======
+from setuptools import setup
+
+setup()
+>>>>>>> feat/test_framework
