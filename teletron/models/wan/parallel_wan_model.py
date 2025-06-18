@@ -1,9 +1,29 @@
+from typing import Tuple, Optional
 import torch
-from teletron.core.context_parallel import ContextParallelMixin
+from teletron.core.context_parallel import ContextParallelMixin, \
+    modulate_with_cp_grad_reduce, gate_with_cp_grad_reduce
 from teletron.core.transformer import TransformerGeneralMixin
-from teletron.models.wan import WanModel
+from .wan_model import WanModel, DiTBlock
 from megatron.core import mpu
-from megatron.training import get_args
+from teletron import get_args
+
+
+
+class ContextParallelWanDitBlock(DiTBlock):
+    def forward(self, x, context, t_mod, freqs):
+        # msa: multi-head self-attention  mlp: multi-layer perceptron
+
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
+        input_x = modulate_with_cp_grad_reduce(self.norm1(x), shift_msa, scale_msa)
+        attn_output = self.self_attn(input_x, freqs)
+        # print("before gate", attn_output.shape, gate_msa.shape, x.shape)
+        x = gate_with_cp_grad_reduce(x, gate_msa, attn_output)
+        x = x + self.cross_attn(self.norm3(x), context)
+        input_x = modulate_with_cp_grad_reduce(self.norm2(x), shift_mlp, scale_mlp)
+        x = gate_with_cp_grad_reduce(x, gate_mlp, self.ffn(input_x))
+        return x
+
 
 class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
     def __init__(self, dim: int,
@@ -32,6 +52,11 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                         num_layers,
                         has_image_input,
                         has_image_pos_emb)
+        
+        self.blocks = nn.ModuleList([
+            ContextParallelWanDitBlock(has_image_input, dim, num_heads, ffn_dim, eps)
+            for _ in range(num_layers)
+        ])
 
         # from TransformerGeneralMixin
         args = get_args()
@@ -49,6 +74,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         for i in range(len(self.blocks)):
             self.enable_context_parallel_attention(self.blocks[i].self_attn.attn)
     
+    # TODO: grad reduce hook, gate grad reduce and modulation grad reduce
 
     def forward(self,
                 x: torch.Tensor,
@@ -56,8 +82,6 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                 context: torch.Tensor,
                 clip_feature: Optional[torch.Tensor] = None,
                 y: Optional[torch.Tensor] = None,
-                use_gradient_checkpointing: bool = False,
-                use_gradient_checkpointing_offload: bool = False,
                 cn_images=None, 
                 **kwargs,):
         # Do whatever necessary before forward transformer blocks
