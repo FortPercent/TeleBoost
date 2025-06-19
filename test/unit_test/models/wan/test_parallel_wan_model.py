@@ -38,9 +38,10 @@ class WanParams:
     has_image_pos_emb: bool = False
 
 
-WAN_MODEL_SUCCESS = "Parallel Wan model forward test success"
-WAN_MODEL_FAIL = "Parallel Wan model forward test fail"
-
+WAN_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
+WAN_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
+WAN_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
+WAN_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 
 @patch("teletron.get_args")
 def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
@@ -103,31 +104,37 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
 
     input_dict = torch.load("test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     parallel_wan_model_output = parallel_wan_model(**input_dict)
-    wan_norm = wan_model_output.norm().item()
-    parallel_norm = parallel_wan_model_output.norm().item()
-    logging.info(f"wan output: {wan_norm}, parallel output: {parallel_norm}")
-    euclid_dist = torch.norm(wan_model_output - parallel_wan_model_output)
-    logging.info(f"euclid dist:{euclid_dist}")
-    normalized_euclid_dist = 0.5 * euclid_dist / (wan_norm + parallel_norm)
-    logging.info(f"normalized euclid dist: {normalized_euclid_dist}")
-    if normalized_euclid_dist < 0.001:
-        q.put(f"{WAN_MODEL_SUCCESS} rank{rank}")
+    if is_close_by_normalized_euclid_dist(wan_model_output, parallel_wan_model_output):
+        q.put(f"{WAN_MODEL_FWD_SUCCESS} rank{rank}")
     else:
-        q.put(f"{WAN_MODEL_FAIL} rank{rank}")
-    
+        q.put(f"{WAN_MODEL_FWD_FAIL} rank{rank}")
+    #TODO: test backward
+
+
+def is_close_by_normalized_euclid_dist(output, parallel_output):
+    wan_norm = output.norm().item()
+    parallel_norm = parallel_output.norm().item()
+    euclid_dist = torch.norm(output - parallel_output)
+    normalized_euclid_dist = 0.5 * euclid_dist / (wan_norm + parallel_norm)
+    if normalized_euclid_dist < 0.001:
+        return True 
+    else:
+        return False 
 
 
 
 class testParallelWanModel(TestCase):
-    def test_forward(self):
+    def test_forward_backward(self):
         cp_size = 2
         os.environ['WORLD_SIZE'] = str(cp_size)
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '12445'
         q = spawn(cp_size, parallel_wan_model_testing)
-        correct_responses = [f"{WAN_MODEL_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        correct_responses = [f"{WAN_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
         responses = []
         while not q.empty():
             res = q.get()
             responses.append(res)
         self.assertEqual(sorted(responses), correct_responses)
+        #TODO: test backward
+
