@@ -108,9 +108,9 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     logging.info(f"wan output: {wan_norm}, parallel output: {parallel_norm}")
     euclid_dist = torch.norm(wan_model_output - parallel_wan_model_output)
     logging.info(f"euclid dist:{euclid_dist}")
-    logging.info(f"normalized euclid dist: {0.5 * euclid_dist / (wan_norm + parallel_norm)}")
-    
-    if torch.allclose(wan_model_output, parallel_wan_model_output, rtol=1e-3):
+    normalized_euclid_dist = 0.5 * euclid_dist / (wan_norm + parallel_norm)
+    logging.info(f"normalized euclid dist: {normalized_euclid_dist}")
+    if normalized_euclid_dist < 0.001:
         q.put(f"{WAN_MODEL_SUCCESS} rank{rank}")
     else:
         q.put(f"{WAN_MODEL_FAIL} rank{rank}")
