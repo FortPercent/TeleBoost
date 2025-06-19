@@ -11,6 +11,15 @@ from teletron.core.context_parallel.mappings import split_forward_gather_backwar
 
 class ContextParallelMixin:
 
+    @staticmethod
+    def cp_grad_reduce(grad):
+        with torch.no_grad():
+            grad_list = [torch.empty_like(grad) for _ in range(mpu.get_context_parallel_world_size())]
+            torch.distributed.all_gather(grad_list, grad, group=mpu.get_context_parallel_group())
+            reduced_grad = torch.sum(torch.stack(grad_list), dim=0)
+        
+        return reduced_grad
+
     def enable_context_parallel(self, attn_module: nn.Module):
         attn_module.forward = self.forward_attn
     
