@@ -101,17 +101,28 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
         ).cuda().to(torch.bfloat16)
     parallel_wan_model.load_state_dict(wan_model.state_dict())
 
-    input_dict = torch.load("test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
+    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     wan_model_output = wan_model(**input_dict)
 
-    input_dict = torch.load("test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
+    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     parallel_wan_model_output = parallel_wan_model(**input_dict)
     if is_close_by_normalized_euclid_dist(wan_model_output, parallel_wan_model_output):
         q.put(f"{WAN_MODEL_FWD_SUCCESS} rank{rank}")
     else:
         q.put(f"{WAN_MODEL_FWD_FAIL} rank{rank}")
     #TODO: test backward
+    # test backward
+    wan_model_output.backward(torch.ones_like(wan_model_output))
+    parallel_wan_model_output.backward(torch.ones_like(parallel_wan_model_output))
 
+    model_grads = {name: param.grad for name, param in wan_model.named_parameters() if param.grad is not None}
+    parallel_moedl_grads = {name: param.grad for name, param in parallel_wan_model.named_parameters() if param.grad is not None}
+    for name in model_grads:
+        if is_close_by_normalized_euclid_dist(model_grads[name], parallel_moedl_grads[name], True):
+            grad_flag = True
+        else:
+            grad_flag = False
+    
 
 def is_close_by_normalized_euclid_dist(output, parallel_output):
     wan_norm = output.norm().item()

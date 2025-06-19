@@ -14,20 +14,23 @@ class TransformerGeneralMixin:
         self.activation_recompute_method = args.recompute_method
         self.recompute_granularity = args.recompute_granularity
         self.recompute_num_layers = args.recompute_num_layers
-        blocks.forward = self.checkpointed_forward_transformer_blocks
+        blocks.forward = self.checkpointed_forward_transformer_blocks(blocks)
 
     # todo: kwargs are not updated
-    def checkpointed_forward_transformer_blocks(self, *args, **kwargs):
-        if self.recompute_granularity == "full"  and self.training:
-            output = self._checkpointed_forward(*args)
-        else:
-            for block in self.blocks:
-                output = block(*args)
-                args = self._update_args(output, args)
-        return output
+    def checkpointed_forward_transformer_blocks(self, blocks):
+        def wrap_blocks(*args):
+            if self.recompute_granularity == "full"  and self.training:
+                recompute_num_layers = len(blocks)
+                output = self._checkpointed_forward(blocks, recompute_num_layers, *args)
+            else:
+                for block in blocks:
+                    output = block(*args)
+                    args = self._update_args(output, args)
+            return output
+        return wrap_blocks
 
-    def _get_block(self, layer_number: int):
-        return self.blocks[layer_number]    
+    def _get_block(self, blocks, layer_number: int):
+        return blocks[layer_number]    
 
     def _update_args(self, output, args):
         if isinstance(output, tuple):
@@ -35,13 +38,12 @@ class TransformerGeneralMixin:
         else:
             return (output,) + args[1:]
 
-    def _checkpointed_forward(self, *args):
-        recompute_num_layers = self.recompute_num_layers
+    def _checkpointed_forward(self, blocks, recompute_num_layers, *args):
 
-        def create_custom_forward(start, end):
+        def create_custom_forward(start, end, blocks):
             def custom_forward(*args):
                 for index in range(start, end):
-                    block = self._get_block(index)
+                    block = self._get_block(blocks, index)
                     output = block(*args)
                     args = self._update_args(output, args)
                 return output
@@ -52,9 +54,9 @@ class TransformerGeneralMixin:
             # checkpoint the input activation of each divided chunk.
             # A method to further reduce memory usage reducing checkpoints.
             _layer_num = 0
-            while _layer_num < self.num_layers:
+            while _layer_num < len(blocks):
                 output = checkpoint(
-                    create_custom_forward(_layer_num, _layer_num + recompute_num_layers),
+                    create_custom_forward(_layer_num, _layer_num + recompute_num_layers, blocks),
                     *args,
                     use_reentrant=False,
                 )
@@ -65,18 +67,18 @@ class TransformerGeneralMixin:
             # Checkpoint the input activation of only a set number of individual
             # Transformer layers and skip the rest.
             # A method fully use the device memory removing redundant re-computation.
-            for _layer_num in range(self.num_layers):
+            for _layer_num in range(len(blocks)):
                 if _layer_num < recompute_num_layers:
                     output = checkpoint(
-                        create_custom_forward(_layer_num, _layer_num + 1),
+                        create_custom_forward(_layer_num, _layer_num + 1, blocks),
                         *args,
                         use_reentrant=False,
                     )
                 else:
-                    block = self._get_block(_layer_num)
+                    block = self._get_block(blocks, _layer_num)
                     output = block(*args)
                 args = self._update_args(output, args)
         else:
-            raise ValueError(f"Invalid activation recompute method {self.recompute_method}.")
+            raise ValueError(f"Invalid activation recompute method {self.activation_recompute_method}.")
 
         return output 
