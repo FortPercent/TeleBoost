@@ -18,8 +18,6 @@ class ContextParallelWanDitBlock(DiTBlock):
             self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
         input_x = modulate_with_cp_grad_reduce(self.norm1(x), shift_msa, scale_msa)
         attn_output = self.self_attn(input_x, freqs)
-        # print("before gate", attn_output.shape, gate_msa.shape, x.shape)
-        logging.info(f"input_x: {input_x.shape},  x:{x.shape}, gate:{gate_msa.shape}, residual:{attn_output.shape}")
         x = gate_with_cp_grad_reduce(x, gate_msa, attn_output)
         x = x + self.cross_attn(self.norm3(x), context)
         input_x = modulate_with_cp_grad_reduce(self.norm2(x), shift_mlp, scale_mlp)
