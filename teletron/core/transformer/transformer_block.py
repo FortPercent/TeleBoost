@@ -4,9 +4,16 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
+from teletron import get_args
 
 class TransformerGeneralMixin:
     def enable_activation_checkpointing(self, blocks):
+        args = get_args()
+        self.num_heads = args.num_attention_heads
+        self.num_layers = args.num_layers
+        self.activation_recompute_method = args.recompute_method
+        self.recompute_granularity = args.recompute_granularity
+        self.recompute_num_layers = args.recompute_num_layers
         blocks.forward = self.checkpointed_forward_transformer_blocks
 
     # todo: kwargs are not updated

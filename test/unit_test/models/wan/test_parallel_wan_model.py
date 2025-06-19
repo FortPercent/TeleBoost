@@ -51,6 +51,8 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
+    args.num_layers = 1 
+    args.num_attention_heads = 40
     mock_teletron.return_value = args
 
 
