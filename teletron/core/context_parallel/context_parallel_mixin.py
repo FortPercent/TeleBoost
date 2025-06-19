@@ -7,7 +7,8 @@ from megatron.core import mpu
 from yunchang.comm.all_to_all import SeqAllToAll4D
 from teletron.core.context_parallel.mappings import split_forward_gather_backward,\
         gather_forward_split_backward
-import logging
+
+
 class ContextParallelMixin:
 
     def enable_context_parallel(self, attn_module: nn.Module):
@@ -15,7 +16,6 @@ class ContextParallelMixin:
     
     def split_input(self, x, dim):
         # assert x is not parallel
-        logging.info(f"x at split input {x.shape}")
         self.origin_length = x.shape[dim]
         self.padded_length = math.ceil(self.origin_length / self.cp_size) * self.cp_size
         if self.padded_length != 0:
@@ -56,15 +56,11 @@ class ContextParallelMixin:
         k = SeqAllToAll4D.apply(self.cp_group, k, 2, 1)
         v = SeqAllToAll4D.apply(self.cp_group, v, 2, 1)
 
-        import logging 
-        logging.info(f"q before remove pad: {q.shape}")
         # qkv: b s n/CP d
         q,k,v = map(
             lambda x: self.remove_pad_for_context_parallel(x, 1),
             [q,k,v]
         )
-
-        logging.info(f"q after remove pad: {q.shape}")
 
         q = q.transpose(1, 2).contiguous()
         k = k.transpose(1, 2).contiguous()
@@ -72,7 +68,6 @@ class ContextParallelMixin:
         # qkv: b n/CP s d
 
         x = F.scaled_dot_product_attention(q, k, v)
-        logging.info(f"x after sdpa: {x.shape}")
         if x.shape[2] % self.cp_size != 0:
             x = self.pad_for_context_parallel(x, 2)
         x = SeqAllToAll4D.apply(
