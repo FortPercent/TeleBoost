@@ -1,12 +1,13 @@
 from typing import Tuple, Optional
 import torch
+import torch.nn as nn
 from teletron.core.context_parallel import ContextParallelMixin, \
     modulate_with_cp_grad_reduce, gate_with_cp_grad_reduce
 from teletron.core.transformer import TransformerGeneralMixin
-from .wan_model import WanModel, DiTBlock
-from megatron.core import mpu
+from .wan_model import WanModel, DiTBlock, sinusoidal_embedding_1d
+from megatron.core import mpu 
 from teletron import get_args
-
+import logging
 
 
 class ContextParallelWanDitBlock(DiTBlock):
@@ -18,6 +19,7 @@ class ContextParallelWanDitBlock(DiTBlock):
         input_x = modulate_with_cp_grad_reduce(self.norm1(x), shift_msa, scale_msa)
         attn_output = self.self_attn(input_x, freqs)
         # print("before gate", attn_output.shape, gate_msa.shape, x.shape)
+        logging.info(f"input_x: {input_x.shape},  x:{x.shape}, gate:{gate_msa.shape}, residual:{attn_output.shape}")
         x = gate_with_cp_grad_reduce(x, gate_msa, attn_output)
         x = x + self.cross_attn(self.norm3(x), context)
         input_x = modulate_with_cp_grad_reduce(self.norm2(x), shift_mlp, scale_mlp)
@@ -40,7 +42,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                 has_image_pos_emb: bool,
                 context_parallel_dim: int = 1):
         
-        WanModel.__init__(dim,
+        WanModel.__init__(self, dim,
                         in_dim,
                         ffn_dim,
                         out_dim,
@@ -61,6 +63,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         # from TransformerGeneralMixin
         args = get_args()
         self.num_layers = num_layers
+        self.num_heads = num_heads
         self.activation_recompute_method = args.recompute_method
         self.recompute_granularity = args.recompute_granularity
         self.recompute_num_layers = args.recompute_num_layers
@@ -72,7 +75,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         self.split_dim = context_parallel_dim
         self.gather_dim = context_parallel_dim
         for i in range(len(self.blocks)):
-            self.enable_context_parallel_attention(self.blocks[i].self_attn.attn)
+            self.enable_context_parallel(self.blocks[i].self_attn.attn)
     
     # TODO: grad reduce hook, gate grad reduce and modulation grad reduce
 

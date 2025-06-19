@@ -12,7 +12,6 @@ class ContextParallelGateModule(nn.Module):
 
 
 def gate_with_cp_grad_reduce(x, gate, residual):
-    logging.info(f"is grad enabled, {torch.is_grad_enabled()}")
     return GateWithGradReduce.apply(x, gate, residual)
 
 

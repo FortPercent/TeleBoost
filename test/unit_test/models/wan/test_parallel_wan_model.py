@@ -1,4 +1,6 @@
 import pytest 
+import os 
+import torch
 import torch.nn.functional as F
 from typing import Tuple, Optional, Callable
 from unittest import TestCase
@@ -9,8 +11,7 @@ import multiprocessing as mp
 import argparse
 from unit_test.test_utils import spawn
 import logging
-from teletron.models.wan import ParallelWanModel, WanModel
-from teletron.core import initialize_model_parallel
+import teletron
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
@@ -42,15 +43,19 @@ WAN_MODEL_FAIL = "Parallel Wan model forward test fail"
 
 
 @patch("teletron.get_args")
-def parallel_wan_model_testing(mock_get_args, rank, world_size, q):
+def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
+    from teletron.models.wan import ParallelWanModel, WanModel
+    from teletron.core import initialize_model_parallel
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
-    mock_get_args.return_value = args
+    mock_teletron.return_value = args
+
 
     cp_size = world_size
-    torch.distributed.init_process_group(world_size=world_size, rank=cp_rank)
+    torch.distributed.init_process_group(world_size=world_size, rank=rank)
+    torch.cuda.set_device(rank)
     initialize_model_parallel(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
@@ -76,7 +81,7 @@ def parallel_wan_model_testing(mock_get_args, rank, world_size, q):
             num_layers=wanConfig.num_layers,
             has_image_input=wanConfig.has_image_input,
             has_image_pos_emb=wanConfig.has_image_pos_emb
-        )
+        ).cuda().to(torch.bfloat16)
     parallel_wan_model = ParallelWanModel(
             dim=wanConfig.num_attention_heads * wanConfig.attention_head_dim,
             in_dim=wanConfig.in_channels,
@@ -90,24 +95,39 @@ def parallel_wan_model_testing(mock_get_args, rank, world_size, q):
             num_layers=wanConfig.num_layers,
             has_image_input=wanConfig.has_image_input,
             has_image_pos_emb=wanConfig.has_image_pos_emb
-        )
+        ).cuda().to(torch.bfloat16)
     parallel_wan_model.load_state_dict(wan_model.state_dict())
 
-    input_dict = torch.load("test_data/transformer_input.pt")
+    input_dict = torch.load("test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     wan_model_output = wan_model(**input_dict)
 
-    input_dict = torch.load("test_data/transformer_input.pt")
+    input_dict = torch.load("test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     parallel_wan_model_output = parallel_wan_model(**input_dict)
-
-    if torch.allclose(wan_model_output, parallel_wan_model_output):
-        q.put("{WAN_MODEL_SUCCESS} rank{rank}")
+    wan_norm = wan_model_output.norm().item()
+    parallel_norm = parallel_wan_model_output.norm().item()
+    logging.info(f"wan output: {wan_norm}, parallel output: {parallel_norm}")
+    euclid_dist = torch.norm(wan_model_output - parallel_wan_model_output)
+    logging.info(f"euclid dist:{euclid_dist}")
+    logging.info(f"normalized euclid dist: {0.5 * euclid_dist / (wan_norm + parallel_norm)}")
+    
+    if torch.allclose(wan_model_output, parallel_wan_model_output, rtol=1e-3):
+        q.put(f"{WAN_MODEL_SUCCESS} rank{rank}")
     else:
-        q.put("{WAN_MODEL_FAIL} rank{rank}")
+        q.put(f"{WAN_MODEL_FAIL} rank{rank}")
     
 
 
 
 class testParallelWanModel(TestCase):
     def test_forward(self):
-        cp_size = 4
-        spawn(cp_size, parallel_wan_model_testing)
+        cp_size = 2
+        os.environ['WORLD_SIZE'] = str(cp_size)
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '12445'
+        q = spawn(cp_size, parallel_wan_model_testing)
+        correct_responses = [f"{WAN_MODEL_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        responses = []
+        while not q.empty():
+            res = q.get()
+            responses.append(res)
+        self.assertEqual(sorted(responses), correct_responses)
