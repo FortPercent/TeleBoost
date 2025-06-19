@@ -59,6 +59,18 @@ class ContextParallelMixin:
         # remove pad must be called after pad
         return tensor.narrow(dim, 0, ContextParallelMixin.origin_length)
 
+    @staticmethod
+    def remove_pad_with_encoder_for_context_parallel(tensor, encoder_length, dim):
+        total_length = tensor.size(dim)
+        
+        split_point = total_length - encoder_length
+        first_raw = tensor.narrow(dim, 0, split_point)
+        first = first_raw.narrow(dim, 0, ContextParallelMixin.origin_length)
+
+        second = tensor.narrow(dim, split_point, encoder_length)
+
+        result = torch.cat([first, second], dim=dim)
+        return result
 
     def forward_attn(self, q, k, v):
         cp_group = mpu.get_context_parallel_group()
