@@ -5,8 +5,9 @@ import torch.nn.functional as F
 from einops import rearrange
 from megatron.core import mpu
 from yunchang.comm.all_to_all import SeqAllToAll4D
-from teletron.core.context_parallel.mappings import split_forward_gather_backward,\
-        gather_forward_split_backward
+from .mappings import split_forward_gather_backward, gather_forward_split_backward
+from .layers import GateWithGradReduce, ModulateWithCPGradReduce
+from teletron import get_args
 
 
 class ContextParallelMixin:
@@ -24,23 +25,26 @@ class ContextParallelMixin:
         attn_module.forward = self.forward_attn
     
     def split_input(self, x, dim):
-        # assert x is not parallel
-        self.origin_length = x.shape[dim]
-        self.padded_length = math.ceil(self.origin_length / self.cp_size) * self.cp_size
-        if self.padded_length != 0:
-            x = self.pad_for_context_parallel(x, dim)
-            
-        x = split_forward_gather_backward(x, self.cp_group, dim=dim, grad_scale="none")
+        # assume x is not parallel
+        cp_group = mpu.get_context_parallel_group()
+
+        x = self.pad_for_context_parallel(x, dim)
+        x = split_forward_gather_backward(x, cp_group, dim=dim, grad_scale="none")
         return x
     
     def gather_output(self, output, dim):
-        output = gather_forward_split_backward(output, self.cp_group, dim=dim, grad_scale="none")
-        if self.padded_length != 0:
-            output = self.remove_pad_for_context_parallel(output, dim)
+        # assume output is parallel
+        cp_group = mpu.get_context_parallel_group()
+        output = gather_forward_split_backward(output, cp_group, dim=dim, grad_scale="none")
+        output = self.remove_pad_for_context_parallel(output, dim)
         return output 
 
-    def pad_for_context_parallel(self, tensor, dim):
-        pad_size = int(self.padded_length - self.origin_length)
+    @staticmethod
+    def pad_for_context_parallel(tensor, dim):
+        cp_size = mpu.get_context_parallel_world_size()
+        ContextParallelMixin.origin_length = tensor.shape[dim]
+        ContextParallelMixin.padded_length = math.ceil(ContextParallelMixin.origin_length / cp_size) * cp_size
+        pad_size = int(ContextParallelMixin.padded_length - ContextParallelMixin.origin_length)
 
         if pad_size <= 0:
             return tensor  # No padding needed
@@ -50,20 +54,25 @@ class ContextParallelMixin:
         pad[-(2 * dim + 1)] = pad_size  # pad after the dimension
         return torch.nn.functional.pad(tensor, pad) 
     
-    def remove_pad_for_context_parallel(self, tensor, dim):
-        return tensor.narrow(dim, 0, self.origin_length)
+    @staticmethod
+    def remove_pad_for_context_parallel(tensor, dim):
+        # remove pad must be called after pad
+        return tensor.narrow(dim, 0, ContextParallelMixin.origin_length)
 
 
     def forward_attn(self, q, k, v):
-        # print("in attention qkv", q.shape, k.shape, v.shape)
-        q = rearrange(q, "b s (n d) -> b s n d", n=self.num_heads)
-        k = rearrange(k, "b s (n d) -> b s n d", n=self.num_heads)
-        v = rearrange(v, "b s (n d) -> b s n d", n=self.num_heads)
+        cp_group = mpu.get_context_parallel_group()
+        args = get_args()
+        num_heads = args.num_attention_heads
+        
+        q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
 
         # qkv: b s/CP n d
-        q = SeqAllToAll4D.apply(self.cp_group, q, 2, 1)
-        k = SeqAllToAll4D.apply(self.cp_group, k, 2, 1)
-        v = SeqAllToAll4D.apply(self.cp_group, v, 2, 1)
+        q = SeqAllToAll4D.apply(cp_group, q, 2, 1)
+        k = SeqAllToAll4D.apply(cp_group, k, 2, 1)
+        v = SeqAllToAll4D.apply(cp_group, v, 2, 1)
 
         # qkv: b s n/CP d
         q,k,v = map(
@@ -77,10 +86,9 @@ class ContextParallelMixin:
         # qkv: b n/CP s d
 
         x = F.scaled_dot_product_attention(q, k, v)
-        if x.shape[2] % self.cp_size != 0:
-            x = self.pad_for_context_parallel(x, 2)
+        x = self.pad_for_context_parallel(x, 2)
         x = SeqAllToAll4D.apply(
-            self.cp_group, x, 2, 1
+            cp_group, x, 2, 1
         )  # b img_seq sub_n d
         torch.cuda.empty_cache()
         # x: b n s/CP d
@@ -88,3 +96,9 @@ class ContextParallelMixin:
         # x: b s h
 
         return x
+
+    def gate_with_cp_grad_reduce(self, x, gate, residual):
+        return GateWithGradReduce.apply(x, gate, residual)
+    
+    def modulate_with_cp_grad_reduce(self, x, shift, scale):
+        return ModulateWithCPGradReduce.apply(x, shift, scale)

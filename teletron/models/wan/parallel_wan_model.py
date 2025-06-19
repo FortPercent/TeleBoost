@@ -1,27 +1,29 @@
 from typing import Tuple, Optional
 import torch
 import torch.nn as nn
-from teletron.core.context_parallel import ContextParallelMixin, \
-    modulate_with_cp_grad_reduce, gate_with_cp_grad_reduce
+from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from .wan_model import WanModel, DiTBlock, sinusoidal_embedding_1d
 from megatron.core import mpu 
-from teletron import get_args
 import logging
 
 
-class ContextParallelWanDitBlock(DiTBlock):
+class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
+    def __init__(self, *args, **kwargs):
+        DiTBlock.__init__(self, *args, **kwargs)
+        # from ContextParallelMixin
+        self.enable_context_parallel(self.self_attn.attn)
+
     def forward(self, x, context, t_mod, freqs):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
-
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
-        input_x = modulate_with_cp_grad_reduce(self.norm1(x), shift_msa, scale_msa)
+        input_x = self.modulate_with_cp_grad_reduce(self.norm1(x), shift_msa, scale_msa)
         attn_output = self.self_attn(input_x, freqs)
-        x = gate_with_cp_grad_reduce(x, gate_msa, attn_output)
+        x = self.gate_with_cp_grad_reduce(x, gate_msa, attn_output)
         x = x + self.cross_attn(self.norm3(x), context)
-        input_x = modulate_with_cp_grad_reduce(self.norm2(x), shift_mlp, scale_mlp)
-        x = gate_with_cp_grad_reduce(x, gate_mlp, self.ffn(input_x))
+        input_x = self.modulate_with_cp_grad_reduce(self.norm2(x), shift_mlp, scale_mlp)
+        x = self.gate_with_cp_grad_reduce(x, gate_mlp, self.ffn(input_x))
         return x
 
 
@@ -59,22 +61,11 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         ])
 
         # from TransformerGeneralMixin
-        args = get_args()
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.activation_recompute_method = args.recompute_method
-        self.recompute_granularity = args.recompute_granularity
-        self.recompute_num_layers = args.recompute_num_layers
         self.enable_activation_checkpointing(self.blocks)
-
+        
         # from ContextParallelMixin
-        self.cp_size = mpu.get_context_parallel_world_size()
-        self.cp_group = mpu.get_context_parallel_group()
-        self.split_dim = context_parallel_dim
-        self.gather_dim = context_parallel_dim
-        for i in range(len(self.blocks)):
-            self.enable_context_parallel(self.blocks[i].self_attn.attn)
         self.register_cp_grad_reduce_hook()
+
     
     def register_cp_grad_reduce_hook(self):
         
