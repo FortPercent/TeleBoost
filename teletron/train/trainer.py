@@ -1,44 +1,3 @@
-from megatron.training import (get_args,
-                               get_timers,
-                               update_num_microbatches,
-                               get_one_logger,
-                               get_num_microbatches,
-                               get_signal_handler,
-                               get_wandb_writer,
-                               get_tensorboard_writer,
-                               )
-from megatron.training.utils import (unwrap_model,
-                                     calc_params_l2_norm,
-                                     check_adlr_autoresume_termination
-                                     )
-from megatron.training.training import (update_train_iters,
-                                        get_train_valid_test_num_samples,
-                                        evaluate_and_print_results,
-                                        compute_throughputs_and_append_to_progress_log,
-                                        training_log)
-from megatron.training.checkpointing import (checkpoint_exists,
-                                             _load_base_checkpoint,
-                                             get_rng_state,
-                                             set_checkpoint_version,
-                                             get_checkpoint_version,
-                                             check_checkpoint_args,
-                                             fix_query_key_value_ordering,
-                                             get_checkpoint_tracker_filename,
-                                             read_metadata,
-                                             get_checkpoint_name,
-                                             get_distributed_optimizer_checkpoint_name,
-                                             ensure_directory_exists,
-                                             load_args_from_checkpoint,
-                                             )
-from megatron.training.arguments import parse_args, validate_args
-from megatron.training.initialize import (_initialize_distributed, 
-                                          _set_random_seed,
-                                          _init_autoresume,
-                                          _compile_dependencies, 
-                                          _initialize_tp_communicators,
-                                          set_jit_fusion_options)
-from teletron.core.data_loader import build_pretraining_data_loader
-from megatron.core.pipeline_parallel import get_forward_backward_func
 import torch
 import torch.distributed as dist
 import dataclasses
@@ -48,87 +7,81 @@ import numpy as np
 import sys
 import gc
 from typing import Callable, Dict, List, Optional
-_TRAIN_START_TIME = time.time()
-from megatron.core.transformer.module import MegatronModule
-from megatron.legacy.model import Float16Module
+from megatron.core.pipeline_parallel import get_forward_backward_func
+from megatron.core.transformer.module import MegatronModule, Float16Module
 from megatron.core.enums import ModelType
 from megatron.core.distributed import finalize_model_grads
-# from teletron.models.wan.light_pipeline import TeletronWanPipeline
-from teletron.core.parallel_state import get_transformer_model_group
-from megatron.training.global_vars import (set_global_variables,)
-
 from megatron.core import mpu, tensor_parallel, dist_checkpointing
 from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.training.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.optimizer import ( OptimizerConfig, 
                                      _get_param_groups,
                                      _update_min_and_max_lr_in_param_groups,
                                      _get_megatron_optimizer_based_on_param_groups,
                                      ChainedOptimizer,)
-from teletron.utils import (validate_yaml,
+        
+from vast.train.samplers import build_sampler as build_sampler_vast
+from vast.datasets import DefaultCollator
+from vast.datasets.datasets.build import build_dataset as build_dataset_vast
+from teletron.models.wan.wan_producer import producer_process
+from teletron.utils.scheduler import OptimizerParamScheduler
+from teletron.utils import (
                    print_rank_0,
                    print_datetime,
                    get_model_config,
+                   print_rank_last,
+                   is_last_rank,
                    num_floating_point_operations,
-
+                   validate_args,
+                   set_args,
+                   get_args,
+                   update_num_microbatches,
+                   get_num_microbatches,
                    )
+from teletron.datasets.build import build_dataset
+from teletron.train.utils import (_initialize_distributed,
+                                  _compile_dependencies,
+                                  set_jit_fusion_options,
+                                  core_transformer_config_from_args,
+                                  load_config_vast,
+                                  get_train_valid_test_num_samples,
+                                  forward_step,
+                                  _set_random_seed,
+                                  _initialize_tp_communicators,
+                                  update_train_iters,
+                                  )
+from teletron.utils.checkpoint import ( _load_base_checkpoint,
+                                       read_metadata,
+                                       get_checkpoint_name,
+                                       get_rng_state,
+                                       get_checkpoint_tracker_filename,
+                                       ensure_directory_exists,
+                                       checkpoint_exists,
+                                       get_distributed_optimizer_checkpoint_name,
+                                        )
+from teletron.core.parallel_state import get_transformer_model_group
+from teletron.core.data_loader import build_pretraining_data_loader
+from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
+from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
+from teletron.models.build import build_model
 from logging import getLogger
 logger = getLogger(__name__)
-from vast.models.dit.wan_dit import ModelManager
-from vast.pipelines.wan.wan_video import WanVideoPipeline
-from vast.models.dit.wan_dit import WanPrompter
-from vast.train.configs.config import load_config
-from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
-from vast.datasets.datasets.build import build_dataset as build_dataset_vast
-from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
-import collections
-from teletron.models.wan.wan_encoder_utils import get_encoder_features
-
-# 定义每个消费者将处理的Tensor数量
-NUM_ITEMS_PER_CONSUMER = 100000
+_TRAIN_START_TIME = time.time()
+ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
 
 
-# 生产者为每个消费者维护的GPU端队列的最大容量
-MAX_QUEUE_PER_CONSUMER_ON_PRODUCER = 2 # 用户要求的队列大小
-# 生产者为每个消费者同时进行的isend操作的最大数量 (提供更精细的发送流控)
-MAX_OUTSTANDING_SENDS_PER_CONSUMER = 1 # 允许最多isend在途
-class CudaTimer:
-    def __init__(self, desc="Code block"):
-        self.desc = desc
-        self.start_event = torch.cuda.Event(enable_timing=True)
-        self.end_event = torch.cuda.Event(enable_timing=True)
-    
-    def __enter__(self):
-        self.start_event.record()  # 记录起始时间点
-        return self
-    
-    def __exit__(self, *args):
-        self.end_event.record()  # 记录结束时间点
-        torch.cuda.synchronize()  # 同步确保计时准确[1,9](@ref)
-        elapsed_ms = self.start_event.elapsed_time(self.end_event)
-        print(f"[{self.desc}] GPU耗时: {elapsed_ms:.3f} ms ({elapsed_ms/1000:.3f} s)")
-# def cleanup_dist():
-#     # pass
-#     if dist.is_initialized():
-#         rank = dist.get_rank()
-#         dist.destroy_process_group()
-#         print(f"Rank {rank}: 进程组已销毁。")
-#     else:
-#         print("进程组未初始化或已被销毁。")
-
-def pack_tensors(tensors_to_flatten):
-    context_tensor = torch.flatten(tensors_to_flatten[0])
-    clip_tensor = torch.flatten(tensors_to_flatten[1])
-    img_tensor = torch.flatten(tensors_to_flatten[2])
-    latents_tensor = torch.flatten(tensors_to_flatten[3])
-    result = torch.cat((context_tensor, clip_tensor, img_tensor, latents_tensor), dim=0)
-    return result
-
-def get_tensors_size(tensor_list:list, device):
-    size_info = ()
-    for item in tensor_list:
-        size_info += item.size()
-    return torch.tensor(size_info, dtype=torch.int32, device=device)
+def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
+    return_list = True
+    if not isinstance(model, list):
+        model = [model]
+        return_list = False
+    unwrapped_model = []
+    for model_module in model:
+        while isinstance(model_module, module_instances):
+            model_module = model_module.module
+        unwrapped_model.append(model_module)
+    if not return_list:
+        return unwrapped_model[0]
+    return unwrapped_model
 
 def cyclic_iter(iter):
     while True:
@@ -137,24 +90,23 @@ def cyclic_iter(iter):
 
 class Trainer:
     def __init__(self, 
-                 model_provider_func, 
-                 dataset_provide_func, 
-                 model_type,
-                 extra_args_provider,
-                 args_defaults):
+                 args,
+                 dataset_provide_func=None, 
+                 ):
+        # args = args_tmp
 
-        self.initialize_megatron(extra_args_provider, args_defaults)
+        self.initialize_megatron(args)
+        set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
-
         if transformer_group is None:
-            self.producer_process(
-                dist.get_rank(), 
-                dist.get_world_size(),
-                self.build_train_valid_test_data_iterators, 
-                self.train_valid_test_datasets_provider
+            train_ds, _, _ = self.build_train_valid_test_datasets()
+            producer_process(
+                rank=dist.get_rank(), 
+                world_size=dist.get_world_size(),
+                build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+                train_ds=train_ds,
             )
             exit()        
-        set_jit_fusion_options()
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
                                         dtype=torch.double,
@@ -165,322 +117,18 @@ class Trainer:
         print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
             time.time() - _TRAIN_START_TIME))
         print_datetime('after megatron is initialized')
+        
+
         self.model, self.optimizer, self.scheduler = \
-            self.setup_model_and_optimizer(model_provider_func, model_type)
+                                self.setup_model_and_optimizer(args.model_type)
+                
         self.train_itrt, self.valid_itrt, self.test_itrt = \
-            self.get_iterator(len(self.model), dataset_provide_func)
+                                self.get_iterator(len(self.model), dataset_provide_func)
         
         self.config = get_model_config(self.model[0])
 
-    def load_config_vast(self):
-        args = get_args()
-        if args.task_type == "t2v":
-            print("loading t2v config")
-            from config.hunyuanvideo_t2v import config
-        elif args.task_type == "i2v":
-            print("loading i2v config")
-            from config.hunyuanvideo_i2vhy import config 
-        elif args.task_type == "i2v_multimask":
-            print("loading i2v_multimask config")
-            from config.hunyuanvideo_i2v_multimask import config
-        elif args.task_type == "i2vhy_token_replace":
-            print("loading i2vhy_token_replace config")
-            from config.hunyuanvideo_i2vhy_token_replace import config
-        elif args.task_type == "t2i_wanvae": 
-            print("loading t2i_wanvae config")
-            from config.hunyuanvideo_t2i_wanvae import config
-        elif args.task_type == "wan_flf":
-            from config.wan_flf import config
-        elif args.task_type == "wan_i2v_prone":
-            from config.prone10_lowerlr import config
-        else:
-            return None
-        config_vast = load_config(config)
-        return config_vast
-    
-    def train_valid_test_datasets_provider(self,train_val_test_num_samples, dp_rank=None, dp_size=None):
 
-        args = get_args()
-
-        print_rank_0("> building train, validation, and test datasets for multimodal ...")
-
-        if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
-            train_ds = build_dataset(args.dataset_type)
-            valid_ds = None
-            test_ds = None
-        elif args.dataset_type == "VastDataset": 
-            global_config = self.load_config_vast()
-            train_ds_config = global_config.dataloaders.train
-            eval_ds_config = global_config.dataloaders.get("eval", None)
-            ds_config = HunyuanVideoDatasetConfig(
-                train_ds_config=train_ds_config,
-                eval_ds_config=eval_ds_config
-            )
-            dataset = build_dataset_vast(train_ds_config.dataset)
-            train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
-                dataset,
-                train_val_test_num_samples,
-                lambda: True,
-                ds_config,
-            ).build()
-
-        elif args.dataset_type == "BucketDataset": 
-            global_config = load_config_vast()
-            assert global_config.sampler.type == "BucketVariableBatchSampler"
-            assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
-            assert args.task_type == "t2i_wanvae", "BucketDataset is only supported for t2i_wanvae task"
-            print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
-
-            dataset = build_dataset_vast(global_config.dataset)
-            if dp_rank is None or dp_size is None:
-                sampler = build_sampler_vast(
-                    global_config.sampler,
-                    dataset=dataset, 
-                    rank=mpu.get_data_parallel_rank(),
-                    num_replicas=mpu.get_data_parallel_world_size(),
-                    seed=args.seed
-                )
-            else:
-                sampler = build_sampler_vast(
-                    global_config.sampler,
-                    dataset=dataset, 
-                    rank=dp_rank,
-                    num_replicas=dp_size,
-                    seed=args.seed
-                )
-            # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
-            # if iteration is None:
-            sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
-            # else:
-                # sampler.last_micro_batch_access_index = iteration * sampler.num_replicas
-
-            collator = DefaultCollator(is_equal=True)
-            train_ds = torch.utils.data.DataLoader(
-                dataset,
-                batch_sampler=sampler,
-                collate_fn=collator,
-                num_workers=global_config.dataloader.num_workers
-            )
-            train_ds = iter(train_ds)
-            valid_ds = None
-            test_ds = None
-        else:
-            raise NotImplementedError
-
-        print_rank_0("> finished creating multimodal datasets ...")
-
-        return train_ds, valid_ds, test_ds
-
-    def build_train_valid_test_data_iterators(
-            build_train_valid_test_datasets_provider, is_tp_first = None, dp_rank = None, dp_size = None, train_ds_prev=None):
-        """Build pretraining data iterators."""
-
-        args = get_args()
-
-        # Build loaders.
-        print("Building loaders.")
-        train_dataloader, valid_dataloader, test_dataloader = \
-            self.build_train_valid_test_data_loaders(
-                build_train_valid_test_datasets_provider, is_tp_first,dp_rank,dp_size, train_ds_prev)
-        
-        # Build iterators.
-        print("Building iterators.")
-        dl_type = args.dataloader_type
-
-        assert dl_type in ['single', 'cyclic', 'external']
-
-        def _get_iterator(dataloader_type, dataloader):
-            """Return dataset iterator."""
-            if dataloader_type == "single":
-                return iter(dataloader)
-            elif dataloader_type == "cyclic":
-                return iter(cyclic_iter(dataloader))
-            elif dataloader_type == "external":
-                # External dataloader is passed through. User is expected to define how to iterate.
-                return dataloader
-            else:
-                raise RuntimeError("unexpected dataloader type")
-
-        if train_dataloader is not None:
-            train_data_iterator = _get_iterator(dl_type, train_dataloader)
-        else:
-            train_data_iterator = None
-
-        if valid_dataloader is not None:
-            valid_data_iterator = _get_iterator(dl_type, valid_dataloader)
-        else:
-            valid_data_iterator = None
-
-        if test_dataloader is not None:
-            test_data_iterator = _get_iterator(dl_type, test_dataloader)
-        else:
-            test_data_iterator = None
-
-        return train_data_iterator, valid_data_iterator, test_data_iterator
-    def producer_process(self, rank, world_size,build_train_valid_test_data_iterators, train_valid_test_dataset_provider, 
-                    train_ds=None, ):
-        # import  ipdb; ipdb.set_trace()
-        model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
-        model_path = ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
-
-        model_manager.load_models(model_path)
-        pipe = WanVideoPipeline.from_model_manager(model_manager)
-        text_encoder=pipe.text_encoder.to(device=torch.cuda.current_device())
-        image_encoder=pipe.image_encoder.to(device=torch.cuda.current_device())
-        vae = pipe.vae.to(device=torch.cuda.current_device(),dtype=torch.bfloat16)
-        del pipe
-
-        prompter = WanPrompter()
-        prompter.fetch_models(text_encoder)
-        prompter.fetch_tokenizer("/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
-        
-        image_encoder.eval()
-        vae.eval()
-        tiler_kwargs = {
-            "tiled": True, 
-            "tile_size":  (34, 34), 
-            "tile_stride": (18, 16)
-        }
-
-        args = get_args()
-        import os
-
-        dit_world_size = args.dit_world_size
-        producer_size = world_size - dit_world_size
-
-        torch.manual_seed(1234 + rank)
-        compute_stream = torch.cuda.Stream()
-        comm_stream = torch.cuda.Stream()
-
-        from teletron.core.parallel_state import get_comm_pair
-        comm_pairs = get_comm_pair()
-        #print(f"Rank:{rank}, comm_pairs: {comm_pairs}", flush=True)
-
-        consumers_data = torch.zeros(
-            (len(comm_pairs), 3), dtype=torch.int64, device=torch.cuda.current_device()
-        )
-        consumers_queue = []
-        idx=0
-        for ccs in comm_pairs:
-            req = dist.irecv(tensor=consumers_data[idx], src=ccs.consumer, tag=0)
-            consumers_queue.append(req)
-            idx+=1
-
-        while len(consumers_queue) > 0:
-            for ccs_req in  consumers_queue:
-                print(len(consumers_queue))
-                
-                if ccs_req.is_completed():
-                    consumers_queue.remove(ccs_req)
-            time.sleep(0.1)
-
-        args.iteration = consumers_data[0][0]
-        args.consumed_train_samples = consumers_data[0][1]
-        args.consumed_valid_samples = consumers_data[0][2]
-
-        train_data_iterators = {comm_pair.consumer: None for comm_pair in comm_pairs}
-        valid_data_iterators = {comm_pair.consumer: None for comm_pair in comm_pairs}
-        test_data_iterators = {comm_pair.consumer: None for comm_pair in comm_pairs}
-
-        for comm_pair in comm_pairs:
-            train_data_iterators[comm_pair.consumer], valid_data_iterators[comm_pair.consumer], test_data_iterators[comm_pair.consumer] \
-                    = build_train_valid_test_data_iterators(
-                        train_valid_test_dataset_provider, 
-                        is_tp_first = True, 
-                        dp_rank = comm_pair.dp_rank, 
-                        dp_size = comm_pair.dp_size, 
-                        train_ds_prev =train_ds )
-            
-        consumers_data_queues = {
-            crank.consumer: collections.deque() for crank in comm_pairs
-        }
-        consumers_size_queues = {
-            crank.consumer: collections.deque() for crank in comm_pairs
-        }
-
-        items_initiated_send_for_consumer = {crank.consumer: 0 for crank in comm_pairs}
-
-        send_size_in_flight = []
-        send_features_in_flight = []
-
-        try:
-            while any(items_initiated_send_for_consumer[crank.consumer] < NUM_ITEMS_PER_CONSUMER for crank in comm_pairs):
-                new_send_size_in_flight = []
-                for req, cr, item_idx_req, size2send in send_size_in_flight:
-                    if req.is_completed():
-                        with torch.cuda.stream(comm_stream):
-                            tensor2send = consumers_data_queues[cr].popleft()
-                            comm_stream.wait_stream(compute_stream)
-                            req_data = dist.isend(tensor=tensor2send, dst=cr, tag=1) # tag=1是示例，应与接收方匹配
-                            send_features_in_flight.append((req_data, cr, item_idx_req, tensor2send))
-                    else:
-                        new_send_size_in_flight.append((req, cr, item_idx_req, size2send))
-                send_size_in_flight = new_send_size_in_flight
-
-                for current_comm_pair in comm_pairs:
-                    items_in_queue = len(consumers_data_queues[current_comm_pair.consumer])
-                    if items_in_queue < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
-                        print(f"Rank {rank}: Queue for {current_comm_pair.consumer} has {items_in_queue} data. Generating new data.")
-                        
-                        with torch.cuda.stream(compute_stream):
-                            data = next(train_data_iterators[current_comm_pair.consumer])
-                            batch = dict(data)
-                            
-                            with CudaTimer("encoder time"): 
-                                prompt_emb, image_emb, latents = get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder)
-                            
-                            context = prompt_emb['context']
-                            img_clip_feature = image_emb["clip_feature"]
-                            img_emb_y = image_emb["y"]
-                            
-                            consumer_size_info = get_tensors_size((context, img_clip_feature, img_emb_y, latents), device=torch.cuda.current_device())
-                            tensor_to_send = pack_tensors([context, img_clip_feature, img_emb_y, latents])
-
-                        consumers_size_queues[current_comm_pair.consumer].append(consumer_size_info)
-                        consumers_data_queues[current_comm_pair.consumer].append(tensor_to_send)
-
-                for current_comm_pair in comm_pairs:
-                    outstanding_sends_for_this_consumer = sum(
-                        1 for _, cr, _, _ in send_size_in_flight if cr == current_comm_pair.consumer
-                    )
-
-                    if consumers_size_queues[current_comm_pair.consumer] and \
-                    outstanding_sends_for_this_consumer < MAX_OUTSTANDING_SENDS_PER_CONSUMER:
-                        
-                        with torch.cuda.stream(comm_stream):
-                            size_to_send = consumers_size_queues[current_comm_pair.consumer].popleft()
-                            current_item_idx_to_send = items_initiated_send_for_consumer[current_comm_pair.consumer]
-                            comm_stream.wait_stream(compute_stream)
-                            req = dist.isend(tensor=size_to_send, dst=current_comm_pair.consumer, tag=0) # tag=0 for size
-                            send_size_in_flight.append((req, current_comm_pair.consumer, current_item_idx_to_send, size_to_send))
-                            items_initiated_send_for_consumer[current_comm_pair.consumer] += 1
-
-                new_send_features_in_flight = []
-                for req, cr, item_idx_req, tensor2send in send_features_in_flight:
-                    if req.is_completed():
-                        del tensor2send
-                    else:
-                        new_send_features_in_flight.append((req, cr, item_idx_req, tensor2send))
-                send_features_in_flight = new_send_features_in_flight
-                
-                time.sleep(0.01)
-
-            for req, _, _, _ in send_size_in_flight:
-                req.wait()
-            for req, _, _, _ in send_features_in_flight:
-                req.wait()
-
-            dist.barrier(group=get_world_group())
-
-        except Exception as e:
-            #print(f"producer (Rank {rank}) error: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-        finally:
-            cleanup_dist()   
-
-    def setup_model_and_optimizer(self, 
-                                  model_provider_func, 
+    def setup_model_and_optimizer(self,  
                                   model_type,
                                   no_wd_decay_cond=None,
                                   scale_lr_cond=None,
@@ -488,29 +136,29 @@ class Trainer:
 
         
         args = get_args()
-        timers = get_timers()
+        # timers = get_timers()
         # set_jit_fusion_options()
         
         assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
-        timers = get_timers()
-        model = self.get_model(model_provider_func, model_type)
+        # timers = get_timers()
+        model = self.get_model(model_type)
         unwrapped_model = unwrap_model(model)
         kwargs = {}
         for f in dataclasses.fields(OptimizerConfig):
             if hasattr(args, f.name):
                 kwargs[f.name] = getattr(args, f.name)
         config = OptimizerConfig(**kwargs)
-        config.timers = timers
+        config.timers = None
         optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
                                         scale_lr_cond, lr_mult)
         
         opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
         if args.load is not None or args.pretrained_checkpoint is not None:
-            timers('load-checkpoint', log_level=0).start(barrier=True)
+            # timers('load-checkpoint', log_level=0).start(barrier=True)
             args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
                 model, optimizer, opt_param_scheduler, strict=True)
-            timers('load-checkpoint').stop(barrier=True)
-            timers.log(['load-checkpoint'])
+            # timers('load-checkpoint').stop(barrier=True)
+            # timers.log(['load-checkpoint'])
         else:
             args.iteration = 0
             args.num_floating_point_operations_so_far = 0
@@ -713,7 +361,19 @@ class Trainer:
         return ChainedOptimizer(optimizers)
 
 
-    def get_model(self, model_provider_func,
+    def model_provider(self,
+                        pre_process=True,
+                        post_process=True,
+                        add_encoder=True,
+                        add_decoder=True,
+                        parallel_output=True):
+        args=get_args()
+        cfg = core_transformer_config_from_args(args)
+        # breakpoint()
+        return build_model(args.model, cfg)
+
+
+    def get_model(self,
                    model_type=ModelType.encoder_or_decoder, 
                    wrap_with_ddp=True):
         args = get_args()
@@ -728,7 +388,7 @@ class Trainer:
                 # Set pre_process and post_process only after virtual rank is set.
                 pre_process = mpu.is_pipeline_first_stage()
                 post_process = mpu.is_pipeline_last_stage()
-                this_model = model_provider_func(
+                this_model = self.model_provider(
                     pre_process=pre_process,
                     post_process=post_process
                 )
@@ -751,21 +411,25 @@ class Trainer:
                             rank == (world_size - 1))
                     add_encoder = mpu.is_pipeline_stage_before_split()
                     add_decoder = mpu.is_pipeline_stage_after_split()
-                model = model_provider_func(
+                model = self.model_provider(
                     pre_process=pre_process,
                     post_process=post_process,
                     add_encoder=add_encoder,
                     add_decoder=add_decoder)
             else:
-                model = model_provider_func(
+                model = self.model_provider(
                     pre_process=pre_process,
                     post_process=post_process
                 )
+            # breakpoint()
             model.model_type = model_type
+
+        # breakpoint()
 
         if not isinstance(model, list):
             model = [model]
 
+        # breakpoint()
         # Set tensor model parallel attributes if not set.
         # Only parameters that are already tensor model parallel have these
         # attributes set for them. We should make sure the default attributes
@@ -780,13 +444,12 @@ class Trainer:
 
         # Fp16 conversion.
         if args.fp16 or args.bf16:
-            model = [Float16Module(model_module, args) for model_module in model]
+            model = [Float16Module(module=model_module, config=model_module.config) for model_module in model]
         #import ipdb; ipdb.set_trace()
+        # breakpoint()
         if wrap_with_ddp:
-            from argparse import Namespace
-            from megatron.training.arguments import core_transformer_config_from_args
-            args = get_args()
-            config = core_transformer_config_from_args(args)
+            config = get_model_config(model[0])
+            # breakpoint()
             model = [DDP(config,
                         model_chunk,
                         data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
@@ -866,7 +529,7 @@ class Trainer:
             return 0, 0
 
         # Set checkpoint version.
-        set_checkpoint_version(state_dict.get('checkpoint_version', 0))
+        # set_checkpoint_version(state_dict.get('checkpoint_version', 0))
 
         # Set iteration.
         if args.finetune or release:
@@ -888,7 +551,7 @@ class Trainer:
         assert args.consumed_valid_samples == 0
         if 'args' in state_dict and not args.finetune:
             checkpoint_args = state_dict['args']
-            check_checkpoint_args(checkpoint_args)
+            # check_checkpoint_args(checkpoint_args)
             args.consumed_train_samples = getattr(checkpoint_args,
                                                 'consumed_train_samples', 0)
             update_num_microbatches(consumed_samples=args.consumed_train_samples)
@@ -901,6 +564,7 @@ class Trainer:
         strict = False if args.retro_add_retriever else strict
 
         if args.lora == True:
+            raise NotImplementedError('Lora not implement yet')
             from peft import get_peft_model, LoraConfig, TaskType
             from teletron.models.wan.light_pipeline import find_lora_target_modules
             base_model_path = args.lora_base_model_path
@@ -933,9 +597,9 @@ class Trainer:
                     model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
 
         # Fix up query/key/value matrix ordering if needed.
-        checkpoint_version = get_checkpoint_version()
-        print_rank_0(f' checkpoint version {checkpoint_version}')
-        fix_query_key_value_ordering(model, checkpoint_version)
+        # checkpoint_version = get_checkpoint_version()
+        # print_rank_0(f' checkpoint version {checkpoint_version}')
+        # fix_query_key_value_ordering(model, checkpoint_version)
 
         # Optimizer.
         if not release and not args.finetune and not args.no_load_optim:
@@ -1131,7 +795,8 @@ class Trainer:
 
     def get_iterator(self, 
                      len_model:int, 
-                     train_valid_test_dataset_provider):
+                     train_valid_test_dataset_provider,
+                     ):
         args = get_args()
         if args.virtual_pipeline_model_parallel_size is not None:
             train_itrt = []
@@ -1145,25 +810,96 @@ class Trainer:
                 valid_itrt.append(iterators[1])
                 test_itrt.append(iterators[2])
         else:
-            train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets(train_valid_test_dataset_provider)
+            train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets()
             train_itrt, valid_itrt, test_itrt \
                 = self.build_train_valid_test_data_iterators(
                     train_valid_test_dataset_provider, train_ds_prev=train_ds)
         return train_itrt, valid_itrt, test_itrt
             
 
-    def build_train_valid_test_datasets(self, build_train_valid_test_datasets_provider):
+    def build_train_valid_test_datasets(self, dp_rank=None, dp_size=None):
         """Build pretraining datasets."""
         train_valid_test_num_samples = get_train_valid_test_num_samples()
         print_rank_0(' > datasets target sizes (minimum size):')
         print_rank_0('    train:      {}'.format(train_valid_test_num_samples[0]))
         print_rank_0('    validation: {}'.format(train_valid_test_num_samples[1]))
         print_rank_0('    test:       {}'.format(train_valid_test_num_samples[2]))
-        return build_train_valid_test_datasets_provider(train_valid_test_num_samples)
+        args = get_args()
 
+        print_rank_0("> building train, validation, and test datasets for multimodal ...")
+
+        if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
+            train_ds = build_dataset(args.dataset_type)
+            valid_ds = None
+            test_ds = None
+        elif args.dataset_type == "VastDataset": 
+            global_config = load_config_vast()
+            train_ds_config = global_config.dataloaders.train
+            eval_ds_config = global_config.dataloaders.get("eval", None)
+            ds_config = HunyuanVideoDatasetConfig(
+                train_ds_config=train_ds_config,
+                eval_ds_config=eval_ds_config
+            )
+            dataset = build_dataset_vast(train_ds_config.dataset)
+            train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
+                dataset,
+                train_valid_test_num_samples,
+                lambda: True,
+                ds_config,
+            ).build()
+
+        elif args.dataset_type == "BucketDataset": 
+            global_config = load_config_vast()
+            assert global_config.sampler.type == "BucketVariableBatchSampler"
+            assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
+            assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
+            print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
+
+            dataset = build_dataset_vast(global_config.dataset)
+            if dp_rank is None or dp_size is None:
+                sampler = build_sampler_vast(
+                    global_config.sampler,
+                    dataset=dataset, 
+                    rank=mpu.get_data_parallel_rank(),
+                    num_replicas=mpu.get_data_parallel_world_size(),
+                    seed=args.seed
+                )
+            else:
+                sampler = build_sampler_vast(
+                    global_config.sampler,
+                    dataset=dataset, 
+                    rank=dp_rank,
+                    num_replicas=dp_size,
+                    seed=args.seed
+                )
+            # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
+            # if iteration is None:
+            sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
+            # else:
+                # sampler.last_micro_batch_access_index = iteration * sampler.num_replicas
+
+            collator = DefaultCollator(is_equal=True)
+            train_ds = torch.utils.data.DataLoader(
+                dataset,
+                batch_sampler=sampler,
+                collate_fn=collator,
+                num_workers=global_config.dataloader.num_workers
+            )
+            train_ds = iter(train_ds)
+            valid_ds = None
+            test_ds = None
+        else:
+            raise NotImplementedError
+
+        print_rank_0("> finished creating multimodal datasets ...")
+
+        return train_ds, valid_ds, test_ds
 
     def build_train_valid_test_data_loaders(self,
-            build_train_valid_test_datasets_provider, is_tp_fist = None, dp_rank = None, dp_size = None,  train_ds_prev = None):
+                                            is_tp_first = None,
+                                            dp_rank = None, 
+                                            dp_size = None,  
+                                            train_ds_prev = None):
         """Build pretraining data loaders."""
 
         args = get_args()
@@ -1182,43 +918,41 @@ class Trainer:
                     args.eval_iters * args.global_batch_size
 
         # Rely on distributed-aware core datasets, temporary
-        is_distributed = getattr(build_train_valid_test_datasets_provider, "is_distributed", False)
+        # is_distributed = getattr(build_train_valid_test_datasets_provider, "is_distributed", False)
         # print(f"cs rank: {dist.get_rank()}, is_distributed: {is_distributed}")
 
         # Construct the data pipeline
-        
         # if is_distributed or mpu.get_tensor_model_parallel_rank() == 0:
-        if is_tp_fist is None:
-            is_tp_fist = (mpu.get_tensor_model_parallel_rank() == 0)
+        # if is_tp_fist is None:
+        #     is_tp_fist = (mpu.get_tensor_model_parallel_rank() == 0)
         
-        if is_distributed or is_tp_fist:
+        # if is_distributed or is_tp_fist:
             # Build datasets.
-            if train_ds_prev is not None:
-                train_ds = train_ds_prev
-                valid_ds = None
-                test_ds = None
-            else:
-                train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets(
-                    build_train_valid_test_datasets_provider)
-            # Build dataloders.
-            train_dataloader = build_pretraining_data_loader(
-                train_ds, args.consumed_train_samples, dp_rank, dp_size )
-            if args.skip_train:
-                valid_dataloader = build_pretraining_data_loader(valid_ds, 0, dp_rank, dp_size )
-            else:
-                valid_dataloader = build_pretraining_data_loader(
-                    valid_ds, args.consumed_valid_samples, dp_rank, dp_size )
-            test_dataloader = build_pretraining_data_loader(test_ds, 0,  dp_rank, dp_size )
-
-            # Flags to know if we need to do training/validation/testing.
-            do_train = train_dataloader is not None and args.train_iters > 0
-            do_valid = valid_dataloader is not None and args.eval_iters > 0
-            do_test = test_dataloader is not None and args.eval_iters > 0
-            flags = torch.tensor(
-                [int(do_train), int(do_valid), int(do_test)],
-                dtype=torch.long, device='cuda')
+        if train_ds_prev is not None:
+            train_ds = train_ds_prev
+            valid_ds = None
+            test_ds = None
         else:
-            flags = torch.tensor([0, 0, 0], dtype=torch.long, device='cuda')
+            train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets()
+        # Build dataloders.
+        train_dataloader = build_pretraining_data_loader(
+            train_ds, args.consumed_train_samples, dp_rank, dp_size )
+        if args.skip_train:
+            valid_dataloader = build_pretraining_data_loader(valid_ds, 0, dp_rank, dp_size )
+        else:
+            valid_dataloader = build_pretraining_data_loader(
+                valid_ds, args.consumed_valid_samples, dp_rank, dp_size )
+        test_dataloader = build_pretraining_data_loader(test_ds, 0,  dp_rank, dp_size )
+
+        # Flags to know if we need to do training/validation/testing.
+        do_train = train_dataloader is not None and args.train_iters > 0
+        do_valid = valid_dataloader is not None and args.eval_iters > 0
+        do_test = test_dataloader is not None and args.eval_iters > 0
+        flags = torch.tensor(
+            [int(do_train), int(do_valid), int(do_test)],
+            dtype=torch.long, device='cuda')
+        # else:
+        #     flags = torch.tensor([0, 0, 0], dtype=torch.long, device='cuda')
 
         if dp_rank is None or dp_size is None:
             torch.distributed.broadcast(flags, 0)
@@ -1231,7 +965,10 @@ class Trainer:
 
 
     def build_train_valid_test_data_iterators(self,
-            build_train_valid_test_datasets_provider, is_tp_first = None, dp_rank = None, dp_size = None, train_ds_prev=None):
+                    is_tp_first = None,
+                    dp_rank = None, 
+                    dp_size = None, 
+                    train_ds_prev=None):
         """Build pretraining data iterators."""
 
         args = get_args()
@@ -1240,7 +977,7 @@ class Trainer:
         print("Building loaders.")
         train_dataloader, valid_dataloader, test_dataloader = \
             self.build_train_valid_test_data_loaders(
-                build_train_valid_test_datasets_provider, is_tp_first,dp_rank,dp_size, train_ds_prev)
+                is_tp_first, dp_rank, dp_size, train_ds_prev)
         
         # Build iterators.
         print("Building iterators.")
@@ -1279,43 +1016,21 @@ class Trainer:
 
 
     def initialize_megatron(self,
-            extra_args_provider=None,
-            args_defaults={},
-            ignore_unknown_args=False,
-            allow_no_cuda=False,
-            skip_mpu_initialization=False,
+                            args,
         ):
 
-        if not allow_no_cuda:
-            # Make sure cuda is available.
-            assert torch.cuda.is_available(), "Megatron requires CUDA."
-
-        # Parse arguments
-        args = parse_args(extra_args_provider, ignore_unknown_args)
         if args.distributed_vae:
             args.world_size -= args.distributed_vae_world_size
             args.dit_world_size = args.world_size
-        # print("before set global vars: ", args.world_size) 
-        if args.use_checkpoint_args or args_defaults.get("use_checkpoint_args", False):
-            assert args.load is not None, "--use-checkpoints-args requires --load argument"
-            load_args_from_checkpoint(args)
-        
 
-        if args.yaml_cfg is not None:
-            args = validate_yaml(args, args_defaults)
-        else:
-            validate_args(args, args_defaults)
-        
-        set_global_variables(args)
+        validate_args(args)
+        set_args(args)
+
         if args.distributed_vae:
             args.world_size += args.distributed_vae_world_size
-        # print("initial world size: ", args.world_size)
         def finish_mpu_init():
             args = get_args()
-            # Pytorch distributed.
             _initialize_distributed()
-
-            # Random seeds for reproducibility.
             if args.rank == 0:
                 print("> setting random seeds to {} ...".format(args.seed))
 
@@ -1323,12 +1038,7 @@ class Trainer:
             isDiTRank = get_transformer_model_group()
             if isDiTRank is not None:
                 _set_random_seed(args.seed, args.data_parallel_random_init)
-
-        if skip_mpu_initialization:
-            return None
-
         args = get_args()
-
         
         if args.lazy_mpu_init:
             args.use_cpu_initialization = True
@@ -1343,7 +1053,7 @@ class Trainer:
             # Megatron's MPU is the master. Complete initialization right away.
             finish_mpu_init()
             # Autoresume.
-            _init_autoresume()
+            # _init_autoresume()
             # Compile dependencies.
             from teletron.core.parallel_state import get_transformer_model_group
             isConsumerRank = get_transformer_model_group()
@@ -1353,16 +1063,15 @@ class Trainer:
                 _initialize_tp_communicators()
             # No continuation function
             return None
-
+    
 
     def pretrain(self, 
-              forward_step_func,
+              forward_step_func=forward_step,
               process_non_loss_data_func=None,
               ):
         args = get_args()
-        timers = get_timers()
+
         if args.distributed_vae:
-            # print("distributed_vae")
             consumer_config = torch.zeros(
                 (3), dtype=torch.int64, device=torch.cuda.current_device()
             )
@@ -1374,17 +1083,11 @@ class Trainer:
             comm_pair = get_comm_pair()
 
             if comm_pair is not None:
-                req = dist.isend(tensor=consumer_config, dst=comm_pair.producer , tag=0)
+                req = dist.isend(tensor=consumer_config, dst=comm_pair.producer, tag=0)
                 req.wait()
-        timers('train/valid/test-data-iterators-setup').stop()
         print_datetime('after dataloaders are built')
         print_rank_0('done with setup ...')
 
-        # import debugpy,os
-        # dist.barrier()
-        # if int(os.environ.get("RANK","0")) == 0:
-        #     debugpy.breakpoint()
-        # dist.barrier()
 
         if not args.skip_train:
             print_rank_0('training ...')
@@ -1398,6 +1101,7 @@ class Trainer:
             if args.do_train and args.train_iters > 0:
                 iteration, num_floating_point_operations_so_far = self.train(
                     forward_step_func,
+                    # forward_step_func,
                     self.model, self.optimizer, self.scheduler,
                     self.train_itrt, self.valid_itrt,
                     process_non_loss_data_func, self.config)
@@ -1413,32 +1117,29 @@ class Trainer:
 
         if args.do_valid:
             prefix = f'iteration {iteration} on validation set'
-            evaluate_and_print_results(prefix, forward_step_func,
+            self.evaluate_and_print_results(prefix, forward_step_func,
                                     self.valid_itrt, self.model,
                                     iteration, process_non_loss_data_func, self.config,
                                     verbose=True, write_to_tensorboard=not args.skip_train)
 
         if args.do_test:
             prefix = f'iteration {iteration} on test set'
-            evaluate_and_print_results(prefix, forward_step_func,
+            self.evaluate_and_print_results(prefix, forward_step_func,
                                     self.test_itrt, self.model,
                                     iteration, process_non_loss_data_func, self.config,
                                     verbose=True, write_to_tensorboard=not args.skip_train)
 
+
     def save_checkpoint_and_time(self, iteration, model, optimizer, opt_param_scheduler,
                              num_floating_point_operations_so_far):
         args = get_args()
-        timers = get_timers()
         # Extra barrier is added to make sure all ranks report the max time.
-        timers('save-checkpoint', log_level=0).start(barrier=True)
         self.save_checkpoint(iteration, model, optimizer, opt_param_scheduler,
                         num_floating_point_operations_so_far)
-        timers('save-checkpoint').stop(barrier=True)
-        timers.log(['save-checkpoint'])
 
-        if args.log_progress:
-            compute_throughputs_and_append_to_progress_log(iteration,
-                                                        num_floating_point_operations_so_far)
+        # if args.log_progress:
+        #     compute_throughputs_and_append_to_progress_log(iteration,
+        #                                                 num_floating_point_operations_so_far)
 
 
 
@@ -1452,30 +1153,17 @@ class Trainer:
                    process_non_loss_data_func,
                    config):
         args = get_args()
-        timers = get_timers()
         for model_module in model:
             model_module.train()
         total_loss_dict = {}
 
         # Iterations.
         iteration = args.iteration
-        one_logger = get_one_logger()
-        if one_logger:
-            iteration_start = iteration
-            train_samples_start = args.consumed_train_samples
-            train_samples_target = args.train_samples
-            one_logger.log_metrics({
-                'train_samples_start': args.consumed_train_samples,
-                'train_iterations_start': iteration,
-                'train_samples_target': train_samples_target,
-                'train_iterations_target': args.train_iters,
-            })
 
         num_floating_point_operations_so_far = args.num_floating_point_operations_so_far
 
         # Setup some training config params
         config.grad_scale_func = self.optimizer.scale_loss
-        config.timers = timers
         if isinstance(model[0], DDP) and args.overlap_grad_reduce:
             assert config.no_sync_func is None, \
                 ('When overlap_grad_reduce is True, config.no_sync_func must be None; '
@@ -1494,7 +1182,6 @@ class Trainer:
                 config.param_sync_func = config.param_sync_func[0]
         config.finalize_model_grads_func = finalize_model_grads
 
-        timers('interval-time', log_level=0).start(barrier=True)
         print_datetime('before the start of training step')
         report_memory_flag = True
         exit = False
@@ -1510,26 +1197,23 @@ class Trainer:
         num_microbatches = get_num_microbatches()
         eval_duration = 0.0
         eval_iterations = 0
-        def track_e2e_metrics():
-            # Nested function to track a bunch of E2E APP metrics
-            if one_logger:
-                train_duration = timers('interval-time').active_time()  # overall_elapsed
-                train_samples = args.consumed_train_samples - train_samples_start
-                train_iterations = iteration - iteration_start
-                train_iterations_time_msecs_avg = (train_duration * 1000.0) / train_iterations
-                if eval_iterations:
-                    validation_iterations_time_msecs_avg = (eval_duration * 1000.0) / eval_iterations
-                else:
-                    validation_iterations_time_msecs_avg = None
+        # def track_e2e_metrics():
+        #     # Nested function to track a bunch of E2E APP metrics
+        #     if one_logger:
+        #         train_samples = args.consumed_train_samples - train_samples_start
+        #         train_iterations = iteration - iteration_start
+        #         if eval_iterations:
+        #             validation_iterations_time_msecs_avg = (eval_duration * 1000.0) / eval_iterations
+        #         else:
+        #             validation_iterations_time_msecs_avg = None
 
-                one_logger.log_metrics({
-                    'train_iterations_end': iteration,
-                    'train_samples_end': args.consumed_train_samples,
-                    'train_iterations': train_iterations,
-                    'train_samples': train_samples,
-                    'train_iterations_time_msecs_avg': train_iterations_time_msecs_avg,
-                    'validation_iterations_time_msecs_avg': validation_iterations_time_msecs_avg
-                })
+        #         one_logger.log_metrics({
+        #             'train_iterations_end': iteration,
+        #             'train_samples_end': args.consumed_train_samples,
+        #             'train_iterations': train_iterations,
+        #             'train_samples': train_samples,
+        #             'validation_iterations_time_msecs_avg': validation_iterations_time_msecs_avg
+        #         })
 
         while iteration < args.train_iters:
             if args.profile and \
@@ -1568,79 +1252,62 @@ class Trainer:
             num_floating_point_operations_so_far += num_floating_point_operations(args, batch_size)
 
             # Logging.
-            loss_scale = optimizer.get_loss_scale().item()
-            params_norm = None
-            if args.log_params_norm:
-                params_norm = calc_params_l2_norm(model)
+            # loss_scale = optimizer.get_loss_scale().item()
+            # params_norm = None
+            # if args.log_params_norm:
+            #     params_norm = calc_params_l2_norm(model)
 
-            if iteration % args.log_interval == 0:
-                track_e2e_metrics()
+            # # if iteration % args.log_interval == 0:
+            # #     track_e2e_metrics()
 
-            learning_rate = None
-            decoupled_learning_rate = None
-            for param_group in optimizer.param_groups:
-                if param_group['is_decoupled_lr']:
-                    decoupled_learning_rate = param_group['lr']
-                else:
-                    learning_rate = param_group['lr']
-            report_memory_flag = training_log(loss_dict, total_loss_dict,
-                                            learning_rate,
-                                            decoupled_learning_rate,
-                                            iteration, loss_scale,
-                                            report_memory_flag, skipped_iter,
-                                            grad_norm, params_norm, num_zeros_in_grad)
+            # learning_rate = None
+            # decoupled_learning_rate = None
+            # for param_group in optimizer.param_groups:
+            #     if param_group['is_decoupled_lr']:
+            #         decoupled_learning_rate = param_group['lr']
+            #     else:
+            #         learning_rate = param_group['lr']
+            # report_memory_flag = training_log(loss_dict, total_loss_dict,
+            #                                 learning_rate,
+            #                                 decoupled_learning_rate,
+            #                                 iteration, loss_scale,
+            #                                 report_memory_flag, skipped_iter,
+            #                                 grad_norm, params_norm, num_zeros_in_grad)
 
             # Autoresume
-            if args.adlr_autoresume and \
-            (iteration % args.adlr_autoresume_interval == 0):
-                check_adlr_autoresume_termination(iteration, model, optimizer,
-                                                opt_param_scheduler)
+            # if args.adlr_autoresume and \
+            # (iteration % args.adlr_autoresume_interval == 0):
+            #     check_adlr_autoresume_termination(iteration, model, optimizer,
+            #                                     opt_param_scheduler)
 
             # Evaluation
             if args.eval_interval and iteration % args.eval_interval == 0 and \
-            args.do_valid:
-                timers('interval-time').stop()
+                    args.do_valid:
                 if args.use_distributed_optimizer and args.overlap_param_gather:
                     optimizer.disable_pre_hook()
                 if args.manual_gc and args.manual_gc_eval:
                     # Collect all objects.
                     gc.collect()
                 prefix = 'iteration {}'.format(iteration)
-                timers('eval-time', log_level=0).start(barrier=True)
-                evaluate_and_print_results(prefix, forward_step_func,
+                self.evaluate_and_print_results(prefix, forward_step_func,
                                         valid_data_iterator, model,
                                         iteration, process_non_loss_data_func,
                                         config, False)
-                eval_duration += timers('eval-time').elapsed()
                 eval_iterations += args.eval_iters
-                timers('eval-time').stop()
                 if args.manual_gc and args.manual_gc_eval:
                     # Collect only the objects created and used in evaluation.
                     gc.collect(generation=0)
                 if args.use_distributed_optimizer and args.overlap_param_gather:
                     optimizer.enable_pre_hook()
-                timers('interval-time', log_level=0).start(barrier=True)
 
             # Checkpointing
             saved_checkpoint = False
-            if args.exit_signal_handler:
-                signal_handler = get_signal_handler()
-                if any(signal_handler.signals_received()):
-                    self.save_checkpoint_and_time(iteration, model, optimizer,
-                                            opt_param_scheduler,
-                                            num_floating_point_operations_so_far)
-                    print_datetime('exiting program after receiving SIGTERM.')
-                    exit = True
-                    break
-
             if args.save and args.save_interval and \
-            iteration % args.save_interval == 0:
-                timers('interval-time').stop()
+                            iteration % args.save_interval == 0:
                 self.save_checkpoint_and_time(iteration, model, optimizer,
                                         opt_param_scheduler,
                                         num_floating_point_operations_so_far)
                 saved_checkpoint = True
-                timers('interval-time', log_level=0).start(barrier=True)
 
             # Exiting based on duration
             if args.exit_duration_in_mins:
@@ -1680,15 +1347,15 @@ class Trainer:
                 if args.manual_gc_interval != 0 and iteration % args.manual_gc_interval == 0:
                     gc.collect()
 
-        track_e2e_metrics()
+        # track_e2e_metrics()
 
         # Flush TensorBoard and WandB writers.
-        writer = get_tensorboard_writer()
-        if writer:
-            writer.flush()
-        wandb_writer = get_wandb_writer()
-        if wandb_writer:
-            wandb_writer.finish()
+        # writer = get_tensorboard_writer()
+        # if writer:
+        #     writer.flush()
+        # wandb_writer = get_wandb_writer()
+        # if wandb_writer:
+        #     wandb_writer.finish()
 
         # Close out pre-hooks if using distributed optimizer and overlapped param gather.
         if args.use_distributed_optimizer and args.overlap_param_gather:
@@ -1704,15 +1371,20 @@ class Trainer:
                model, optimizer, opt_param_scheduler, config):
         """Single training step."""
         args = get_args()
-        timers = get_timers()
 
         # Set grad to zero.
         for model_chunk in model:
             model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
 
+        # import os, debugpy
+        # dist.barrier()  
+        # if int(os.environ.get("RANK","0")) == 0:
+        #     debugpy.breakpoint()
+        # dist.barrier()
         # Forward pass.
         forward_backward_func = get_forward_backward_func()
+
         losses_reduced = forward_backward_func(
             forward_step_func=forward_step_func,
             data_iterator=data_iterator,
@@ -1723,6 +1395,7 @@ class Trainer:
             decoder_seq_length=args.decoder_seq_length,
             forward_only=False)
 
+        # breakpoint()
         # Empty unused memory.
         if args.empty_unused_memory_level >= 1:
             torch.cuda.empty_cache()
@@ -1733,9 +1406,7 @@ class Trainer:
             unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
 
         # Update parameters.
-        timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
-        timers('optimizer').stop()
 
         # Vision momentum.
         if getattr(args, 'vision_pretraining', False) and args.vision_pretraining_type == "dino":
@@ -1765,3 +1436,122 @@ class Trainer:
             return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad
         return {}, skipped_iter, grad_norm, num_zeros_in_grad
 
+    def evaluate_and_print_results(self,
+                                   prefix, forward_step_func,
+                               data_iterator, model,
+                               iteration, process_non_loss_data_func, config,
+                               verbose=False, write_to_tensorboard=True):
+        """Helper function to evaluate and dump results on screen."""
+        args = get_args()
+
+        total_loss_dict, collected_non_loss_data, timelimit = self.evaluate(
+            forward_step_func, data_iterator, model,
+            process_non_loss_data_func, config, verbose)
+        # Timelimit hit during evaluation
+        if timelimit:
+            return
+        string = ' validation loss at {} | '.format(prefix)
+        import math
+        for key in total_loss_dict:
+            string += '{} value: {:.6E} | '.format(key, total_loss_dict[key].item())
+            ppl = math.exp(min(20, total_loss_dict[key].item()))
+            string += '{} PPL: {:.6E} | '.format(key, ppl)
+
+        length = len(string) + 1
+        print_rank_last('-' * length)
+        print_rank_last(string)
+        print_rank_last('-' * length)
+
+    def evaluate(self,
+                forward_step_func,
+                data_iterator,
+                model,
+                process_non_loss_data_func,
+                config,
+                verbose=False):
+        """Evaluation."""
+        args = get_args()
+
+        # if args.vision_pretraining and args.vision_pretraining_type == "dino":
+        #     from megatron.legacy.model.vision.knn_monitor import compute_feature_bank
+        #     compute_feature_bank(model)
+
+        # Turn on evaluation mode which disables dropout.
+        for model_module in model:
+            model_module.eval()
+
+        total_loss_dict = {}
+
+        # make validation batch size independent from training batch size
+        eval_batch_size = args.global_batch_size
+        eval_num_microbatches = eval_batch_size // \
+            (args.micro_batch_size * args.data_parallel_size)
+
+        with torch.no_grad():
+            iteration = 0
+            if verbose:
+                print_rank_0(f'Evaluating on {args.eval_iters * eval_batch_size} samples')
+            while iteration < args.eval_iters:
+                iteration += 1
+                if verbose:
+                    print_rank_0(f'Evaluating iter {iteration}/{args.eval_iters}')
+
+                forward_backward_func = get_forward_backward_func()
+                # Don't care about timing during evaluation
+                config.timers = None
+                loss_dicts = forward_backward_func(
+                    forward_step_func=forward_step_func,
+                    data_iterator=data_iterator,
+                    model=model,
+                    num_microbatches=eval_num_microbatches,
+                    seq_length=args.seq_length,
+                    micro_batch_size=args.micro_batch_size,
+                    decoder_seq_length=args.decoder_seq_length,
+                    forward_only=True)
+
+                # Empty unused memory
+                if args.empty_unused_memory_level >= 1:
+                    torch.cuda.empty_cache()
+
+                if mpu.is_pipeline_last_stage(ignore_virtual=True):
+                    # Reduce across processes.
+                    for loss_dict in loss_dicts:
+                        for key in loss_dict:
+                            total_loss_dict[key] = total_loss_dict.get(
+                                key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
+
+                args.consumed_valid_samples += eval_batch_size
+
+                if args.exit_duration_in_mins:
+                    train_time = (time.time() - _TRAIN_START_TIME) / 60.0
+                    done_cuda = torch.tensor(
+                        [train_time > args.exit_duration_in_mins],
+                        dtype=torch.int, device='cuda')
+                    torch.distributed.all_reduce(
+                        done_cuda, op=torch.distributed.ReduceOp.MAX)
+                    done = done_cuda.item()
+                    if done:
+                        print_rank_0('Exiting during evaluation, timelimit reached')
+                        return None, None, True
+
+            collected_non_loss_data = None
+            if process_non_loss_data_func is not None and is_last_rank():
+                collected_non_loss_data = forward_backward_func(
+                    forward_step_func=forward_step_func,
+                    data_iterator=data_iterator,
+                    model=model,
+                    num_microbatches=get_num_microbatches(),
+                    seq_length=args.seq_length,
+                    micro_batch_size=args.micro_batch_size,
+                    decoder_seq_length=args.decoder_seq_length,
+                    forward_only=True,
+                    collect_non_loss_data=True)
+
+        # Move model back to the train mode.
+        for model_module in model:
+            model_module.train()
+
+        for key in total_loss_dict:
+            total_loss_dict[key] /= args.eval_iters * eval_num_microbatches
+
+        return total_loss_dict, collected_non_loss_data, False

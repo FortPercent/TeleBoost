@@ -38,14 +38,14 @@ def exe_adaptation():
     megatron.core.parallel_state.get_tensor_context_parallel_src_rank = get_tensor_context_parallel_src_rank
     megatron.core.mpu = megatron.core.parallel_state
 
-    import megatron.training
-    from teletron.core.training import (setup_model_and_optimizer_decorators,
-                                        generate_state_dict,
-                                        load_checkpoint)
-    megatron.training.training.setup_model_and_optimizer = setup_model_and_optimizer_decorators(
-        megatron.training.training.setup_model_and_optimizer
-    )
-    megatron.training.checkpointing.generate_state_dict = generate_state_dict
-    megatron.training.checkpointing.load_checkpoint = load_checkpoint
+    # import megatron.training
+    # from teletron.core.training import (setup_model_and_optimizer_decorators,
+    #                                     generate_state_dict,
+    #                                     load_checkpoint)
+    # megatron.training.training.setup_model_and_optimizer = setup_model_and_optimizer_decorators(
+    #     megatron.training.training.setup_model_and_optimizer
+    # )
+    # megatron.training.checkpointing.generate_state_dict = generate_state_dict
+    # megatron.training.checkpointing.load_checkpoint = load_checkpoint
 
 exe_adaptation()

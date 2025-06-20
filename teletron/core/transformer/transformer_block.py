@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
-from megatron.training import get_args
+from teletron.utils import get_args
 
 class TransformerGeneralMixin:
     def enable_activation_checkpointing(self, blocks):

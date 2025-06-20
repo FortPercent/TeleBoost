@@ -36,13 +36,16 @@ def load_config_vast():
         from config.wan_flf import config
     elif args.task_type == "wan_i2v_prone":
         from config.prone10_lowerlr import config
+    elif args.task_type == "wan_i2v_bucket":
+        from config.wan_i2v_bucket import config
+        
     else:
         return None
     config_vast = load_config(config)
     return config_vast
 
 
-def train_valid_test_datasets_provider(train_val_test_num_samples):
+def train_valid_test_datasets_provider(train_val_test_num_samples, dp_rank=None, dp_size=None):
 
     args = get_args()
 
@@ -72,19 +75,31 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
         global_config = load_config_vast()
         assert global_config.sampler.type == "BucketVariableBatchSampler"
         assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
-        assert args.task_type == "t2i_wanvae", "BucketDataset is only supported for t2i_wanvae task"
+        assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
         print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
 
         dataset = build_dataset_vast(global_config.dataset)
-        sampler = build_sampler_vast(
-            global_config.sampler,
-            dataset=dataset, 
-            rank=mpu.get_data_parallel_rank(),
-            num_replicas=mpu.get_data_parallel_world_size(),
-            seed=args.seed
-        )
+        if dp_rank is None or dp_size is None:
+            sampler = build_sampler_vast(
+                global_config.sampler,
+                dataset=dataset, 
+                rank=mpu.get_data_parallel_rank(),
+                num_replicas=mpu.get_data_parallel_world_size(),
+                seed=args.seed
+            )
+        else:
+            sampler = build_sampler_vast(
+                global_config.sampler,
+                dataset=dataset, 
+                rank=dp_rank,
+                num_replicas=dp_size,
+                seed=args.seed
+            )
         # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
+        # if iteration is None:
         sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
+        # else:
+            # sampler.last_micro_batch_access_index = iteration * sampler.num_replicas
 
         collator = DefaultCollator(is_equal=True)
         train_ds = torch.utils.data.DataLoader(

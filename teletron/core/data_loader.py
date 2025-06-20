@@ -2,7 +2,7 @@ import random
 import torch
 import numpy as np
 from torch.utils.data import Dataset
-from megatron.training import get_args
+from teletron.utils import get_args
 from megatron.core import mpu
 from megatron.legacy.data.data_samplers import MegatronPretrainingSampler,MegatronPretrainingRandomSampler
 
