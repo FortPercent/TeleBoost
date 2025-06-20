@@ -71,6 +71,7 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
             distributed_timeout_minutes = 30,
         )
     wanConfig = WanParams()
+    torch.manual_seed(1234)
     wan_model = WanModel(
             dim=wanConfig.num_attention_heads * wanConfig.attention_head_dim,
             in_dim=wanConfig.in_channels,
@@ -85,6 +86,8 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
             has_image_input=wanConfig.has_image_input,
             has_image_pos_emb=wanConfig.has_image_pos_emb
         ).cuda().to(torch.bfloat16)
+    
+    torch.manual_seed(1234)
     parallel_wan_model = ParallelWanModel(
             dim=wanConfig.num_attention_heads * wanConfig.attention_head_dim,
             in_dim=wanConfig.in_channels,
@@ -99,11 +102,18 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
             has_image_input=wanConfig.has_image_input,
             has_image_pos_emb=wanConfig.has_image_pos_emb
         ).cuda().to(torch.bfloat16)
+
     parallel_wan_model.load_state_dict(wan_model.state_dict())
+    wan_params = dict(wan_model.named_parameters())
+    wan_parallel_params = dict(parallel_wan_model.named_parameters())
+    # for name in wan_params:
+    #     logging.info(f"{name} {wan_params[name].float().norm()} {wan_parallel_params[name].float().norm()}")
+
+    # from tensorwatch import watch_module_forward_backward, TensorWatch
+    # watch_module_forward_backward(parallel_wan_model)
 
     input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     wan_model_output = wan_model(**input_dict)
-
     input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
     parallel_wan_model_output = parallel_wan_model(**input_dict)
     if is_close_by_normalized_euclid_dist(wan_model_output, parallel_wan_model_output):
@@ -114,15 +124,30 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     # test backward
     wan_model_output.backward(torch.ones_like(wan_model_output))
     parallel_wan_model_output.backward(torch.ones_like(parallel_wan_model_output))
-
+    # TensorWatch.step()
     model_grads = {name: param.grad for name, param in wan_model.named_parameters() if param.grad is not None}
-    parallel_moedl_grads = {name: param.grad for name, param in parallel_wan_model.named_parameters() if param.grad is not None}
+    parallel_model_grads = {name: param.grad for name, param in parallel_wan_model.named_parameters() if param.grad is not None}
+    grad_allclose = True
     for name in model_grads:
-        if is_close_by_normalized_euclid_dist(model_grads[name], parallel_moedl_grads[name], True):
-            grad_flag = True
+        norm_euclid_dist = normalized_euclid_dist(model_grads[name], parallel_model_grads[name])
+        # logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_model_grads[name].norm()} rank{rank}")
+        if norm_euclid_dist < 0.02:
+            continue
         else:
-            grad_flag = False
+            grad_allclose = False
+    if grad_allclose:
+        q.put(f"{WAN_MODEL_BWD_SUCCESS} rank{rank}")
+    else:
+        q.put(f"{WAN_MODEL_BWD_FAIL} rank{rank}")
     
+
+
+def normalized_euclid_dist(output, parallel_output):
+    wan_norm = output.norm().item()
+    parallel_norm = parallel_output.norm().item()
+    euclid_dist = torch.norm(output - parallel_output)
+    normalized_euclid_dist = 0.5 * euclid_dist / (wan_norm + parallel_norm)
+    return normalized_euclid_dist
 
 def is_close_by_normalized_euclid_dist(output, parallel_output):
     wan_norm = output.norm().item()
@@ -143,7 +168,8 @@ class testParallelWanModel(TestCase):
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '12445'
         q = spawn(cp_size, parallel_wan_model_testing)
-        correct_responses = [f"{WAN_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        correct_responses = [f"{WAN_MODEL_BWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        correct_responses += [f"{WAN_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
         responses = []
         while not q.empty():
             res = q.get()

@@ -62,7 +62,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
 
         # from TransformerGeneralMixin
         self.enable_activation_checkpointing(self.blocks)
-        
+
         # from ContextParallelMixin
         self.register_cp_grad_reduce_hook()
 
@@ -71,39 +71,15 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         
         # layers with parallel input sequence need to reduce its param gradient.
         # list the parameters that needs grad reduce and register tensor grad hook
-        self.wgrad_not_to_reduce = [
-            "head.head.weight",
-            "head.head.bias",
-            "head.modulation"] + [
-                f"blocks.{i}.cross_attn.v_img.bias" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.v_img.weight" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.norm_k_img.weight" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.k_img.weight"  for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.k_img.bias" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.v.bias" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.v.weight" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.norm_k.weight" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.k.bias" for i in range(self.num_layers)
-            ] + [
-                f"blocks.{i}.cross_attn.k.weight" for i in range(self.num_layers)
-            ]
-        
+
         for name, param in self.named_parameters():
-            if name.startswith("patch_embedding") or\
-                  name.startswith("img_emb") or \
-                    name.startswith("text_embedding") or \
-                        name.startswith("time") or "modulation" in name:
+            if name.startswith("patch_embedding") or \
+                    name.startswith("time") or\
+                        name.startswith("head") or \
+                             "modulation" in name:
                 continue 
-            if name not in self.wgrad_not_to_reduce:
-                param.register_hook(ContextParallelMixin.cp_grad_reduce)
+
+            param.register_hook(self.cp_grad_reduce)
 
     def forward(self,
                 x: torch.Tensor,
