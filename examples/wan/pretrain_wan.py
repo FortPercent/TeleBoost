@@ -202,7 +202,7 @@ def wait_for_debugger(rank_to_debug=0, port=5678):
 
 
 if __name__ == "__main__":
-    wait_for_debugger(0)
+    # wait_for_debugger(0)
     args = parse_args(extra_args=extra_args)
     # import teletron.train.utils
     # teletron.train.utils.forward_step = forward_step
