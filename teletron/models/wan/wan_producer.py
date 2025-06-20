@@ -2,19 +2,10 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import time
-import os
-import sys
 import collections
-from megatron.core import mpu
-from diffusers import AutoencoderKLHunyuanVideo
-from einops import rearrange
-from vast.models import utils as gm_utils
-from config.wan_flf import config
-from megatron.training import get_args
-import copy
+from teletron.utils import get_args
 from teletron.core.parallel_state import get_world_group
 from teletron.models.wan.wan_encoder_utils import get_encoder_features
-
 from vast.models.dit.wan_dit import ModelManager
 from vast.models.dit.wan_dit import WanModel
 from vast.models.dit.wan_dit import WanTextEncoder
@@ -61,7 +52,7 @@ def producer_process(
         rank, 
         world_size,
         build_train_valid_test_data_iterators, 
-        train_valid_test_dataset_provider, 
+        # train_valid_test_dataset_provider, 
         train_ds=None, 
     ):
     
@@ -121,7 +112,7 @@ def producer_process(
     for comm_pair in comm_pairs:
         train_data_iterators[comm_pair.consumer], valid_data_iterators[comm_pair.consumer], test_data_iterators[comm_pair.consumer] \
                 = build_train_valid_test_data_iterators(
-                    train_valid_test_dataset_provider, 
+                    # train_valid_test_dataset_provider, 
                     is_tp_first = True, 
                     dp_rank = comm_pair.dp_rank, 
                     dp_size = comm_pair.dp_size, 

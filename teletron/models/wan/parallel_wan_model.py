@@ -28,20 +28,21 @@ class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
 
 
 class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
-    def __init__(self, dim: int,
-                in_dim: int,
-                ffn_dim: int,
-                out_dim: int,
-                text_dim: int,
-                freq_dim: int,
-                eps: float,
-                patch_size: Tuple[int, int, int],
-                num_heads: int,
-                num_layers: int,
-                has_image_input: bool,
-                has_image_pos_emb: bool,
-                context_parallel_dim: int = 1):
-        
+    def __init__(self, dim: int=40*128,
+                in_dim: int=36,
+                ffn_dim: int=13824,
+                out_dim: int=16,
+                text_dim: int=4096,
+                freq_dim: int=256,
+                eps: float=1e-6,
+                patch_size: Tuple[int, int, int]=(1,2,2),
+                num_heads: int=40,
+                num_layers: int=1,
+                has_image_input: bool=True,
+                has_image_pos_emb: bool=False,
+                context_parallel_dim: int = 1,
+                config=None):
+        self.config=config
         WanModel.__init__(self, dim,
                         in_dim,
                         ffn_dim,

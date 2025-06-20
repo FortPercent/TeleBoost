@@ -11,6 +11,7 @@ from datetime import timedelta
 from functools import reduce
 import operator
 import os
+from teletron.utils import get_args
 
 _TENSOR_CONTEXT_PARALLEL_GROUP = None
 _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE = None
@@ -98,7 +99,6 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
                 expert_model_parallel_size: int = 1,
                 nccl_communicator_config_path: Optional[str] = None,
                 distributed_timeout_minutes: int = 30):
-        from megatron.training import get_args
         global WORLD_GROUP
         WORLD_GROUP = torch.distributed.new_group(
             range(0, torch.distributed.get_world_size())
@@ -175,7 +175,6 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
     return wrapper
 
 def initialize_comm_pair( tensor_model_parallel_size, pipeline_model_parallel_size, context_parallel_size):
-    from megatron.training import get_args
     args = get_args()
     world_size = args.dit_world_size
     producer_size = args.distributed_vae_world_size
@@ -226,7 +225,6 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
     
     assert torch.distributed.is_initialized()
     if base_process_group == -100:
-        from megatron.training import get_args
         margs = get_args()
         extra_model_parallel_world_size = margs.distributed_vae_world_size
         total_world_size = torch.distributed.get_world_size()

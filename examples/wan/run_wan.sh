@@ -10,7 +10,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Megatron_060
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Teletron
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/data/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/ccg/vast2
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/teleai_data_tool/
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
@@ -67,6 +67,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     # # --debug
     # --use-cpu-initialization
+    --model ParallelWanModel # TODO support more models
     --task-type wan_i2v_prone
     --micro-batch-size ${MBS}
     # --global-batch-size ${GBS}
@@ -120,16 +121,16 @@ EVAL_AND_LOGGING_ARGS=(
 # as lora only save the adpater weight.
 # Set the LOAD args in EVAL_AND_LOGGING_ARGS to your saved ckpt path.
 # Training from start is no need to provide LORA_BASE_MODEL_PATH and LOAD args.
-LORA_CFG=(
-    --lora False 
-    --lora-rank 8
-    --lora-alpha 32
-    --lora-dropout 0.05
-    --lora-target-modules q,v # usage: q,v,k,o or q
-    --lora-bias none
-    --lora-task-type FEATURE_EXTRACTION
-    --lora-base-model-path # specify one if using lora
-)
+# LORA_CFG=(
+#     --lora False 
+#     --lora-rank 8
+#     --lora-alpha 32
+#     --lora-dropout 0.05
+#     --lora-target-modules q,v # usage: q,v,k,o or q
+#     --lora-bias none
+#     --lora-task-type FEATURE_EXTRACTION
+#     --lora-base-model-path # specify one if using lora
+# )
 
 # export NCCL_IB_DISABLE=1
 # export NCCL_SOCKET_IFNAME=eth0
@@ -146,3 +147,4 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
     ${DATA_ARGS[@]}    \
     ${EVAL_AND_LOGGING_ARGS[@]} \
     ${LORA_CFG[@]} \
+    "$@"
