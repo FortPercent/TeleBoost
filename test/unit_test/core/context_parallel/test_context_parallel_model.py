@@ -2,7 +2,7 @@ from unittest import TestCase
 import os 
 import torch
 from teletron.core.context_parallel import ContextParallelModelManager
-from teletron.core import initialize_model_parallel
+from teletron.core.parallel_state  import initialize_model_parallel_base
 from unit_test.test_utils import spawn
 import logging
 
@@ -34,7 +34,7 @@ def split_input(cp_manager, cp_size, cp_rank, q):
 def setupContextParallelModelManager(cp_rank, cp_size, q):
 
     torch.distributed.init_process_group(world_size=cp_size, rank=cp_rank)
-    initialize_model_parallel(
+    initialize_model_parallel_base(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
             virtual_pipeline_model_parallel_size = None,

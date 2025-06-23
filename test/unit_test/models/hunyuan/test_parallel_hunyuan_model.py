@@ -39,9 +39,10 @@ class HunyuanParams:
     rope_axes_dim: Tuple[int] = (16, 56, 56)
 
 
-HUNYUAN_MODEL_SUCCESS = "Parallel Hunyuan model forward test success"
-HUNYUAN_MODEL_FAIL = "Parallel Hunyuan model forward test fail"
-
+HUNYUAN_MODEL_FWD_SUCCESS = "Parallel Hunyuan model forward test success"
+HUNYUAN_MODEL_FWD_FAIL = "Parallel Hunyuan model forward test fail"
+HUNYUAN_MODEL_BWD_SUCCESS = "Parallel Hunyuan model backward test success"
+HUNYUAN_MODEL_BWD_FAIL = "Parallel Hunyuan model backward test fail"
 
 @patch("teletron.get_args")
 def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
@@ -50,6 +51,7 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
+    args.recompute_num_layers = 1
     mock_teletron.return_value = args
 
 
@@ -68,6 +70,7 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
             distributed_timeout_minutes = 30,
         )
     hunyuanConfig = HunyuanParams()
+    torch.manual_seed(1234)
     hunyuan_model = HunyuanVideoTransformer3DModel(
             in_channels=hunyuanConfig.in_channels,
             out_channels=hunyuanConfig.out_channels,
@@ -86,6 +89,7 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
             rope_theta=hunyuanConfig.rope_theta,
             rope_axes_dim=hunyuanConfig.rope_axes_dim
         ).cuda().to(torch.bfloat16)
+    torch.manual_seed(1234)
     parallel_hunyuan_model = ParallelHunyuanVideoModel(
             in_channels=hunyuanConfig.in_channels,
             out_channels=hunyuanConfig.out_channels,
@@ -107,40 +111,60 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
     # test forward
     parallel_hunyuan_model.load_state_dict(hunyuan_model.state_dict())
 
+    # from tensorwatch import watch_module_forward_backward, TensorWatch
+    # watch_module_forward_backward(parallel_hunyuan_model)
+
     input_dict = torch.load("/nvfile-heatstorage/teleai-infra/qiuyang/datasets/rank0_inputs.pt", map_location=f"cuda:{rank}")
     hunyuan_model_output = hunyuan_model(**input_dict)
 
     input_dict = torch.load("/nvfile-heatstorage/teleai-infra/qiuyang/datasets/rank0_inputs.pt", map_location=f"cuda:{rank}")
     parallel_hunyuan_model_output = parallel_hunyuan_model(**input_dict)
-    if is_close_by_normalized_euclid_dist(hunyuan_model_output[0], parallel_hunyuan_model_output[0]) < 0.001:
-        q.put(f"{HUNYUAN_MODEL_SUCCESS} rank{rank}")
+
+    if is_close_by_normalized_euclid_dist(hunyuan_model_output[0], parallel_hunyuan_model_output[0]):
+        q.put(f"{HUNYUAN_MODEL_FWD_SUCCESS} rank{rank}")
     else:
-        q.put(f"{HUNYUAN_MODEL_FAIL} rank{rank}")
+        logging.info(f"normalized_euclid_dist {normalized_euclid_dist(hunyuan_model_output[0], parallel_hunyuan_model_output[0])} {hunyuan_model_output[0].norm()} {parallel_hunyuan_model_output[0].norm()} rank{rank}")
+        q.put(f"{HUNYUAN_MODEL_FWD_FAIL} rank{rank}")
+
+
     # test backward
     hunyuan_model_output[0].backward(torch.ones_like(hunyuan_model_output[0]))
     parallel_hunyuan_model_output[0].backward(torch.ones_like(parallel_hunyuan_model_output[0]))
 
+    # TensorWatch.step()
     model_grads = {name: param.grad for name, param in hunyuan_model.named_parameters() if param.grad is not None}
     parallel_moedl_grads = {name: param.grad for name, param in parallel_hunyuan_model.named_parameters() if param.grad is not None}
+    grad_allclose = True
     for name in model_grads:
-        if is_close_by_normalized_euclid_dist(model_grads[name], parallel_moedl_grads[name]):
-            grad_flag = True
+        norm_euclid_dist = normalized_euclid_dist(model_grads[name], parallel_moedl_grads[name])
+        if norm_euclid_dist < 0.02:
+            continue
         else:
-            grad_flag = False
+            logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_moedl_grads[name].norm()} rank{rank}")
+            if model_grads[name].norm() < 1e-4:
+                continue
+            grad_allclose = False
+    if grad_allclose:
+        q.put(f"{HUNYUAN_MODEL_BWD_SUCCESS} rank{rank}")
+    else:
+        q.put(f"{HUNYUAN_MODEL_BWD_FAIL} rank{rank}")
 
-    
-def is_close_by_normalized_euclid_dist(output, parallel_output, flag = False):
-    wan_norm = output.norm().item()
+def normalized_euclid_dist(output, parallel_output):
+    hunyuan_norm = output.norm().item()
     parallel_norm = parallel_output.norm().item()
     euclid_dist = torch.norm(output - parallel_output)
-    normalized_euclid_dist = 0.5 * euclid_dist / (wan_norm + parallel_norm)
-    logging.info(f"normalized euclid dist: {normalized_euclid_dist}")
+    normalized_euclid_dist = 0.5 * euclid_dist / (hunyuan_norm + parallel_norm)
+    return normalized_euclid_dist
+    
+def is_close_by_normalized_euclid_dist(output, parallel_output):
+    hunyuan_norm = output.norm().item()
+    parallel_norm = parallel_output.norm().item()
+    euclid_dist = torch.norm(output - parallel_output)
+    normalized_euclid_dist = 0.5 * euclid_dist / (hunyuan_norm + parallel_norm)
     if normalized_euclid_dist < 0.001:
         return True 
     else:
         return False 
-    
-
 
 class testParallelHunyuanVideoModel(TestCase):
     def test_forward_backward(self):
@@ -149,7 +173,8 @@ class testParallelHunyuanVideoModel(TestCase):
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '12445'
         q = spawn(cp_size, parallel_hunyuan_model_testing)
-        correct_responses = [f"{HUNYUAN_MODEL_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        correct_responses = [f"{HUNYUAN_MODEL_BWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
+        correct_responses += [f"{HUNYUAN_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(cp_size)]
         responses = []
         while not q.empty():
             res = q.get()
