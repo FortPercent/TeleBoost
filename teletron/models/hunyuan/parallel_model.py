@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from megatron.core import mpu
@@ -7,19 +8,19 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.attention_processor import Attention
 from diffusers.utils import (
     USE_PEFT_BACKEND,
-    logging,
     scale_lora_layers,
     unscale_lora_layers,
 )
-
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from teletron.core.context_parallel.mappings import split_forward_gather_backward,\
     gather_forward_split_backward
 from .model import HunyuanVideoTransformer3DModel
-from teletron import get_args
+import logging
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+# Configure logging
+logging.basicConfig(level=logging.DEBUG,
+format='%(asctime)s - %(levelname)s - %(message)s')
 
 class HunyuanVideoDoubleAttnProcessor2_0:
     def __init__(self):
@@ -260,7 +261,8 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
             rope_theta,
             rope_axes_dim,
         )
-
+        self.num_layers = num_layers
+        self.num_single_layers = num_single_layers
         # from TransformerGeneralMixin
         self.enable_activation_checkpointing(self.transformer_blocks)
         self.enable_activation_checkpointing(self.single_transformer_blocks)
@@ -268,8 +270,37 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
         # from ContextParallelMixin
         for i in range(len(self.transformer_blocks)):
             self.transformer_blocks[i].attn.processor = HunyuanVideoDoubleAttnProcessor2_0()
+            self.transformer_blocks[i].norm1.modulate = self.modulate_with_cp_grad_reduce
+            self.transformer_blocks[i].gate = self.gate_with_cp_grad_reduce
         for i in range(len(self.single_transformer_blocks)):
             self.single_transformer_blocks[i].attn.processor = HunyuanVideoSingleAttnProcessor2_0()
+            self.single_transformer_blocks[i].norm = self.modulate_with_cp_grad_reduce
+            self.single_transformer_blocks[i].gate = self.gate_with_cp_grad_reduce
+
+        self.register_cp_grad_reduce_hook()
+
+    
+    def register_cp_grad_reduce_hook(self):
+        
+        # layers with parallel input sequence need to reduce its param gradient.
+        # list the parameters that needs grad reduce and register tensor grad hook     
+        self.wgrad_not_to_reduce =[
+                f"single_transformer_blocks.{i}.norm.linear.weight" for i in range(self.num_single_layers)
+            ] + [
+                f"single_transformer_blocks.{i}.norm.linear.bias" for i in range(self.num_single_layers)
+            ] + [
+                f"transformer_blocks.{i}.norm1.linear.weight" for i in range(self.num_layers)
+            ] + [
+                f"transformer_blocks.{i}.norm1.linear.bias"  for i in range(self.num_layers)
+            ]
+        for name, param in self.named_parameters():
+            if name.startswith("time_text_embed") or\
+                name.startswith("x_embedder") or \
+                    name.startswith("norm_out") or \
+                        name.startswith("proj_out")  or "modulation" in name:
+                continue 
+            if name not in self.wgrad_not_to_reduce:
+                param.register_hook(ContextParallelMixin.cp_grad_reduce)
 
     def forward(
         self,
