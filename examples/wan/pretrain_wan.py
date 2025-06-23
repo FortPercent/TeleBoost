@@ -16,7 +16,7 @@ def extra_args(parser):
 
     if your arg name is already in our default args lib, it will not work
 
-    check the default args lib using the following command:
+    To check the default args lib, using the following command:
         >>> bash current_file.sh --show-args
     '''
     group = parser.add_argument_group(title='customized args')
