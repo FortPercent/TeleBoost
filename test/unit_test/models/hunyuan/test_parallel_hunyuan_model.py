@@ -8,7 +8,6 @@ from unittest.mock import patch, Mock
 # import torch.multiprocessing as mp 
 from multiprocessing import Process
 import multiprocessing as mp 
-import argparse
 from unit_test.test_utils import spawn
 import logging
 import teletron
@@ -44,10 +43,10 @@ HUNYUAN_MODEL_FWD_FAIL = "Parallel Hunyuan model forward test fail"
 HUNYUAN_MODEL_BWD_SUCCESS = "Parallel Hunyuan model backward test success"
 HUNYUAN_MODEL_BWD_FAIL = "Parallel Hunyuan model backward test fail"
 
-@patch("teletron.get_args")
+@patch("teletron.utils.get_args")
 def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
     from teletron.models.hunyuan import HunyuanVideoTransformer3DModel, ParallelHunyuanVideoModel
-    from teletron.core import initialize_model_parallel
+    from teletron.core.parallel_state import initialize_model_parallel_base
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
@@ -58,7 +57,7 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
     cp_size = world_size
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
     torch.cuda.set_device(rank)
-    initialize_model_parallel(
+    initialize_model_parallel_base(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
             virtual_pipeline_model_parallel_size = None,
