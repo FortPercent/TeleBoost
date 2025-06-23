@@ -6,7 +6,7 @@ from verl.trainer.ppo.reward import get_custom_reward_fn
 from .dancegrpo_ray_trainer import RayDanceGRPOTrainer
 
 
-@hydra.main(config_path="config", config_name="dapo_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
 def main(config):
     run_ppo(config)
     
@@ -38,8 +38,8 @@ class TaskRunner:
         local_path = copy_to_local(config.actor_rollout_ref.model.path)
 
         # instantiate tokenizer
+        # TODO 是否需要tokenizer和preprocessor
         from verl.utils import hf_processor, hf_tokenizer
-
         tokenizer = hf_tokenizer(local_path)
         processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
 
@@ -103,9 +103,7 @@ class TaskRunner:
             tokenizer=tokenizer,
             num_examine=0,
             compute_score=compute_score,
-            reward_fn_key=config.data.reward_fn_key,
-            max_resp_len=config.data.max_response_length,
-            overlong_buffer_cfg=config.reward_model.overlong_buffer,
+            reward_fn_key=config.data.reward_fn_key
         )
 
         # Note that we always use function-based RM for validation
@@ -113,9 +111,7 @@ class TaskRunner:
             tokenizer=tokenizer,
             num_examine=1,
             compute_score=compute_score,
-            reward_fn_key=config.data.reward_fn_key,
-            max_resp_len=config.data.max_response_length,
-            overlong_buffer_cfg=config.reward_model.overlong_buffer,
+            reward_fn_key=config.data.reward_fn_key
         )
 
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)

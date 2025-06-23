@@ -46,7 +46,7 @@ from tqdm.auto import tqdm
 import math
 from diffusers.image_processor import VaeImageProcessor
 
-from .prime_core_algos import compute_dpo_abs_accuracy, compute_dpo_accuracy
+from omegaconf import DictConfig, open_dict
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -271,81 +271,6 @@ class PRIMERewardModelWorker(Worker):
             tokenizer=self.tokenizer,
         )
 
-    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def compute_rm_score(self, data: DataProto):
-        data = data.to(get_device_name())
-
-        if self._is_offload_param:
-            load_fsdp_model_to_gpu(self.reward_module)
-            load_fsdp_model_to_gpu(self.ref_module)
-        micro_batch_size = self.config.micro_batch_size_per_gpu
-        data.meta_info["micro_batch_size"] = micro_batch_size
-        data.meta_info["max_token_len"] = self.config.forward_max_token_len_per_gpu
-        data.meta_info["use_dynamic_bsz"] = self.config.use_dynamic_bsz
-        # perform forward computation
-        with self.ulysses_sharding_manager:
-            data = self.ulysses_sharding_manager.preprocess_data(data=data)
-            rm_scores, q, metrics = self.rm.compute_rm_score(data=data)
-
-            prompt_length = data.batch["prompts"].shape[-1]
-            response_mask = data.batch["attention_mask"][:, prompt_length:]
-            acc = data.batch["acc"]
-
-            dpo_acc = compute_dpo_accuracy(rm_scores, acc, response_mask=response_mask, n_samples=data.meta_info["n"])
-            dpo_acc_abs = compute_dpo_abs_accuracy(rm_scores, acc, response_mask, n_samples=data.meta_info["n"])
-
-            metrics["reward_model/dpo_acc"] = dpo_acc.detach().item()
-            metrics["reward_model/dpo_acc_abs"] = dpo_acc_abs.detach().item()
-
-            output = DataProto.from_dict(tensors={"rm_scores": rm_scores, "q": q}, meta_info={"metrics": metrics})
-            output = self.ulysses_sharding_manager.postprocess_data(data=output)
-
-        output = output.to("cpu")
-        if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.reward_module)
-            offload_fsdp_model_to_cpu(self.ref_module)
-        return output
-
-    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def update_rm(self, data: DataProto):
-        data = data.to(get_device_name())
-        if self._is_offload_param:
-            load_fsdp_model_to_gpu(self.ref_module)
-            load_fsdp_model_to_gpu(self.reward_module)
-        if self._is_offload_optimizer:
-            load_fsdp_optimizer(optimizer=self.reward_optimizer, device_id=get_device_id())
-
-        # perform forward computation
-        with self.ulysses_sharding_manager:
-            data = self.ulysses_sharding_manager.preprocess_data(data=data)
-
-            rm_scores, metrics = self.rm.update_rm(data=data)
-
-            self.reward_lr_scheduler.step()
-            lr = self.reward_lr_scheduler.get_last_lr()[0]
-            metrics["rm/lr"] = lr
-
-            prompt_length = data.batch["prompts"].shape[-1]
-            response_mask = data.batch["attention_mask"][:, prompt_length:]
-            acc = data.batch["acc"]
-
-            dpo_acc_before = compute_dpo_accuracy(rm_scores, acc, response_mask=response_mask, n_samples=data.meta_info["n"])
-            dpo_acc_abs = compute_dpo_abs_accuracy(rm_scores, acc, response_mask, n_samples=data.meta_info["n"])
-
-            metrics["reward_model/dpo_acc_before"] = dpo_acc_before.detach().item()
-            metrics["reward_model/dpo_acc_abs_before"] = dpo_acc_abs.detach().item()
-
-            output = DataProto.from_dict(tensors={"rm_scores": rm_scores}, meta_info={"metrics": metrics})
-            output = self.ulysses_sharding_manager.postprocess_data(data=output)
-
-        if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.reward_module)
-            offload_fsdp_model_to_cpu(self.ref_module)
-        if self._is_offload_optimizer:
-            offload_fsdp_optimizer(optimizer=self.reward_optimizer)
-        output = output.to("cpu")
-        return output
-
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
         import torch
@@ -378,8 +303,8 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
     or a hybrid engine based on the config.rollout
     """
 
-    def __init__(self):
-        ActorRolloutRefWorker.__init__(self)
+    def __init__(self, config: DictConfig, role: str, model_deployment=None):
+        super().__init__(config,role)
         
         
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
