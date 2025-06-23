@@ -33,7 +33,8 @@ from verl.trainer.ppo.metric_utils import (
     compute_timing_metrics,
     reduce_metrics,
 )
-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, _timer, apply_kl_penalty, compute_advantage, compute_response_mask
+from verl.utils.debug import marked_timer
+from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_advantage, compute_response_mask
 
 
 class RayDanceGRPOTrainer(RayPPOTrainer):
@@ -105,13 +106,13 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
-                with _timer("step", timing_raw):
+                with marked_timer("step", timing_raw):
                     # generate a batch
-                    with _timer("gen", timing_raw):
+                    with marked_timer("gen", timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sample(gen_batch)
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                        with _timer("gen_max", timing_raw):
+                        with marked_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
                             gen_baseline_batch.meta_info["do_sample"] = False
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
@@ -131,7 +132,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     new_batch = new_batch.union(gen_batch_output)
 
-                    with _timer("reward", timing_raw):
+                    with marked_timer("reward", timing_raw):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
@@ -167,7 +168,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
                     # recompute old_log_probs
-                    with _timer("old_log_prob", timing_raw):
+                    with marked_timer("old_log_prob", timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
                         response_masks = batch.batch["response_mask"]
@@ -180,17 +181,17 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                     if self.use_reference_policy:
                         # compute reference log_prob
-                        with _timer("ref", timing_raw):
+                        with marked_timer("ref", timing_raw):
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
 
                     # compute values
                     if self.use_critic:
-                        with _timer("values", timing_raw):
+                        with marked_timer("values", timing_raw):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
-                    with _timer("adv", timing_raw):
+                    with marked_timer("adv", timing_raw):
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
                         batch = compute_advantage(
@@ -204,7 +205,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                     # update critic
                     if self.use_critic:
-                        with _timer("update_critic", timing_raw):
+                        with marked_timer("update_critic", timing_raw):
                             critic_output = self.critic_wg.update_critic(batch)
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)
@@ -212,21 +213,21 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     # implement critic warmup
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
-                        with _timer("update_actor", timing_raw):
+                        with marked_timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
-                        with _timer("testing", timing_raw):
+                        with marked_timer("testing", timing_raw):
                             val_metrics: dict = self._validate()
                             if is_last_step:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
-                        with _timer("save_checkpoint", timing_raw):
+                        with marked_timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
 
                 # collect metrics
