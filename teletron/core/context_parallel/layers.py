@@ -42,8 +42,11 @@ class ModulateWithCPGradReduce(torch.autograd.Function):
         x_grad = grad_output * (1 + scale) 
         scale_grad = torch.sum((grad_output * x), dim=1, keepdim=True)
         torch.distributed.all_reduce(scale_grad, group=mpu.get_context_parallel_group())
+        shift_grad = torch.sum((grad_output), dim=1, keepdim=True)
+        torch.distributed.all_reduce(shift_grad, group=mpu.get_context_parallel_group())
         
-        return x_grad, grad_output, scale_grad
+        
+        return x_grad, shift_grad, scale_grad
 
 
 def modulate_with_cp_grad_reduce(x, shift, scale):

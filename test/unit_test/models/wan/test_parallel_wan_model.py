@@ -130,7 +130,7 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     grad_allclose = True
     for name in model_grads:
         norm_euclid_dist = normalized_euclid_dist(model_grads[name], parallel_model_grads[name])
-        # logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_model_grads[name].norm()} rank{rank}")
+        logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_model_grads[name].norm()} rank{rank}")
         if norm_euclid_dist < 0.02:
             continue
         else:
