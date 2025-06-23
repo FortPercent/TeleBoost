@@ -3,6 +3,10 @@ import torch.nn as nn
 from megatron.core import mpu 
 import logging
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG,
+format='%(asctime)s - %(levelname)s - %(message)s')
+
 class ContextParallelGateModule(nn.Module):
     def __init__(self):
         super().__init__()
@@ -42,10 +46,8 @@ class ModulateWithCPGradReduce(torch.autograd.Function):
         x_grad = grad_output * (1 + scale) 
         scale_grad = torch.sum((grad_output * x), dim=1, keepdim=True)
         torch.distributed.all_reduce(scale_grad, group=mpu.get_context_parallel_group())
-        shift_grad = torch.sum((grad_output), dim=1, keepdim=True)
+        shift_grad = torch.sum(grad_output, dim=1, keepdim=True)
         torch.distributed.all_reduce(shift_grad, group=mpu.get_context_parallel_group())
-        
-        
         return x_grad, shift_grad, scale_grad
 
 

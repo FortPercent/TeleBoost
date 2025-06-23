@@ -30,17 +30,14 @@ from diffusers.utils import (
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import Attention, AttentionProcessor
 from diffusers.models.embeddings import (
+    CombinedTimestepLabelEmbeddings,
     CombinedTimestepGuidanceTextProjEmbeddings,
     CombinedTimestepTextProjEmbeddings,
     get_1d_rotary_pos_embed,
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import (
-    AdaLayerNormContinuous,
-    AdaLayerNormZero,
-    AdaLayerNormZeroSingle,
-)
+from diffusers.models.normalization import AdaLayerNormContinuous
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -396,6 +393,98 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         freqs_sin = torch.cat([f[1] for f in freqs], dim=1)  # (W * H * T, D / 2)
         return freqs_cos, freqs_sin
 
+class FP32LayerNorm(nn.LayerNorm):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        origin_dtype = inputs.dtype
+        return F.layer_norm(
+            inputs.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        ).to(origin_dtype)
+
+class AdaLayerNormZero(nn.Module):
+    r"""
+    Norm layer adaptive layer norm zero (adaLN-Zero).
+
+    Parameters:
+        embedding_dim (`int`): The size of each embedding vector.
+        num_embeddings (`int`): The size of the embeddings dictionary.
+    """
+
+    def __init__(self, embedding_dim: int, num_embeddings: Optional[int] = None, norm_type="layer_norm", bias=True):
+        super().__init__()
+        if num_embeddings is not None:
+            self.emb = CombinedTimestepLabelEmbeddings(num_embeddings, embedding_dim)
+        else:
+            self.emb = None
+
+        self.silu = nn.SiLU()
+        self.linear = nn.Linear(embedding_dim, 6 * embedding_dim, bias=bias)
+        if norm_type == "layer_norm":
+            self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
+        elif norm_type == "fp32_layer_norm":
+            self.norm = FP32LayerNorm(embedding_dim, elementwise_affine=False, bias=False)
+        else:
+            raise ValueError(
+                f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
+            )
+
+    def modulate(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
+        return (x * (1 + scale) + shift)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        timestep: Optional[torch.Tensor] = None,
+        class_labels: Optional[torch.LongTensor] = None,
+        hidden_dtype: Optional[torch.dtype] = None,
+        emb: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.emb is not None:
+            emb = self.emb(timestep, class_labels, hidden_dtype=hidden_dtype)
+        emb = self.linear(self.silu(emb))
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.chunk(6, dim=1)
+        x = self.modulate(self.norm(x), shift_msa[:, None], scale_msa[:, None])
+        # x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
+
+class AdaLayerNormZeroSingle(nn.Module):
+    r"""
+    Norm layer adaptive layer norm zero (adaLN-Zero).
+
+    Parameters:
+        embedding_dim (`int`): The size of each embedding vector.
+        num_embeddings (`int`): The size of the embeddings dictionary.
+    """
+
+    def __init__(self, embedding_dim: int, norm_type="layer_norm", bias=True):
+        super().__init__()
+
+        self.silu = nn.SiLU()
+        self.linear = nn.Linear(embedding_dim, 3 * embedding_dim, bias=bias)
+        if norm_type == "layer_norm":
+            self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
+        else:
+            raise ValueError(
+                f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
+            )
+    
+    def modulate(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
+        return (x * (1 + scale) + shift)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        emb: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        emb = self.linear(self.silu(emb))
+        shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=1)
+        x = self.modulate(self.norm(x), shift_msa[:, None], scale_msa[:, None])
+        # x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
+        return x, gate_msa
+
 
 class HunyuanVideoSingleTransformerBlock(nn.Module):
     def __init__(
@@ -427,6 +516,9 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         self.proj_mlp = nn.Linear(hidden_size, mlp_dim)
         self.act_mlp = nn.GELU(approximate="tanh")
         self.proj_out = nn.Linear(hidden_size + mlp_dim, hidden_size)
+
+    def gate(self, x, gate, residual):
+        return x + gate * residual
 
     def forward(
         self,
@@ -461,8 +553,10 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
 
         # 3. Modulation and residual connection
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
-        hidden_states = gate.unsqueeze(1) * self.proj_out(hidden_states)
-        hidden_states = hidden_states + residual
+        hidden_states = self.proj_out(hidden_states)
+        hidden_states = self.gate(residual, gate.unsqueeze(1), hidden_states)
+        # hidden_states = gate.unsqueeze(1) * hidden_states
+        # hidden_states = hidden_states + residual
 
         hidden_states, encoder_hidden_states = (
             hidden_states[:, :-text_seq_length, :],
@@ -512,6 +606,9 @@ class HunyuanVideoTransformerBlock(nn.Module):
             hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate"
         )
 
+    def gate(self, x, gate, residual):
+        return x + gate * residual
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -536,7 +633,8 @@ class HunyuanVideoTransformerBlock(nn.Module):
         )
 
         # 3. Modulation and residual connection
-        hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
+        # hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
+        hidden_states = self.gate(hidden_states, gate_msa.unsqueeze(1), attn_output)
         encoder_hidden_states = (
             encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
         )
@@ -556,7 +654,8 @@ class HunyuanVideoTransformerBlock(nn.Module):
         ff_output = self.ff(norm_hidden_states)
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
 
-        hidden_states = hidden_states + gate_mlp.unsqueeze(1) * ff_output
+        # hidden_states = hidden_states + gate_mlp.unsqueeze(1) * ff_output
+        hidden_states = self.gate(hidden_states, gate_mlp.unsqueeze(1), ff_output)
         encoder_hidden_states = (
             encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
         )
