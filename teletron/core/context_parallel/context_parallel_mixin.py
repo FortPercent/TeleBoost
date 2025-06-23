@@ -7,7 +7,7 @@ from megatron.core import mpu
 from yunchang.comm.all_to_all import SeqAllToAll4D
 from .mappings import split_forward_gather_backward, gather_forward_split_backward
 from .layers import GateWithGradReduce, ModulateWithCPGradReduce
-from teletron import get_args
+from teletron.utils import get_args
 
 
 class ContextParallelMixin:

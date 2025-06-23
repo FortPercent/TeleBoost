@@ -1,1 +1,1 @@
-from .parallel_state import initialize_model_parallel
+# from .parallel_state import initialize_model_parallel
