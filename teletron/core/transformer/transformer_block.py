@@ -9,8 +9,6 @@ from teletron.utils import get_args
 class TransformerGeneralMixin:
     def enable_activation_checkpointing(self, blocks):
         args = get_args()
-        self.num_heads = args.num_attention_heads
-        self.num_layers = args.num_layers
         self.activation_recompute_method = args.recompute_method
         self.recompute_granularity = args.recompute_granularity
         self.recompute_num_layers = args.recompute_num_layers
@@ -20,8 +18,7 @@ class TransformerGeneralMixin:
     def checkpointed_forward_transformer_blocks(self, blocks):
         def wrap_blocks(*args):
             if self.recompute_granularity == "full"  and self.training:
-                recompute_num_layers = len(blocks)
-                output = self._checkpointed_forward(blocks, recompute_num_layers, *args)
+                output = self._checkpointed_forward(blocks, *args)
             else:
                 for block in blocks:
                     output = block(*args)
@@ -38,7 +35,7 @@ class TransformerGeneralMixin:
         else:
             return (output,) + args[1:]
 
-    def _checkpointed_forward(self, blocks, recompute_num_layers, *args):
+    def _checkpointed_forward(self, blocks, *args):
 
         def create_custom_forward(start, end, blocks):
             def custom_forward(*args):
@@ -54,21 +51,22 @@ class TransformerGeneralMixin:
             # checkpoint the input activation of each divided chunk.
             # A method to further reduce memory usage reducing checkpoints.
             _layer_num = 0
+            assert self.recompute_num_layers <= len(blocks)
             while _layer_num < len(blocks):
                 output = checkpoint(
-                    create_custom_forward(_layer_num, _layer_num + recompute_num_layers, blocks),
+                    create_custom_forward(_layer_num, _layer_num + self.recompute_num_layers, blocks),
                     *args,
                     use_reentrant=False,
                 )
                 args = self._update_args(output, args)
-                _layer_num += recompute_num_layers
+                _layer_num += self.recompute_num_layers
 
         elif self.activation_recompute_method == "block":
             # Checkpoint the input activation of only a set number of individual
             # Transformer layers and skip the rest.
             # A method fully use the device memory removing redundant re-computation.
             for _layer_num in range(len(blocks)):
-                if _layer_num < recompute_num_layers:
+                if _layer_num < self.recompute_num_layers:
                     output = checkpoint(
                         create_custom_forward(_layer_num, _layer_num + 1, blocks),
                         *args,
