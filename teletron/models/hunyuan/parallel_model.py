@@ -274,7 +274,7 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
             self.transformer_blocks[i].gate = self.gate_with_cp_grad_reduce
         for i in range(len(self.single_transformer_blocks)):
             self.single_transformer_blocks[i].attn.processor = HunyuanVideoSingleAttnProcessor2_0()
-            self.single_transformer_blocks[i].norm = self.modulate_with_cp_grad_reduce
+            self.single_transformer_blocks[i].norm.modulate = self.modulate_with_cp_grad_reduce
             self.single_transformer_blocks[i].gate = self.gate_with_cp_grad_reduce
 
         self.register_cp_grad_reduce_hook()
