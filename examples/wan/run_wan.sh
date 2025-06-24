@@ -11,7 +11,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Megatron_060
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/data/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/ccg/vast2
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/vast-10b
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/teleai_data_tool/
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
