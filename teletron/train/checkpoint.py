@@ -232,8 +232,17 @@ class CheckPointMixin:
                     model[i]=get_peft_model(model[i], lora_config)
                     model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
         else:
+            
+            # Remove the 'transformer.' prefix from all keys
+            # new_state_dict = {
+            #     k.replace('transformer.', '', 1): v
+            #     for k, v in state_dict['model'].items()
+            #     if k.startswith('transformer.')
+            # }
+
             if len(model) == 1:
-                model[0].load_state_dict(state_dict['model'], strict=strict)
+                # breakpoint()
+                model[0].load_state_dict(state_dict, strict=strict)
             else:
                 for i in range(len(model)):
                     mpu.set_virtual_pipeline_model_parallel_rank(i)

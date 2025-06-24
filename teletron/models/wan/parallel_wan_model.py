@@ -43,7 +43,8 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                 context_parallel_dim: int = 1,
                 config=None):
         self.config=config
-        WanModel.__init__(self, dim,
+        WanModel.__init__(self, 
+                        dim,
                         in_dim,
                         ffn_dim,
                         out_dim,
@@ -55,6 +56,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                         num_layers,
                         has_image_input,
                         has_image_pos_emb)
+        # breakpoint()
         
         self.blocks = nn.ModuleList([
             ContextParallelWanDitBlock(has_image_input, dim, num_heads, ffn_dim, eps)

@@ -1111,7 +1111,8 @@ def load_config_vast():
         from config.prone10_lowerlr import config
     elif args.task_type == "wan_i2v_bucket":
         from config.wan_i2v_bucket import config
-        
+    elif args.task_type == "wan_multimask":
+        from config.wan_i2v_multimask import config
     else:
         return None
     config_vast = load_config(config)
