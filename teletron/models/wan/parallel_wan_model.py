@@ -28,37 +28,13 @@ class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
 
 
 class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
-    def __init__(self, dim: int=40*128,
-                in_dim: int=36,
-                ffn_dim: int=13824,
-                out_dim: int=16,
-                text_dim: int=4096,
-                freq_dim: int=256,
-                eps: float=1e-6,
-                patch_size: Tuple[int, int, int]=(1,2,2),
-                num_heads: int=40,
-                num_layers: int=1,
-                has_image_input: bool=True,
-                has_image_pos_emb: bool=False,
-                context_parallel_dim: int = 1,
-                config=None):
-        self.config=config
-        WanModel.__init__(self, dim,
-                        in_dim,
-                        ffn_dim,
-                        out_dim,
-                        text_dim,
-                        freq_dim,
-                        eps,
-                        patch_size,
-                        num_heads,
-                        num_layers,
-                        has_image_input,
-                        has_image_pos_emb)
+    def __init__(self, config):
+        WanModel.__init__(self, config)
+        self.config = config
         
         self.blocks = nn.ModuleList([
-            ContextParallelWanDitBlock(has_image_input, dim, num_heads, ffn_dim, eps)
-            for _ in range(num_layers)
+            ContextParallelWanDitBlock(self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
+            for _ in range(self.num_layers)
         ])
 
         # from TransformerGeneralMixin

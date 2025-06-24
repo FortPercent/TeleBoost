@@ -70,43 +70,9 @@ def parallel_hunyuan_model_testing(rank, world_size, q, mock_teletron):
         )
     hunyuanConfig = HunyuanParams()
     torch.manual_seed(1234)
-    hunyuan_model = HunyuanVideoTransformer3DModel(
-            in_channels=hunyuanConfig.in_channels,
-            out_channels=hunyuanConfig.out_channels,
-            num_attention_heads=hunyuanConfig.num_attention_heads,
-            attention_head_dim=hunyuanConfig.attention_head_dim,
-            num_layers=hunyuanConfig.num_layers,
-            num_single_layers=hunyuanConfig.num_single_layers,
-            num_refiner_layers=hunyuanConfig.num_refiner_layers,
-            mlp_ratio=hunyuanConfig.mlp_ratio,
-            patch_size=hunyuanConfig.patch_size,
-            patch_size_t=hunyuanConfig.patch_size_t,
-            qk_norm=hunyuanConfig.qk_norm,
-            guidance_embeds=hunyuanConfig.guidance_embeds,
-            text_embed_dim=hunyuanConfig.text_embed_dim,
-            pooled_projection_dim=hunyuanConfig.pooled_projection_dim,
-            rope_theta=hunyuanConfig.rope_theta,
-            rope_axes_dim=hunyuanConfig.rope_axes_dim
-        ).cuda().to(torch.bfloat16)
+    hunyuan_model = HunyuanVideoTransformer3DModel(hunyuanConfig).cuda().to(torch.bfloat16)
     torch.manual_seed(1234)
-    parallel_hunyuan_model = ParallelHunyuanVideoModel(
-            in_channels=hunyuanConfig.in_channels,
-            out_channels=hunyuanConfig.out_channels,
-            num_attention_heads=hunyuanConfig.num_attention_heads,
-            attention_head_dim=hunyuanConfig.attention_head_dim,
-            num_layers=hunyuanConfig.num_layers,
-            num_single_layers=hunyuanConfig.num_single_layers,
-            num_refiner_layers=hunyuanConfig.num_refiner_layers,
-            mlp_ratio=hunyuanConfig.mlp_ratio,
-            patch_size=hunyuanConfig.patch_size,
-            patch_size_t=hunyuanConfig.patch_size_t,
-            qk_norm=hunyuanConfig.qk_norm,
-            guidance_embeds=hunyuanConfig.guidance_embeds,
-            text_embed_dim=hunyuanConfig.text_embed_dim,
-            pooled_projection_dim=hunyuanConfig.pooled_projection_dim,
-            rope_theta=hunyuanConfig.rope_theta,
-            rope_axes_dim=hunyuanConfig.rope_axes_dim
-        ).cuda().to(torch.bfloat16)
+    parallel_hunyuan_model = ParallelHunyuanVideoModel(hunyuanConfig).cuda().to(torch.bfloat16)
     # test forward
     parallel_hunyuan_model.load_state_dict(hunyuan_model.state_dict())
 

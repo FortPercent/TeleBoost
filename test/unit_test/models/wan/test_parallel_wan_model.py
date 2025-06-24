@@ -19,24 +19,9 @@ logging.basicConfig(level=logging.DEBUG,
 format='%(asctime)s - %(levelname)s - %(message)s')
 
 class WanParams:
-    patch_size: Tuple[int] = (1, 2, 2)
     num_attention_heads: int = 40
-    attention_head_dim: int = 128
-    activation_func: Callable = F.gelu
-    in_channels: int = 36
-    out_channels: int = 16
-    text_dim: int = 4096
-    freq_dim: int = 256
-    ffn_dim: int = 13824
+    hidden_size: int = 5120
     num_layers: int = 1
-    cross_attn_norm: bool = True
-    qk_norm: Optional[str] = "rms_norm_across_heads"
-    eps: float = 1e-6
-    image_dim: int = 1280
-    added_kv_proj_dim: int = 5120
-    rope_max_seq_len: int = 1024
-    has_image_input: bool = True
-    has_image_pos_emb: bool = False
 
 
 WAN_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
@@ -74,36 +59,9 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
         )
     wanConfig = WanParams()
     torch.manual_seed(1234)
-    wan_model = WanModel(
-            dim=wanConfig.num_attention_heads * wanConfig.attention_head_dim,
-            in_dim=wanConfig.in_channels,
-            ffn_dim=wanConfig.ffn_dim,
-            out_dim=wanConfig.out_channels,
-            text_dim=wanConfig.text_dim,
-            freq_dim=wanConfig.freq_dim,
-            eps=wanConfig.eps,
-            patch_size=wanConfig.patch_size,
-            num_heads=wanConfig.num_attention_heads,
-            num_layers=wanConfig.num_layers,
-            has_image_input=wanConfig.has_image_input,
-            has_image_pos_emb=wanConfig.has_image_pos_emb
-        ).cuda().to(torch.bfloat16)
-    
+    wan_model = WanModel(wanConfig).cuda().to(torch.bfloat16)
     torch.manual_seed(1234)
-    parallel_wan_model = ParallelWanModel(
-            dim=wanConfig.num_attention_heads * wanConfig.attention_head_dim,
-            in_dim=wanConfig.in_channels,
-            ffn_dim=wanConfig.ffn_dim,
-            out_dim=wanConfig.out_channels,
-            text_dim=wanConfig.text_dim,
-            freq_dim=wanConfig.freq_dim,
-            eps=wanConfig.eps,
-            patch_size=wanConfig.patch_size,
-            num_heads=wanConfig.num_attention_heads,
-            num_layers=wanConfig.num_layers,
-            has_image_input=wanConfig.has_image_input,
-            has_image_pos_emb=wanConfig.has_image_pos_emb
-        ).cuda().to(torch.bfloat16)
+    parallel_wan_model = ParallelWanModel(wanConfig).cuda().to(torch.bfloat16)
 
     parallel_wan_model.load_state_dict(wan_model.state_dict())
     wan_params = dict(wan_model.named_parameters())
