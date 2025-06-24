@@ -5,7 +5,7 @@ from collections import defaultdict
 import torch
 import random
 import string
-from megatron.training import get_args
+from teletron.utils import get_args
 
 class FakeDataset():
     def __init__(
