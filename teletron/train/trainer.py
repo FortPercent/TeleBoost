@@ -2,28 +2,20 @@ import torch
 import torch.distributed as dist
 import dataclasses
 import time
-import random
-import numpy as np
 import sys
 import gc
-from typing import Callable, Dict, List, Optional
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.transformer.module import MegatronModule, Float16Module
 from megatron.core.enums import ModelType
 from megatron.core.distributed import finalize_model_grads
-from megatron.core import mpu, tensor_parallel, dist_checkpointing
+from megatron.core import mpu, tensor_parallel
 from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.core.optimizer import ( OptimizerConfig, 
-                                     _get_param_groups,
-                                     _update_min_and_max_lr_in_param_groups,
-                                     _get_megatron_optimizer_based_on_param_groups,
-                                     ChainedOptimizer,)
+from megatron.core.optimizer import ( OptimizerConfig, )
         
 from vast.train.samplers import build_sampler as build_sampler_vast
 from vast.datasets import DefaultCollator
 from vast.datasets.datasets.build import build_dataset as build_dataset_vast
 from teletron.models.wan.wan_producer import producer_process
-from teletron.utils.scheduler import OptimizerParamScheduler
 from teletron.utils import (
                    print_rank_0,
                    print_datetime,
@@ -47,22 +39,16 @@ from teletron.train.utils import (_initialize_distributed,
                                   forward_step,
                                   _set_random_seed,
                                   _initialize_tp_communicators,
-                                  update_train_iters,
+                                  training_log,
+                                  calc_params_l2_norm,
                                   )
-from teletron.utils.checkpoint import ( _load_base_checkpoint,
-                                       read_metadata,
-                                       get_checkpoint_name,
-                                       get_rng_state,
-                                       get_checkpoint_tracker_filename,
-                                       ensure_directory_exists,
-                                       checkpoint_exists,
-                                       get_distributed_optimizer_checkpoint_name,
-                                        )
 from teletron.core.parallel_state import get_transformer_model_group
 from teletron.core.data_loader import build_pretraining_data_loader
 from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
 from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
 from teletron.models.build import build_model
+from teletron.train.checkpoint import CheckPointMixin
+from teletron.train.lr_scheduler import SchedulerMixin
 from logging import getLogger
 logger = getLogger(__name__)
 _TRAIN_START_TIME = time.time()
@@ -88,7 +74,7 @@ def cyclic_iter(iter):
         for x in iter:
             yield x
 
-class Trainer:
+class Trainer(CheckPointMixin, SchedulerMixin):
     def __init__(self, 
                  args,
                  dataset_provide_func=None, 
@@ -172,193 +158,6 @@ class Trainer:
                 optimizer.reload_model_params()
 
         return model, optimizer, opt_param_scheduler
-
-    def get_optimizer_param_scheduler(self, optimizer):
-        """Build the learning rate scheduler."""
-        args = get_args()
-
-        # Iteration-based training.
-        if args.train_iters:
-            if args.lr_decay_iters is None:
-                args.lr_decay_iters = args.train_iters
-            lr_decay_steps = args.lr_decay_iters * args.global_batch_size
-            wd_incr_steps = args.train_iters * args.global_batch_size
-            if args.lr_warmup_fraction is not None:
-                lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
-            else:
-                lr_warmup_steps = args.lr_warmup_iters * args.global_batch_size
-        # Sample-based training.
-        elif args.train_samples:
-            # We need to set training iters for later use. Technically
-            # we need to adjust the training samples too (due to last
-            # batch being incomplete) but we leave it as is for now.
-            update_train_iters(args)
-            if args.lr_decay_samples is None:
-                args.lr_decay_samples = args.train_samples
-            lr_decay_steps = args.lr_decay_samples
-            wd_incr_steps = args.train_samples
-            if args.lr_warmup_fraction is not None:
-                lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
-            else:
-                lr_warmup_steps = args.lr_warmup_samples
-        else:
-            raise Exception(
-                'either train-iters or train-samples should be provided.')
-
-        opt_param_scheduler = OptimizerParamScheduler(
-            optimizer,
-            init_lr=args.lr_warmup_init,
-            max_lr=args.lr,
-            min_lr=args.min_lr,
-            lr_warmup_steps=lr_warmup_steps,
-            lr_decay_steps=lr_decay_steps,
-            lr_decay_style=args.lr_decay_style,
-            start_wd=args.start_weight_decay,
-            end_wd=args.end_weight_decay,
-            wd_incr_steps=wd_incr_steps,
-            wd_incr_style=args.weight_decay_incr_style,
-            use_checkpoint_opt_param_scheduler=args.use_checkpoint_opt_param_scheduler,
-            override_opt_param_scheduler=args.override_opt_param_scheduler)
-
-        return opt_param_scheduler
-
-
-
-    def get_scheduler(self, optimizer):
-        args = get_args()
-        # Iteration-based training.
-        if args.train_iters:
-            if args.lr_decay_iters is None:
-                args.lr_decay_iters = args.train_iters
-            lr_decay_steps = args.lr_decay_iters * args.global_batch_size
-            wd_incr_steps = args.train_iters * args.global_batch_size
-            if args.lr_warmup_fraction is not None:
-                lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
-            else:
-                lr_warmup_steps = args.lr_warmup_iters * args.global_batch_size
-        # Sample-based training.
-        elif args.train_samples:
-            # We need to set training iters for later use. Technically
-            # we need to adjust the training samples too (due to last
-            # batch being incomplete) but we leave it as is for now.
-            update_train_iters(args)
-            if args.lr_decay_samples is None:
-                args.lr_decay_samples = args.train_samples
-            lr_decay_steps = args.lr_decay_samples
-            wd_incr_steps = args.train_samples
-            if args.lr_warmup_fraction is not None:
-                lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
-            else:
-                lr_warmup_steps = args.lr_warmup_samples
-        else:
-            raise Exception(
-                'either train-iters or train-samples should be provided.')
-
-        opt_param_scheduler = OptimizerParamScheduler(
-            optimizer,
-            init_lr=args.lr_warmup_init,
-            max_lr=args.lr,
-            min_lr=args.min_lr,
-            lr_warmup_steps=lr_warmup_steps,
-            lr_decay_steps=lr_decay_steps,
-            lr_decay_style=args.lr_decay_style,
-            start_wd=args.start_weight_decay,
-            end_wd=args.end_weight_decay,
-            wd_incr_steps=wd_incr_steps,
-            wd_incr_style=args.weight_decay_incr_style,
-            use_checkpoint_opt_param_scheduler=args.use_checkpoint_opt_param_scheduler,
-            override_opt_param_scheduler=args.override_opt_param_scheduler)
-
-        return opt_param_scheduler
-
-
-    def get_optimizer(self, config: OptimizerConfig, 
-                      model: List[MegatronModule], 
-                      no_weight_decay_cond: Optional[Callable] = None, 
-                      scale_lr_cond: Optional[Callable] = None, 
-                      lr_mult: float = 1.0):
-        
-        """Retrieve the Megatron optimizer for model chunks.
-
-        We use separate optimizers for expert parameters and non-expert parameters.
-
-        Args:
-            config (OptimizerConfig): optimizer configuration object.
-            model_chunks (List[MegatronModule]): model chunks to get optimizer for.
-            no_weight_decay_cond (func, optional): function to determine whether a parameter
-                should not perform weight decay. Defaults to None.
-            scale_lr_cond (func, optional): function to determine whether a parameter
-                should have a scaled learning rate. Defaults to None.
-            lr_mult (float, optional): learning rate multiplier for parameters that
-                satisfy scale_lr_cond. Defaults to 1.0.
-
-        Returns:
-            Instance of MegatronOptimizer.
-        """
-
-        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-            logger.info(f'Setting up optimizer with {config}')
-
-        # Collect param groups.
-        param_groups = _get_param_groups(
-            model,
-            no_weight_decay_cond,
-            scale_lr_cond,
-            lr_mult,
-            use_decoupled_learning_rate=config.decoupled_lr is not None,
-        )
-        param_groups = _update_min_and_max_lr_in_param_groups(
-            param_groups,
-            lr=config.lr,
-            min_lr=config.min_lr,
-            decoupled_lr=config.decoupled_lr,
-            decoupled_min_lr=config.decoupled_min_lr,
-        )
-
-        # Collect grad buffers for distributed optimizer.
-        per_model_buffers = {}
-        per_model_ep_buffers = {}
-        for model_idx, model_chunk in enumerate(model):
-            if hasattr(model_chunk, 'buffers'):
-                per_model_buffers[model_idx] = model_chunk.buffers
-                per_model_ep_buffers[model_idx] = model_chunk.expert_parallel_buffers
-
-        # Split param groups into dense and MoE params (since data-parallel groups for MoE
-        # parameters can be different with expert parallelism).
-        dense_param_groups = list(filter(lambda g: not g['is_expert_parallel'], param_groups))
-        moe_param_groups = list(filter(lambda g: g['is_expert_parallel'], param_groups))
-
-        # Create optimizers.
-        model_parallel_rank = torch.distributed.get_rank(mpu.get_model_parallel_group())
-        optimizers = [
-            _get_megatron_optimizer_based_on_param_groups(
-                config,
-                param_groups=dense_param_groups,
-                per_model_buffers=per_model_buffers,
-                data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
-                data_parallel_group_gloo=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
-                data_parallel_group_idx=model_parallel_rank,
-            )
-        ]
-        if len(moe_param_groups) > 0:
-            model_parallel_world_size = torch.distributed.get_world_size(mpu.get_model_parallel_group())
-            expert_parallel_rank = mpu.get_expert_model_parallel_rank()
-            optimizers.append(
-                _get_megatron_optimizer_based_on_param_groups(
-                    config,
-                    param_groups=moe_param_groups,
-                    per_model_buffers=per_model_ep_buffers,
-                    data_parallel_group=mpu.get_data_modulo_expert_parallel_group(),
-                    data_parallel_group_gloo=mpu.get_data_modulo_expert_parallel_group_gloo(),
-                    data_parallel_group_idx=expert_parallel_rank * model_parallel_world_size
-                    + model_parallel_rank,
-                )
-            )
-
-        if len(optimizers) == 1:
-            return optimizers[0]
-
-        return ChainedOptimizer(optimizers)
 
 
     def model_provider(self,
@@ -470,328 +269,6 @@ class Trainer:
 
         return model
         
-
-    def load_checkpoint(self, model, optimizer, opt_param_scheduler, load_arg='load', strict=True):
-        """Load a model checkpoint and return the iteration.
-        strict (bool): whether to strictly enforce that the keys in
-            :attr:`state_dict` of the checkpoint match the names of
-            parameters and buffers in model.
-        """
-        args = get_args()
-        load_dir = getattr(args, load_arg)
-
-        # Finetuning directories
-        pretrained_dir = getattr(args,'pretrained_checkpoint', None)
-        if pretrained_dir is not None and not checkpoint_exists(load_dir):
-            print_rank_0(f'Checkpoint file not found in load directory {load_dir} attempting to finetune with checkpoint in {pretrained_dir}')
-            load_dir = pretrained_dir
-            if not checkpoint_exists(load_dir):
-                raise FileNotFoundError("No checkpoint found in load directory or pretrained directory")
-            args.finetune = True
-
-
-        model = unwrap_model(model)
-
-        load_kwargs = {}
-        is_dist_ckpt = False
-        if args.auto_detect_ckpt_format or args.use_dist_ckpt:
-            state_dict, checkpoint_name, release = _load_base_checkpoint(load_dir, rank0=True, exit_on_missing_checkpoint=args.exit_on_missing_checkpoint)
-            is_dist_ckpt = dist_checkpointing.check_is_distributed_checkpoint(checkpoint_name)
-            if is_dist_ckpt:
-                ckpt_tp_pp = (state_dict['args'].tensor_model_parallel_size, state_dict['args'].pipeline_model_parallel_size)
-                run_tp_pp = (mpu.get_tensor_model_parallel_world_size(), mpu.get_pipeline_model_parallel_world_size())
-                mismatch_msg = "(TP, PP) mismatch after resume ({} vs {} from checkpoint)".format(ckpt_tp_pp, run_tp_pp)
-
-                if ckpt_tp_pp == run_tp_pp and not getattr(state_dict['args'], 'no_save_rng', False):
-                    rng_state = get_rng_state(True)  # we can load the rng state
-                else:
-                    rng_state = None
-                    print_rank_0("{}: RNG state will be ignored".format(mismatch_msg))
-
-                # TODO: add DistributedOptimizer support for differing TPxPP
-                if ckpt_tp_pp != run_tp_pp and not release and not args.finetune and not args.no_load_optim and args.use_distributed_optimizer:
-                    raise RuntimeError("{}: not supported for DistributedOptimizer".format(mismatch_msg))
-
-                optim_sd_kwargs = dict(is_loading=True)
-                if args.use_distributed_optimizer:
-                    optim_sd_kwargs['sharding_type'] = ('fully_sharded_bucket_space'
-                                                        if getattr(state_dict['args'], 'ckpt_fully_parallel_save', False)
-                                                        else 'dp_zero_gather_scatter')
-                load_kwargs['sharded_state_dict'] = self.generate_state_dict(args, model, optimizer, opt_param_scheduler,
-                                                                        rng_state, args.use_dist_ckpt, optim_sd_kwargs=optim_sd_kwargs)
-                load_kwargs['exit_on_missing_checkpoint'] = args.exit_on_missing_checkpoint
-
-        state_dict, checkpoint_name, release = _load_base_checkpoint(load_dir, rank0=False, **load_kwargs)
-
-        # Checkpoint not loaded.
-        if state_dict is None:
-            # Iteration and num_floating_point_operations_so_far default to 0.
-            return 0, 0
-
-        # Set checkpoint version.
-        # set_checkpoint_version(state_dict.get('checkpoint_version', 0))
-
-        # Set iteration.
-        if args.finetune or release:
-            iteration = 0
-        else:
-            try:
-                iteration = state_dict['iteration']
-            except KeyError:
-                try:  # Backward compatible with older checkpoints
-                    iteration = state_dict['total_iters']
-                except KeyError:
-                    print_rank_0('A metadata file exists but unable to load '
-                                'iteration from checkpoint {}, exiting'.format(checkpoint_name))
-                    sys.exit()
-        num_floating_point_operations_so_far = state_dict.get('num_floating_point_operations_so_far', 0)
-
-        # Check arguments.
-        assert args.consumed_train_samples == 0
-        assert args.consumed_valid_samples == 0
-        if 'args' in state_dict and not args.finetune:
-            checkpoint_args = state_dict['args']
-            # check_checkpoint_args(checkpoint_args)
-            args.consumed_train_samples = getattr(checkpoint_args,
-                                                'consumed_train_samples', 0)
-            update_num_microbatches(consumed_samples=args.consumed_train_samples)
-            args.consumed_valid_samples = getattr(checkpoint_args,
-                                                'consumed_valid_samples', 0)
-        else:
-            print_rank_0('could not find arguments in the checkpoint ...')
-
-        # Model.
-        strict = False if args.retro_add_retriever else strict
-
-        if args.lora == True:
-            raise NotImplementedError('Lora not implement yet')
-            from peft import get_peft_model, LoraConfig, TaskType
-            from teletron.models.wan.light_pipeline import find_lora_target_modules
-            base_model_path = args.lora_base_model_path
-            target_modules = find_lora_target_modules(model[0], args.lora_target_modules)
-            lora_config = LoraConfig(
-                r=args.lora_rank,                             # LoRA rank
-                lora_alpha=args.lora_alpha,                   # Scaling factor
-                # target_modules=["q", "v","o","k"],  # Layer names to apply LoRA to
-                target_modules=target_modules, # Layer names to apply LoRA to
-                lora_dropout=args.lora_dropout,
-                bias=args.lora_bias,
-                task_type= TaskType[args.lora_task_type]    # or SEQ_CLS, TOKEN_CLS etc.
-            )
-            if len(model) == 1:
-                model[0].load_state_dict(torch.load(base_model_path))
-                model[0]=get_peft_model(model[0], lora_config)
-                model[0].load_state_dict(state_dict['model'], strict=strict)
-            else:
-                for i in range(len(model)):
-                    mpu.set_virtual_pipeline_model_parallel_rank(i)
-                    model[i].load_state_dict(torch.load(base_model_path), strict=strict)
-                    model[i]=get_peft_model(model[i], lora_config)
-                    model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
-        else:
-            if len(model) == 1:
-                model[0].load_state_dict(state_dict['model'], strict=strict)
-            else:
-                for i in range(len(model)):
-                    mpu.set_virtual_pipeline_model_parallel_rank(i)
-                    model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
-
-        # Fix up query/key/value matrix ordering if needed.
-        # checkpoint_version = get_checkpoint_version()
-        # print_rank_0(f' checkpoint version {checkpoint_version}')
-        # fix_query_key_value_ordering(model, checkpoint_version)
-
-        # Optimizer.
-        if not release and not args.finetune and not args.no_load_optim:
-            try:
-                # Load state dict.
-                if optimizer is not None:
-                    optimizer.load_state_dict(state_dict['optimizer'])
-
-                # Load distributed optimizer's custom parameter state.
-                # For distributed checkpoint it's already loaded in load_state_dict above
-                if args.use_distributed_optimizer and not is_dist_ckpt:
-                    tracker_filename = get_checkpoint_tracker_filename(load_dir)
-                    iteration, release = read_metadata(tracker_filename)
-                    model_checkpoint_name = \
-                        get_checkpoint_name(load_dir, iteration, release)
-                    optim_checkpoint_name = \
-                        get_distributed_optimizer_checkpoint_name(
-                            model_checkpoint_name)
-                    optimizer.load_parameter_state(optim_checkpoint_name)
-
-                # Load scheduler.
-                if opt_param_scheduler is not None:
-                    if 'lr_scheduler' in state_dict: # backward compatbility
-                        opt_param_scheduler.load_state_dict(state_dict['lr_scheduler'])
-                    else:
-                        opt_param_scheduler.load_state_dict(state_dict['opt_param_scheduler'])
-            except KeyError:
-                print_rank_0('Unable to load optimizer from checkpoint {}. '
-                            'Specify --no-load-optim or --finetune to prevent '
-                            'attempting to load the optimizer state, '
-                            'exiting ...'.format(checkpoint_name))
-                sys.exit()
-        else:
-            if (args.fp16 or args.bf16) and optimizer is not None:
-                optimizer.reload_model_params()
-
-        # rng states.
-        if not release and not args.finetune and not args.no_load_rng:
-            try:
-                if 'rng_state' in state_dict:
-                    # access rng_state for data parallel rank
-                    if args.data_parallel_random_init:
-                        rng_state = state_dict['rng_state'][mpu.get_data_parallel_rank()]
-                    else:
-                        rng_state = state_dict['rng_state'][0]
-                    random.setstate(rng_state['random_rng_state'])
-                    np.random.set_state(rng_state['np_rng_state'])
-                    torch.set_rng_state(rng_state['torch_rng_state'])
-                    torch.cuda.set_rng_state(rng_state['cuda_rng_state'])
-                    # Check for empty states array
-                    if not rng_state['rng_tracker_states']:
-                        raise KeyError
-                    tensor_parallel.get_cuda_rng_tracker().set_states(
-                        rng_state['rng_tracker_states'])
-                else:  # backward compatability
-                    random.setstate(state_dict['random_rng_state'])
-                    np.random.set_state(state_dict['np_rng_state'])
-                    torch.set_rng_state(state_dict['torch_rng_state'])
-                    torch.cuda.set_rng_state(state_dict['cuda_rng_state'])
-                    # Check for empty states array
-                    if not state_dict['rng_tracker_states']:
-                        raise KeyError
-                    tensor_parallel.get_cuda_rng_tracker().set_states(
-                        state_dict['rng_tracker_states'])
-            except KeyError:
-                print_rank_0('Unable to load rng state from checkpoint {}. '
-                            'Specify --no-load-rng or --finetune to prevent '
-                            'attempting to load the rng state, '
-                            'exiting ...'.format(checkpoint_name))
-                sys.exit()
-        # from .global_vars import _GLOBAL_ARGS
-        args.last_micro_batch_access_index = state_dict["last_microbatch_size_index"]
-
-        # Some utilities want to load a checkpoint without distributed being initialized
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-
-        print_rank_0(f'  successfully loaded checkpoint from {load_dir} '
-                    f'[ t {mpu.get_tensor_model_parallel_rank()}, '
-                    f'p {mpu.get_pipeline_model_parallel_rank()} ] '
-                    f'at iteration {iteration}')
-
-        return iteration, num_floating_point_operations_so_far
-
-
-    def save_checkpoint(self, iteration, model, optimizer, opt_param_scheduler,
-                    num_floating_point_operations_so_far):
-        """Save a model checkpoint."""
-        args = get_args()
-
-        # Only rank zero of the data parallel writes to the disk.
-        model = unwrap_model(model)
-
-        ckpt_format = args.dist_ckpt_format if args.use_dist_ckpt else 'torch'
-        print_rank_0('saving checkpoint at iteration {:7d} to {} in {} format'.format(
-            iteration, args.save, ckpt_format))
-
-        # Collect rng state across data parallel ranks.
-        rng_state = get_rng_state(args.use_dist_ckpt)
-
-        # Checkpoint name.
-        checkpoint_name = get_checkpoint_name(args.save, iteration, return_base_dir=args.use_dist_ckpt)
-
-        # Save distributed optimizer's custom parameter state.
-        if args.use_distributed_optimizer and not args.no_save_optim and optimizer is not None and not args.use_dist_ckpt:
-            optim_checkpoint_name = \
-                get_distributed_optimizer_checkpoint_name(checkpoint_name)
-            ensure_directory_exists(optim_checkpoint_name)
-            optimizer.save_parameter_state(optim_checkpoint_name)
-
-        # Collect args, model, RNG.
-        if not torch.distributed.is_initialized() \
-                or mpu.get_data_modulo_expert_parallel_rank() == 0 \
-                or args.use_dist_ckpt:
-
-            optim_sd_kwargs = {}
-            if args.use_dist_ckpt and args.use_distributed_optimizer:
-                optim_sd_kwargs['sharding_type'] = ('fully_sharded_bucket_space'
-                                                    if args.ckpt_fully_parallel_save
-                                                    else 'dp_zero_gather_scatter')
-                print_rank_0(f'Storing distributed optimizer sharded state of type {optim_sd_kwargs["sharding_type"]}')
-            state_dict = self.generate_state_dict(args, model, optimizer, opt_param_scheduler, rng_state,
-                                            args.use_dist_ckpt, iteration, optim_sd_kwargs=optim_sd_kwargs)
-
-            state_dict['num_floating_point_operations_so_far'] = num_floating_point_operations_so_far
-            if args.use_dist_ckpt:
-                if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-                    ensure_directory_exists(checkpoint_name,
-                                            check_parent=False)
-                dist_checkpointing.save(state_dict, checkpoint_name, (args.dist_ckpt_format, 1))
-
-            else:
-                # Save.
-                ensure_directory_exists(checkpoint_name)
-                torch.save(state_dict, checkpoint_name)
-
-        # Wait so everyone is done (necessary)
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-
-        print_rank_0('  successfully saved checkpoint at iteration {:7d} to {}' \
-                    .format(iteration, args.save))
-
-        # And update the latest iteration
-        if not torch.distributed.is_initialized() \
-        or torch.distributed.get_rank() == 0:
-            tracker_filename = get_checkpoint_tracker_filename(args.save)
-            with open(tracker_filename, 'w') as f:
-                f.write(str(iteration))
-
-        # Wait so everyone is done (not necessary)
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-
-
-    def generate_state_dict(self, args, model, optimizer, opt_param_scheduler,
-                        rng_state, use_dist_ckpt=False, iteration=None,sampler=None,
-                        optim_sd_kwargs=None):
-        # Arguments, iteration, and model.
-        state_dict = {}
-        state_dict['args'] = args
-        state_dict['checkpoint_version'] = 3.0
-        if iteration is not None:
-            state_dict['iteration'] = iteration
-        # save bucketSample last_microbatch_size_index
-        state_dict["last_microbatch_size_index"]=args.last_microbatch_size_index
-
-        if len(model) == 1:
-            state_dict['model'] = (model[0].sharded_state_dict()
-                                if use_dist_ckpt else
-                                model[0].state_dict_for_save_checkpoint())
-        else:
-            for i in range(len(model)):
-                mpu.set_virtual_pipeline_model_parallel_rank(i)
-                state_dict['model%d' % i] = (
-                    model[i].sharded_state_dict()
-                    if use_dist_ckpt else
-                    model[i].state_dict_for_save_checkpoint())
-        # Optimizer stuff.
-        if not args.no_save_optim:
-            if optimizer is not None:
-                state_dict['optimizer'] = (optimizer.sharded_state_dict(state_dict, **(optim_sd_kwargs or {}))
-                                        if use_dist_ckpt else
-                                        optimizer.state_dict())
-            if opt_param_scheduler is not None:
-                state_dict['opt_param_scheduler'] = \
-                    opt_param_scheduler.state_dict()
-        # RNG states.
-        if not args.no_save_rng:
-            state_dict["rng_state"] = rng_state
-        return state_dict
-
 
     def get_iterator(self, 
                      len_model:int, 
@@ -1130,17 +607,6 @@ class Trainer:
                                     verbose=True, write_to_tensorboard=not args.skip_train)
 
 
-    def save_checkpoint_and_time(self, iteration, model, optimizer, opt_param_scheduler,
-                             num_floating_point_operations_so_far):
-        args = get_args()
-        # Extra barrier is added to make sure all ranks report the max time.
-        self.save_checkpoint(iteration, model, optimizer, opt_param_scheduler,
-                        num_floating_point_operations_so_far)
-
-        # if args.log_progress:
-        #     compute_throughputs_and_append_to_progress_log(iteration,
-        #                                                 num_floating_point_operations_so_far)
-
 
 
     def train(self, 
@@ -1153,6 +619,8 @@ class Trainer:
                    process_non_loss_data_func,
                    config):
         args = get_args()
+        # model = self.model
+
         for model_module in model:
             model_module.train()
         total_loss_dict = {}
@@ -1252,28 +720,29 @@ class Trainer:
             num_floating_point_operations_so_far += num_floating_point_operations(args, batch_size)
 
             # Logging.
-            # loss_scale = optimizer.get_loss_scale().item()
-            # params_norm = None
-            # if args.log_params_norm:
-            #     params_norm = calc_params_l2_norm(model)
+            loss_scale = optimizer.get_loss_scale().item()
+            params_norm = None
+            if args.log_params_norm:
+                params_norm = calc_params_l2_norm(model)
 
             # # if iteration % args.log_interval == 0:
             # #     track_e2e_metrics()
 
-            # learning_rate = None
-            # decoupled_learning_rate = None
-            # for param_group in optimizer.param_groups:
-            #     if param_group['is_decoupled_lr']:
-            #         decoupled_learning_rate = param_group['lr']
-            #     else:
-            #         learning_rate = param_group['lr']
-            # report_memory_flag = training_log(loss_dict, total_loss_dict,
-            #                                 learning_rate,
-            #                                 decoupled_learning_rate,
-            #                                 iteration, loss_scale,
-            #                                 report_memory_flag, skipped_iter,
-            #                                 grad_norm, params_norm, num_zeros_in_grad)
+            learning_rate = None
+            decoupled_learning_rate = None
+            for param_group in optimizer.param_groups:
+                if param_group['is_decoupled_lr']:
+                    decoupled_learning_rate = param_group['lr']
+                else:
+                    learning_rate = param_group['lr']
+            report_memory_flag = training_log(loss_dict, total_loss_dict,
+                                            learning_rate,
+                                            decoupled_learning_rate,
+                                            iteration, loss_scale,
+                                            report_memory_flag, skipped_iter,
+                                            grad_norm, params_norm, num_zeros_in_grad)
 
+            # breakpoint()
             # Autoresume
             # if args.adlr_autoresume and \
             # (iteration % args.adlr_autoresume_interval == 0):
@@ -1426,6 +895,7 @@ class Trainer:
         # Empty unused memory.
         if args.empty_unused_memory_level >= 2:
             torch.cuda.empty_cache()
+        # breakpoint()
 
         if mpu.is_pipeline_last_stage(ignore_virtual=True):
             # Average loss across microbatches.

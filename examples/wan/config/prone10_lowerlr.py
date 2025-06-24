@@ -187,7 +187,7 @@ config = dict(
                         embedding_keys=[
                             "raw_first_image", 
                         ],  
-                        dst_size=dst_size,
+                        # dst_size=dst_size,
                     ),
                 ],
             ),
