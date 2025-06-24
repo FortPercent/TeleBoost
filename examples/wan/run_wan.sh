@@ -36,24 +36,9 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
 
-set -e  # 发生错误即退出
-
-# pip install  \
-#     --root-user-action ignore \
-#     --trusted-host pypi.chinatelecom.ai \
-#     --index-url http://pypi.chinatelecom.ai/simple/ uv 
-
-# uv venv --system-site-packages
-source .venv/bin/activate
-
-# uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Megatron-LM
-uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/vast
-uv pip install -e .
-uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/teleai_data_tool
-
-# run apt install rsync
-# rsync -ah --info=progress2 /nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P /workspace/
-# rsync -ah --info=progress2 /nvfile-heatstorage/model_zoo/Wan2___1-FLF2V-14B-480P-init /workspace/
+source ./examples/wan/setup_pyenv.sh
+setup_env_and_install
+# reinstall with "rm -rf .venv"
 
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1_step100
 TENSORBOARD_LOGS_PATH=./logs
