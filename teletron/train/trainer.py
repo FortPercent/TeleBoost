@@ -148,6 +148,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         else:
             args.iteration = 0
             args.num_floating_point_operations_so_far = 0
+            args.last_microbatch_size_index = None
 
         # get model without FP16 and/or DDP wrappers
         if args.iteration == 0 and len(unwrapped_model) == 1 \
@@ -350,8 +351,10 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                     seed=args.seed
                 )
             # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
-            # if iteration is None:
-            sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
+            if args.last_microbatch_size_index is None:
+                sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
+            else:
+                sampler.last_micro_batch_access_index = args.last_microbatch_size_index
             # else:
                 # sampler.last_micro_batch_access_index = iteration * sampler.num_replicas
 
