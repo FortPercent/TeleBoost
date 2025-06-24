@@ -705,6 +705,9 @@ class Trainer(CheckPointMixin, SchedulerMixin):
             update_num_microbatches(args.consumed_train_samples, consistency_check=True)
 
             args.curr_iteration = iteration
+            import os
+            if os.environ.get("MEMORY_SNAPSHOT"):
+                torch.cuda.memory._record_memory_history(max_entries=80000)
             loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
                 self.train_step(forward_step_func,
                         train_data_iterator,
@@ -712,6 +715,12 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                         optimizer,
                         opt_param_scheduler,
                         config)
+            if os.environ.get("MEMORY_SNAPSHOT"):
+                time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+                save_dir = os.environ.get("PROF_SAVE_PATH", ".")  # 默认当前目录
+                file_name = os.path.join(save_dir, f"memory_{time_str}_iter{iteration}_rank{torch.distributed.get_rank()}.pt")
+                torch.cuda.memory._dump_snapshot(file_name)
+                torch.cuda.memory._record_memory_history(enabled=None)
             iteration += 1
             batch_size = mpu.get_data_parallel_world_size() * \
                         args.micro_batch_size * \

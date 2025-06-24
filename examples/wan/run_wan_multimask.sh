@@ -34,6 +34,9 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
 
+source .venv/bin/activate
+
+
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_multimask_tp1_pp1_layer_20_step100
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
@@ -85,6 +88,7 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
+    --activation-offload
     # --distribute-saved-activations
 )
 
