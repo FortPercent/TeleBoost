@@ -37,7 +37,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                 eps: float=1e-6,
                 patch_size: Tuple[int, int, int]=(1,2,2),
                 num_heads: int=40,
-                num_layers: int=1,
+                num_layers: int=5,
                 has_image_input: bool=True,
                 has_image_pos_emb: bool=False,
                 context_parallel_dim: int = 1,
@@ -62,7 +62,12 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         ])
 
         # from TransformerGeneralMixin
-        self.enable_activation_checkpointing(self.blocks)
+        from teletron.utils import get_args
+        args = get_args()
+        if args.activation_offload:
+            self.enable_activation_offload(self.blocks)
+        else:
+            self.enable_activation_checkpointing(self.blocks)
 
         # from ContextParallelMixin
         self.register_cp_grad_reduce_hook()
