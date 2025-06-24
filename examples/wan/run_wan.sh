@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Runs the "175B" parameter model
 export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
@@ -9,10 +11,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # TODO, change to your own path
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Megatron_060
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/data/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/vast-10b
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/teleai_data_tool/
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Megatron_060
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/data/Teletron
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/vast-10b
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/teleai_data_tool/
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
@@ -33,6 +35,25 @@ echo '$NODE_RANK' $NODE_RANK
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
+
+set -e  # 发生错误即退出
+
+pip install  \
+    --root-user-action ignore \
+    --trusted-host pypi.chinatelecom.ai \
+    --index-url http://pypi.chinatelecom.ai/simple/ uv 
+
+uv venv --system-site-packages
+source .venv/bin/activate
+
+uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Megatron-LM
+uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/vast
+uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Teletron
+uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/teleai_data_tool
+
+# run apt install rsync
+# rsync -ah --info=progress2 /nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P /workspace/
+# rsync -ah --info=progress2 /nvfile-heatstorage/model_zoo/Wan2___1-FLF2V-14B-480P-init /workspace/
 
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1_step100
 TENSORBOARD_LOGS_PATH=./logs

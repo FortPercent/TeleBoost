@@ -48,3 +48,7 @@ teletron = ["**/*.yml", "**/*.sh"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+
+[tool.uv]
+link-mode = "copy" 
+index-url = "http://pypi.chinatelecom.ai/simple/"
