@@ -242,7 +242,7 @@ class CheckPointMixin:
 
             if len(model) == 1:
                 # breakpoint()
-                model[0].load_state_dict(state_dict, strict=strict)
+                model[0].load_state_dict(state_dict['model'], strict=strict)
             else:
                 for i in range(len(model)):
                     mpu.set_virtual_pipeline_model_parallel_rank(i)
@@ -322,7 +322,7 @@ class CheckPointMixin:
                             'attempting to load the rng state, '
                             'exiting ...'.format(checkpoint_name))
                 sys.exit()
-        # from .global_vars import _GLOBAL_ARGS
+        # for bucket sampler dataloader
         args.last_micro_batch_access_index = state_dict["last_microbatch_size_index"]
 
         # Some utilities want to load a checkpoint without distributed being initialized
