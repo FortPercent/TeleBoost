@@ -18,3 +18,4 @@ __pycache__/*
 tests/*
 *.png
 debug/
+.venv
