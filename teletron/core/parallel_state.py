@@ -11,7 +11,6 @@ from datetime import timedelta
 from functools import reduce
 import operator
 import os
-from teletron.utils import get_args
 
 _TENSOR_CONTEXT_PARALLEL_GROUP = None
 _MPU_TENSOR_CONTEXT_PARALLEL_WORLD_SIZE = None
@@ -104,6 +103,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
             range(0, torch.distributed.get_world_size())
         )
 
+        from teletron.utils import get_args
         margs = get_args()
         if margs.distributed_vae:
             extra_model_parallel_world_size = margs.distributed_vae_world_size
