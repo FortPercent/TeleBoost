@@ -21,6 +21,7 @@ _TRANSFORMER_MODEL_GROUP = None
 WORLD_GROUP = None 
 # groups that include the first tp-cp ranks and the vae rank
 _DATA_TRANSMIT_GROUP = []
+from teletron.utils import get_args
 
 from dataclasses import dataclass
 
