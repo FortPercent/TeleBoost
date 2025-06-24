@@ -36,7 +36,7 @@ import random
 import copy
 import yaml
 
-from megatron.training import get_args
+from teletron.utils import get_args
 
 random.seed(42)
 

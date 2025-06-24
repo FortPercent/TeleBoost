@@ -42,6 +42,24 @@ from diffusers.models.normalization import AdaLayerNormContinuous
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+class HunyuanParams:
+    hidden_size: int = 3072
+    in_channels: int = 33
+    out_channels: int = 16
+    num_attention_heads: int = 24
+    attention_head_dim: int = 128
+    num_layers: int = 3
+    num_single_layers: int = 6
+    num_refiner_layers: int = 2
+    mlp_ratio: float = 4.0
+    patch_size: int = 2
+    patch_size_t: int = 1
+    qk_norm: str = "rms_norm"
+    guidance_embeds: bool = True
+    text_embed_dim: int = 4096
+    pooled_projection_dim: int = 768
+    rope_theta: float = 256.0
+    rope_axes_dim: Tuple[int] = (16, 56, 56)
 
 class HunyuanVideoAttnProcessor2_0:
     def __init__(self):
@@ -703,60 +721,60 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
     _supports_gradient_checkpointing = True
 
-    @register_to_config
-    def __init__(
-        self,
-        in_channels: int = 16,
-        out_channels: int = 16,
-        num_attention_heads: int = 24,
-        attention_head_dim: int = 128,
-        num_layers: int = 20,
-        num_single_layers: int = 40,
-        num_refiner_layers: int = 2,
-        mlp_ratio: float = 4.0,
-        patch_size: int = 2,
-        patch_size_t: int = 1,
-        qk_norm: str = "rms_norm",
-        guidance_embeds: bool = True,
-        text_embed_dim: int = 4096,
-        pooled_projection_dim: int = 768,
-        rope_theta: float = 256.0,
-        rope_axes_dim: Tuple[int] = (16, 56, 56),
-    ) -> None:
+    # @register_to_config
+    def __init__(self, config) -> None:
         super().__init__()
+        # hunyuan config
+        hunyuan_config = HunyuanParams()
+        self.in_channels = hunyuan_config.in_channels
+        self.out_channels = hunyuan_config.out_channels or hunyuan_config.in_channels
+        self.attention_head_dim = hunyuan_config.attention_head_dim
+        self.num_attention_heads =hunyuan_config.num_attention_heads
+        self.mlp_ratio = hunyuan_config.mlp_ratio
+        self.patch_size = hunyuan_config.patch_size
+        self.patch_size_t = hunyuan_config.patch_size_t
+        self.qk_norm = hunyuan_config.qk_norm
+        self.guidance_embeds = hunyuan_config.guidance_embeds
+        self.text_embed_dim = hunyuan_config.text_embed_dim
+        self.pooled_projection_dim = hunyuan_config.pooled_projection_dim
+        self.rope_theta = hunyuan_config.rope_theta
+        self.rope_axes_dim = hunyuan_config.rope_axes_dim
 
-        inner_dim = num_attention_heads * attention_head_dim
-        out_channels = out_channels or in_channels
+        # config
+        self.inner_dim = config.hidden_size
+        self.num_layers = config.num_layers
+        self.num_single_layers = config.num_single_layers
+        self.num_refiner_layers = config.num_refiner_layers
 
         # 1. Latent and condition embedders
         self.x_embedder = HunyuanVideoPatchEmbed(
-            (patch_size_t, patch_size, patch_size), in_channels, inner_dim
+            (self.patch_size_t, self.patch_size, self.patch_size), self.in_channels, self.inner_dim
         )
         self.context_embedder = HunyuanVideoTokenRefiner(
-            text_embed_dim,
-            num_attention_heads,
-            attention_head_dim,
-            num_layers=num_refiner_layers,
+            self.text_embed_dim,
+            self.num_attention_heads,
+            self.attention_head_dim,
+            num_layers=self.num_refiner_layers,
         )
         self.time_text_embed = CombinedTimestepGuidanceTextProjEmbeddings(
-            inner_dim, pooled_projection_dim
+            self.inner_dim, self.pooled_projection_dim
         )
 
         # 2. RoPE
         self.rope = HunyuanVideoRotaryPosEmbed(
-            patch_size, patch_size_t, rope_axes_dim, rope_theta
+            self.patch_size, self.patch_size_t, self.rope_axes_dim, self.rope_theta
         )
 
         # 3. Dual stream transformer blocks
         self.transformer_blocks = nn.ModuleList(
             [
                 HunyuanVideoTransformerBlock(
-                    num_attention_heads,
-                    attention_head_dim,
-                    mlp_ratio=mlp_ratio,
-                    qk_norm=qk_norm,
+                    self.num_attention_heads,
+                    self.attention_head_dim,
+                    mlp_ratio=self.mlp_ratio,
+                    qk_norm=self.qk_norm,
                 )
-                for _ in range(num_layers)
+                for _ in range(self.num_layers)
             ]
         )
 
@@ -764,21 +782,21 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         self.single_transformer_blocks = nn.ModuleList(
             [
                 HunyuanVideoSingleTransformerBlock(
-                    num_attention_heads,
-                    attention_head_dim,
-                    mlp_ratio=mlp_ratio,
-                    qk_norm=qk_norm,
+                    self.num_attention_heads,
+                    self.attention_head_dim,
+                    mlp_ratio=self.mlp_ratio,
+                    qk_norm=self.qk_norm,
                 )
-                for _ in range(num_single_layers)
+                for _ in range(self.num_single_layers)
             ]
         )
 
         # 5. Output projection
         self.norm_out = AdaLayerNormContinuous(
-            inner_dim, inner_dim, elementwise_affine=False, eps=1e-6
+            self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6
         )
         self.proj_out = nn.Linear(
-            inner_dim, patch_size_t * patch_size * patch_size * out_channels
+            self.inner_dim, self.patch_size_t * self.patch_size * self.patch_size * self.out_channels
         )
 
         self.gradient_checkpointing = False
@@ -883,7 +901,7 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                 )
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        p, p_t = self.config.patch_size, self.config.patch_size_t
+        p, p_t = self.patch_size, self.patch_size_t
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p
         post_patch_width = width // p
