@@ -12,6 +12,7 @@ import argparse
 from unit_test.test_utils import spawn
 import logging
 import teletron
+from teletron.core.parallel_state import initialize_model_parallel_base
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
@@ -43,23 +44,24 @@ WAN_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
 WAN_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
 WAN_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 
-@patch("teletron.get_args")
+@patch("teletron.utils.get_args")
 def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     from teletron.models.wan import ParallelWanModel, WanModel
-    from teletron.core import initialize_model_parallel
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
     args.num_layers = 1 
     args.num_attention_heads = 40
+    args.distributed_vae = False
     mock_teletron.return_value = args
 
 
     cp_size = world_size
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
     torch.cuda.set_device(rank)
-    initialize_model_parallel(
+    
+    initialize_model_parallel_base(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
             virtual_pipeline_model_parallel_size = None,
@@ -106,8 +108,6 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     parallel_wan_model.load_state_dict(wan_model.state_dict())
     wan_params = dict(wan_model.named_parameters())
     wan_parallel_params = dict(parallel_wan_model.named_parameters())
-    # for name in wan_params:
-    #     logging.info(f"{name} {wan_params[name].float().norm()} {wan_parallel_params[name].float().norm()}")
 
     # from tensorwatch import watch_module_forward_backward, TensorWatch
     # watch_module_forward_backward(parallel_wan_model)
@@ -130,7 +130,7 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     grad_allclose = True
     for name in model_grads:
         norm_euclid_dist = normalized_euclid_dist(model_grads[name], parallel_model_grads[name])
-        # logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_model_grads[name].norm()} rank{rank}")
+        logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm()} {parallel_model_grads[name].norm()} rank{rank}")
         if norm_euclid_dist < 0.02:
             continue
         else:

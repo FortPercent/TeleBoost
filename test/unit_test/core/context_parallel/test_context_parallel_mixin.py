@@ -3,22 +3,11 @@ import os
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from teletron.core.context_parallel import ContextParallelMixin
-from teletron.core import initialize_model_parallel
+from unittest.mock import patch, Mock
+# from teletron.core import initialize_model_parallel
 from unit_test.test_utils import spawn
 from megatron.core import mpu
 import logging
-
-
-class ContextParallelModel(ContextParallelMixin):
-    def __init__(self, split_dim=1, gather_dim=1):
-        self.cp_size = mpu.get_context_parallel_world_size()
-        self.cp_group = mpu.get_context_parallel_group()
-        self.split_dim = split_dim
-        self.gather_dim = gather_dim 
-        self.num_heads = 16 
-        self.use_pad = None
-
 
 SPLIT_SUCCESS = "split input success rank"
 SPLIT_FAIL = "split input fail rank"
@@ -44,11 +33,11 @@ def forward_attn(cp_model, cp_size, cp_rank, que):
         x = x.transpose(1, 2).flatten(2, 3).contiguous().to(f"cuda:{cp_rank}")
         
         # cp attn compute result
-        q_split = cp_model.split_input(q_ori)
-        k_split = cp_model.split_input(k_ori)
-        v_split = cp_model.split_input(v_ori)
+        q_split = cp_model.split_input(q_ori, dim=1)
+        k_split = cp_model.split_input(k_ori, dim=1)
+        v_split = cp_model.split_input(v_ori, dim=1)
         output_split = cp_model.forward_attn(q_split, k_split, v_split).to(f"cuda:{cp_rank}")
-        output = cp_model.gather_output(output_split)
+        output = cp_model.gather_output(output_split, dim=1)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{x.shape}, {cp_size}")
     if torch.all(x == output):
@@ -69,7 +58,7 @@ def gather_output(cp_model, cp_size, cp_rank, q):
         output = torch.cat(x_list, dim=1).to(f"cuda:{cp_rank}")
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{output.shape}, {cp_size}")
-    input_gather = cp_model.gather_output(input)
+    input_gather = cp_model.gather_output(input, dim=1)
     if torch.all(input_gather == output):
         global GATHER_SUCCESS
         q.put(f"{GATHER_SUCCESS}{cp_rank}")
@@ -86,7 +75,7 @@ def split_input(cp_model, cp_size, cp_rank, q):
         x = torch.cat(x_list, dim=1)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{x.shape}, {cp_size}")
-    x_split = cp_model.split_input(x)
+    x_split = cp_model.split_input(x, dim=1)
     if torch.all(x_split == x_list[cp_rank]):
         global SPLIT_SUCCESS
         q.put(f"{SPLIT_SUCCESS}{cp_rank}")
@@ -94,10 +83,25 @@ def split_input(cp_model, cp_size, cp_rank, q):
         global SPLIT_FAIL
         q.put(f"{SPLIT_FAIL}{cp_rank}")
 
+@patch("teletron.utils.get_args")
+def setupContextParallelMixin(cp_rank, cp_size, q, mock_teletron):
+    from teletron.core.context_parallel import ContextParallelMixin
+    from teletron.core.parallel_state import initialize_model_parallel_base
+    args = Mock()
+    args.num_attention_heads = 16
+    mock_teletron.return_value = args
+    
+    class ContextParallelModel(ContextParallelMixin):
+        def __init__(self, split_dim=1, gather_dim=1):
+            self.cp_size = mpu.get_context_parallel_world_size()
+            self.cp_group = mpu.get_context_parallel_group()
+            self.split_dim = split_dim
+            self.gather_dim = gather_dim 
+            self.num_heads = 16 
+            self.use_pad = None
 
-def setupContextParallelMixin(cp_rank, cp_size, q):
     torch.distributed.init_process_group(world_size=cp_size, rank=cp_rank)
-    initialize_model_parallel(
+    initialize_model_parallel_base(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
             virtual_pipeline_model_parallel_size = None,
@@ -110,8 +114,8 @@ def setupContextParallelMixin(cp_rank, cp_size, q):
         )
     
     cp_model = ContextParallelModel()
-    gather_output(cp_model, cp_size, cp_rank, q)
     split_input(cp_model, cp_size, cp_rank, q)
+    gather_output(cp_model, cp_size, cp_rank, q)
     forward_attn(cp_model, cp_size, cp_rank, q)
 
 
