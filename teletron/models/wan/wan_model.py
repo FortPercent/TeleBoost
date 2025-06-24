@@ -24,6 +24,20 @@ except ModuleNotFoundError:
     
 T5_CONTEXT_TOKEN_NUMBER = 512   
 
+class WanParams:
+    hidden_size: int = 5120
+    in_channels: int = 36
+    out_channels: int = 16
+    text_dim: int = 4096
+    freq_dim: int = 256
+    ffn_dim: int = 13824
+    eps: float = 1e-6
+    patch_size: Tuple[int, int, int] = (1,2,2)
+    num_attention_heads: int = 40
+    num_layers: int = 3
+    has_image_input: bool = True
+    has_image_pos_emb: bool = False
+
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False):
     if compatibility_mode:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
@@ -263,52 +277,49 @@ class Head(nn.Module):
 
 
 class WanModel(torch.nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        in_dim: int,
-        ffn_dim: int,
-        out_dim: int,
-        text_dim: int,
-        freq_dim: int,
-        eps: float,
-        patch_size: Tuple[int, int, int],
-        num_heads: int,
-        num_layers: int,
-        has_image_input: bool,
-        has_image_pos_emb: bool,
-    ):
+    def __init__(self, config):
         super().__init__()
-        self.dim = dim
-        self.freq_dim = freq_dim
-        self.has_image_input = has_image_input
-        self.patch_size = patch_size
+        # wan_config
+        wan_config = WanParams()
+        self.in_dim = wan_config.in_channels
+        self.ffn_dim = wan_config.ffn_dim
+        self.out_dim = wan_config.out_channels
+        self.text_dim = wan_config.text_dim
+        self.freq_dim = wan_config.freq_dim
+        self.eps = wan_config.eps
+        self.patch_size = wan_config.patch_size
+        self.has_image_input = wan_config.has_image_input
+        self.has_image_pos_emb = wan_config.has_image_pos_emb
+
+        # config
+        self.dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.num_layers = config.num_layers
 
         self.patch_embedding = nn.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size)
+            self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
         self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim),
+            nn.Linear(self.text_dim, self.dim),
             nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim)
+            nn.Linear(self.dim, self.dim)
         )
         self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim),
+            nn.Linear(self.freq_dim, self.dim),
             nn.SiLU(),
-            nn.Linear(dim, dim)
+            nn.Linear(self.dim, self.dim)
         )
         self.time_projection = nn.Sequential(
-            nn.SiLU(), nn.Linear(dim, dim * 6))
+            nn.SiLU(), nn.Linear(self.dim, self.dim * 6))
         self.blocks = nn.ModuleList([
-            DiTBlock(has_image_input, dim, num_heads, ffn_dim, eps)
-            for _ in range(num_layers)
+            DiTBlock(self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
+            for _ in range(self.num_layers)
         ])
-        self.head = Head(dim, out_dim, patch_size, eps)
-        head_dim = dim // num_heads
+        self.head = Head(self.dim, self.out_dim, self.patch_size, self.eps)
+        head_dim = self.dim // self.num_heads
         self.freqs = precompute_freqs_cis_3d(head_dim)
 
-        if has_image_input:
-            self.img_emb = MLP(1280, dim, has_pos_emb=has_image_pos_emb)  # clip_feature_dim = 1280
-        self.has_image_pos_emb = has_image_pos_emb
+        if self.has_image_input:
+            self.img_emb = MLP(1280, self.dim, has_pos_emb=self.has_image_pos_emb)  # clip_feature_dim = 1280
 
     def patchify(self, x: torch.Tensor):
         x = self.patch_embedding(x)

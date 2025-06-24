@@ -175,6 +175,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
     return wrapper
 
 def initialize_comm_pair( tensor_model_parallel_size, pipeline_model_parallel_size, context_parallel_size):
+    from teletron.utils import get_args
     args = get_args()
     world_size = args.dit_world_size
     producer_size = args.distributed_vae_world_size
@@ -225,6 +226,7 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
     
     assert torch.distributed.is_initialized()
     if base_process_group == -100:
+        from teletron.utils import get_args
         margs = get_args()
         extra_model_parallel_world_size = margs.distributed_vae_world_size
         total_world_size = torch.distributed.get_world_size()
