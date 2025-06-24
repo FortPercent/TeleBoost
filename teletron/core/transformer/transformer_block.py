@@ -4,10 +4,24 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
-from teletron.utils import get_args
 
 class TransformerGeneralMixin:
+    def enable_activation_offload(self, blocks):
+        self.enable_activation_checkpointing(blocks)
+        blocks.forward = self.activation_offload_forward_transformer_blocks(blocks)
+
+    def activation_offload_forward_transformer_blocks(self, blocks):
+        origin_forward = blocks.forward
+        def wrap_blocks_with_offload(*args):
+            return self._activation_offload_forward(origin_forward, *args)
+        return wrap_blocks_with_offload
+
+    def _activation_offload_forward(self, forward_blocks, *args):
+        with torch.autograd.graph.save_on_cpu():
+            return forward_blocks(*args)
+
     def enable_activation_checkpointing(self, blocks):
+        from teletron.utils import get_args
         args = get_args()
         self.activation_recompute_method = args.recompute_method
         self.recompute_granularity = args.recompute_granularity
