@@ -224,45 +224,8 @@ class HunyuanVideoSingleAttnProcessor2_0:
         return hidden_states, encoder_hidden_states
 
 class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, HunyuanVideoTransformer3DModel):
-    def __init__(
-        self,
-        in_channels: int = 16,
-        out_channels: int = 16,
-        num_attention_heads: int = 24,
-        attention_head_dim: int = 128,
-        num_layers: int = 20,
-        num_single_layers: int = 40,
-        num_refiner_layers: int = 2,
-        mlp_ratio: float = 4.0,
-        patch_size: int = 2,
-        patch_size_t: int = 1,
-        qk_norm: str = "rms_norm",
-        guidance_embeds: bool = True,
-        text_embed_dim: int = 4096,
-        pooled_projection_dim: int = 768,
-        rope_theta: float = 256.0,
-        rope_axes_dim: Tuple[int] = (16, 56, 56),
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            num_attention_heads,
-            attention_head_dim,
-            num_layers,
-            num_single_layers,
-            num_refiner_layers,
-            mlp_ratio,
-            patch_size,
-            patch_size_t,
-            qk_norm,
-            guidance_embeds,
-            text_embed_dim,
-            pooled_projection_dim,
-            rope_theta,
-            rope_axes_dim,
-        )
-        self.num_layers = num_layers
-        self.num_single_layers = num_single_layers
+    def __init__(self, config):
+        super().__init__(config)
         # from TransformerGeneralMixin
         self.enable_activation_checkpointing(self.transformer_blocks)
         self.enable_activation_checkpointing(self.single_transformer_blocks)
@@ -332,7 +295,7 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
                 )
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        p, p_t = self.config.patch_size, self.config.patch_size_t
+        p, p_t = self.patch_size, self.patch_size_t
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p
         post_patch_width = width // p
