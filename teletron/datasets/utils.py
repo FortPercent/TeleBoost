@@ -1,7 +1,6 @@
 import torch
 from torch.utils.data import BatchSampler
-from megatron.training import (
-    get_args,
+from teletron.utils import (
     print_rank_0
 )
 from megatron.core import mpu
@@ -16,6 +15,7 @@ from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanV
 
 
 def load_config_vast():
+    from teletron.utils import get_args
     args = get_args()
     if args.task_type == "t2v":
         print("loading t2v config")

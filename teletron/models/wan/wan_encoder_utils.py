@@ -10,7 +10,6 @@ from megatron.core import mpu
 from diffusers import AutoencoderKLHunyuanVideo
 from einops import rearrange
 from vast.models import utils as gm_utils
-from megatron.training import get_args
 import copy
 from teletron.core.parallel_state import get_world_group
 from torchvision.transforms.functional import to_pil_image

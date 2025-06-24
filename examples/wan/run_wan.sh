@@ -38,17 +38,17 @@ echo '$WORLD_SIZE' $WORLD_SIZE
 
 set -e  # 发生错误即退出
 
-pip install  \
-    --root-user-action ignore \
-    --trusted-host pypi.chinatelecom.ai \
-    --index-url http://pypi.chinatelecom.ai/simple/ uv 
+# pip install  \
+#     --root-user-action ignore \
+#     --trusted-host pypi.chinatelecom.ai \
+#     --index-url http://pypi.chinatelecom.ai/simple/ uv 
 
-uv venv --system-site-packages
+# uv venv --system-site-packages
 source .venv/bin/activate
 
-uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Megatron-LM
+# uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Megatron-LM
 uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/vast
-uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/Teletron
+uv pip install -e .
 uv pip install -e /nvfile-heatstorage/teleai-infra/wxy/teleai_data_tool
 
 # run apt install rsync
