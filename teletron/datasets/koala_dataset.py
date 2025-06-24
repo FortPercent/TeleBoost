@@ -24,10 +24,10 @@
 
 import decord
 from decord import VideoReader
-from decord import cpu, gpu
 import os.path as osp
 import numpy as np
-import torch, torchvision
+import torch
+import torchvision
 import ast
 import numpy as np
 import random

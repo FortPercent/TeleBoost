@@ -2,23 +2,25 @@ import torch
 from megatron.core.transformer.module import Float16Module
 from megatron.core.distributed import DistributedDataParallel as DDP
 from teletron.utils import (
-                   print_rank_0,
-                   get_args,
-                   update_num_microbatches,
-                   )
+    print_rank_0,
+    get_args,
+    update_num_microbatches,
+)
 import sys
 import random
 import numpy as np
 from megatron.core import mpu, tensor_parallel, dist_checkpointing
-from teletron.utils.checkpoint import ( _load_base_checkpoint,
-                                       read_metadata,
-                                       get_checkpoint_name,
-                                       get_rng_state,
-                                       get_checkpoint_tracker_filename,
-                                       ensure_directory_exists,
-                                       checkpoint_exists,
-                                       get_distributed_optimizer_checkpoint_name,
-                                        )
+from teletron.utils.checkpoint import (
+    _load_base_checkpoint,
+    read_metadata,
+    get_checkpoint_name,
+    get_rng_state,
+    get_checkpoint_tracker_filename,
+    ensure_directory_exists,
+    checkpoint_exists,
+    get_distributed_optimizer_checkpoint_name,
+)
+
 ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
 
 
@@ -40,8 +42,6 @@ class CheckPointMixin:
 
     def save_checkpoint_and_time(self, iteration, model, optimizer, opt_param_scheduler,
                              num_floating_point_operations_so_far):
-        args = get_args()
-        # Extra barrier is added to make sure all ranks report the max time.
         self.save_checkpoint(iteration, model, optimizer, opt_param_scheduler,
                         num_floating_point_operations_so_far)
 
@@ -206,7 +206,7 @@ class CheckPointMixin:
         # Model.
         strict = False if args.retro_add_retriever else strict
 
-        if args.lora == True:
+        if args.lora:
             raise NotImplementedError('Lora not implement yet')
             from peft import get_peft_model, LoraConfig, TaskType
             from teletron.models.wan.light_pipeline import find_lora_target_modules
@@ -373,7 +373,3 @@ class CheckPointMixin:
         if not args.no_save_rng:
             state_dict["rng_state"] = rng_state
         return state_dict
-
-
-
-

@@ -5,7 +5,6 @@ from megatron.core.tensor_parallel import param_is_not_tensor_parallel_duplicate
 from vast.train.configs.config import load_config
 from teletron.utils import (get_args,
                             fused_kernel_load,
-                            update_num_microbatches,
                             print_rank_0,
                             print_rank_last,
                             get_num_microbatches,
@@ -33,11 +32,19 @@ NUM_BYTES_IN_MEGABYTE = 1024 * 1024
 _TRANSFORMER_MODEL_GROUP = None
 
 
-
-
-def training_log(loss_dict, total_loss_dict, learning_rate, decoupled_learning_rate, iteration,
-                 loss_scale, report_memory_flag, skipped_iter,
-                 grad_norm, params_norm, num_zeros_in_grad):
+def training_log(
+    loss_dict,
+    total_loss_dict,
+    learning_rate,
+    decoupled_learning_rate,
+    iteration,
+    loss_scale,
+    report_memory_flag,
+    skipped_iter,
+    grad_norm,
+    params_norm,
+    num_zeros_in_grad,
+):
     """Log training information such as losses, timing, ...."""
     args = get_args()
     # timers = get_timers()
@@ -1088,7 +1095,7 @@ def get_batch_on_this_tp_cp_rank_vast_origin(data_iterator):
     return batch
 
 
-def load_config_vast():
+def set_config():
     args = get_args()
     if args.task_type == "t2v":
         print("loading t2v config")
