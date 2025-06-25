@@ -45,6 +45,7 @@ from teletron.train.lr_scheduler import SchedulerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import producer_process
+from teletron.models.encoder_registry import get_encoder_name
 
 
 logger = getLogger(__name__)
@@ -81,6 +82,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
         if transformer_group is None:
+            margs = get_args()
             train_ds, _, _ = build_train_valid_test_datasets()
             # producer_process(
             #     rank=dist.get_rank(), 
@@ -88,11 +90,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
             #     build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
             #     train_ds=train_ds,
             # )
-            encoder_name="wan_encoder"
+            
             producer_process(
                 rank=dist.get_rank(), 
                 world_size=dist.get_world_size(),
-                encoder_name=encoder_name,
+                encoder_name=get_encoder_name(margs.model),
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
                 train_ds=train_ds,
