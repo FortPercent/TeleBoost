@@ -46,6 +46,7 @@ from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import producer_process
 from teletron.models.encoder_registry import get_encoder_name
+from teletron.train.consumer_dataloader import create_batch_loader
 
 
 logger = getLogger(__name__)
@@ -68,19 +69,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
         if transformer_group is None:
-            margs = get_args()
             train_ds, _, _ = build_train_valid_test_datasets()
-            # producer_process(
-            #     rank=dist.get_rank(), 
-            #     world_size=dist.get_world_size(),
-            #     build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
-            #     train_ds=train_ds,
-            # )
             
             producer_process(
                 rank=dist.get_rank(), 
                 world_size=dist.get_world_size(),
-                encoder_name=get_encoder_name(margs.model),
+                encoder_name=get_encoder_name(args.model),
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
                 train_ds=train_ds,
@@ -104,6 +98,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         self.train_itrt, self.valid_itrt, self.test_itrt = \
                                 self.get_iterator(len(self.model), dataset_provide_func)
 
+        dataiters = (self.train_itrt, self.valid_itrt, self.test_itrt)
+        self.train_itrt, self.valid_itrt, self.test_itrt = [
+        create_batch_loader(args, ds) if ds is not None else None 
+                for ds in dataiters
+            ]
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  
