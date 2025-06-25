@@ -75,7 +75,8 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         ).build()
     elif args.dataset_type == "TensorDataset":
         global_config = set_config()
-        train_ds = build_dataset(global_config.dataset)
+        train_ds_config = global_config.dataloaders.train
+        train_ds = build_dataset(train_ds_config)
         valid_ds = None
         test_ds = None
         #     pass

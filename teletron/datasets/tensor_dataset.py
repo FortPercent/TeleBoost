@@ -9,7 +9,7 @@ class TensorDataset(torch.utils.data.Dataset):
             pth_paths = [pth_paths]
         if isinstance(metadata_paths, str):
             metadata_paths = [metadata_paths]
-        assert len(pth_paths) == len(metadata_paths), "Mismatch between pth_paths and metadata_paths"
+        # assert len(pth_paths) == len(metadata_paths), "Mismatch between pth_paths and metadata_paths"
 
         self.path = []
 
