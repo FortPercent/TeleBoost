@@ -15,9 +15,13 @@ class ContextParallelMixin:
     @staticmethod
     def cp_grad_reduce(grad):
         with torch.no_grad():
-            grad_list = [torch.empty_like(grad) for _ in range(mpu.get_context_parallel_world_size())]
-            torch.distributed.all_gather(grad_list, grad, group=mpu.get_context_parallel_group())
-            reduced_grad = torch.sum(torch.stack(grad_list), dim=0)
+            cp_size = mpu.get_context_parallel_world_size()
+            dim_size = list(grad.size())
+            dim_size[0] = dim_size[0] * cp_size
+            grad_list = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
+            torch.distributed._all_gather_base(grad_list, grad.contiguous(), group=mpu.get_context_parallel_group())
+            grad_list = torch.stack(torch.chunk(grad_list, cp_size, dim=0))
+            reduced_grad = torch.sum(grad_list, dim=0)
         
         return reduced_grad
 
@@ -102,7 +106,7 @@ class ContextParallelMixin:
         x = SeqAllToAll4D.apply(
             cp_group, x, 2, 1
         )  # b img_seq sub_n d
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         # x: b n s/CP d
         x = x.transpose(1, 2).flatten(2, 3).contiguous()
         # x: b s h
