@@ -19,7 +19,7 @@ def forward_step(data_iterator, model):
     prompt_emb = {}
     batch = get_batch(data_iterator)
     latents = batch["latents"]
-    noise = torch.randn_like(latents)
+    noise = torch.randn_like(latents) if "noise" not in batch else batch["noise"]
 
     timestep_id = torch.randint(0, flow_scheduler.num_train_timesteps, (1,))
     timestep = flow_scheduler.timesteps[timestep_id].to(
