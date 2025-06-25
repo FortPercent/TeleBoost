@@ -57,4 +57,4 @@ def forward_step(data_iterator, model):
 if __name__ == "__main__":
     args = parse_args(extra_args=extra_args)
     trainer = Trainer(args)
-    # trainer.pretrain(forward_step_func=forward_step)
+    trainer.pretrain(forward_step_func=forward_step)
