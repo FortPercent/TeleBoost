@@ -1,20 +1,14 @@
  # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
-
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, List, Optional, Type, Union
-
 import numpy
 import torch
-
 from megatron.core.datasets.blended_dataset import BlendedDataset
 from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
 from megatron.core.datasets.megatron_dataset import LowLevelDataset, MegatronDataset
 from megatron.core.datasets.utils import Split, normalize
-from megatron.core.parallel_state import get_virtual_pipeline_model_parallel_rank
-
-
 logger = logging.getLogger(__name__)
 
 MidLevelDataset = MegatronDataset
@@ -25,6 +19,12 @@ DistributedDataset = Union[
     TopLevelDataset, MidLevelDataset, LowLevelDataset, torch.utils.data.Dataset
 ]
 
+from dataclasses import dataclass
+
+@dataclass
+class HunyuanVideoDatasetConfig():
+    train_ds_config: dict = None
+    eval_ds_config: dict = None
 
 class HunyuanVideoDatasetBuilder(object):
     """Builder class for the BlendedDataset and MegatronDataset classes

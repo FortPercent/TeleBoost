@@ -5,16 +5,14 @@ import time
 import sys
 import gc
 from megatron.core.pipeline_parallel import get_forward_backward_func
-from megatron.core.transformer.module import MegatronModule, Float16Module
+from megatron.core.transformer.module import Float16Module
 from megatron.core.enums import ModelType
 from megatron.core.distributed import finalize_model_grads
 from megatron.core import mpu, tensor_parallel
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import ( OptimizerConfig, )
-        
 from vast.train.samplers import build_sampler as build_sampler_vast
 from vast.datasets import DefaultCollator
-from vast.datasets.datasets.build import build_dataset as build_dataset_vast
 from teletron.models.wan.wan_producer import producer_process
 from teletron.utils import (
                    print_rank_0,
@@ -44,30 +42,16 @@ from teletron.train.utils import (_initialize_distributed,
                                   )
 from teletron.core.parallel_state import get_transformer_model_group
 from teletron.core.data_loader import build_pretraining_data_loader
-from teletron.datasets.vast_dataset.hunyuan_dataset_config import HunyuanVideoDatasetConfig
-from teletron.datasets.vast_dataset.hunyuanvideo_dataset_builder import HunyuanVideoDatasetBuilder
+from teletron.datasets.hunyuanvideo_dataset_builder import (HunyuanVideoDatasetConfig,
+                                                            HunyuanVideoDatasetBuilder)
 from teletron.models.build import build_model
-from teletron.train.checkpoint import CheckPointMixin
+from teletron.train.checkpoint import CheckPointMixin, unwrap_model
 from teletron.train.lr_scheduler import SchedulerMixin
 from logging import getLogger
 logger = getLogger(__name__)
 _TRAIN_START_TIME = time.time()
 ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
 
-
-def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
-    return_list = True
-    if not isinstance(model, list):
-        model = [model]
-        return_list = False
-    unwrapped_model = []
-    for model_module in model:
-        while isinstance(model_module, module_instances):
-            model_module = model_module.module
-        unwrapped_model.append(model_module)
-    if not return_list:
-        return unwrapped_model[0]
-    return unwrapped_model
 
 def cyclic_iter(iter):
     while True:
@@ -273,7 +257,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
 
     def get_iterator(self, 
                      len_model:int, 
-                     train_valid_test_dataset_provider,
+                     train_valid_test_dataset_provider=None,
                      ):
         args = get_args()
         if args.virtual_pipeline_model_parallel_size is not None:
@@ -318,13 +302,19 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                 train_ds_config=train_ds_config,
                 eval_ds_config=eval_ds_config
             )
-            dataset = build_dataset_vast(train_ds_config.dataset)
+            dataset = build_dataset(train_ds_config.dataset)
             train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
                 dataset,
                 train_valid_test_num_samples,
                 lambda: True,
                 ds_config,
             ).build()
+        elif args.dataset_type == "TensorDataset":
+            global_config = load_config_vast()
+            train_ds = build_dataset(global_config.dataset)
+            valid_ds = None
+            test_ds = None
+        #     pass
 
         elif args.dataset_type == "BucketDataset": 
             global_config = load_config_vast()
@@ -333,7 +323,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
             assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
             print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
 
-            dataset = build_dataset_vast(global_config.dataset)
+            dataset = build_dataset(global_config.dataset)
             if dp_rank is None or dp_size is None:
                 sampler = build_sampler_vast(
                     global_config.sampler,

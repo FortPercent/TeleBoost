@@ -17,12 +17,13 @@ def exe_adaptation():
     from teletron.core.distributed.distributed_data_parallel import DistributedDataParallel
     from teletron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
     import sys
-    original_module_name = 'megatron.core.distributed.param_and_grad_buffer'
-    my_fake_module = type(sys)(original_module_name)
-    my_fake_module.ParamAndGradBuffer = ParamAndGradBuffer
-    sys.modules[original_module_name] = my_fake_module
+    # original_module_name = 'megatron.core.distributed.param_and_grad_buffer'
+    # my_fake_module = type(sys)(original_module_name)
+    # my_fake_module._ParamAndGradBuffer = ParamAndGradBuffer
+    # sys.modules[original_module_name] = my_fake_module
     megatron.core.distributed.DistributedDataParallel = DistributedDataParallel
-    megatron.core.distributed.param_and_grad_buffer.ParamAndGradBuffer.finish_grad_sync = ParamAndGradBuffer.finish_grad_sync
+    # megatron.core.distributed.param_and_grad_buffer._ParamAndGradBuffer.finish_grad_sync = ParamAndGradBuffer.finish_grad_sync
+    megatron.core.distributed.param_and_grad_buffer._ParamAndGradBuffer = ParamAndGradBuffer
 
     import megatron.core
     from teletron.core.parallel_state import initialize_model_parallel_decorators
