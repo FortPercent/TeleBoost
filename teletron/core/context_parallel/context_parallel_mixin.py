@@ -18,7 +18,7 @@ class ContextParallelMixin:
             cp_size = mpu.get_context_parallel_world_size()
             dim_size = list(grad.size())
             dim_size[0] = dim_size[0] * cp_size
-            grad_list_tensor = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
+            grad_list = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
             torch.distributed._all_gather_base(grad_list, grad.contiguous(), group=mpu.get_context_parallel_group())
             grad_list = torch.stack(torch.chunk(grad_list, cp_size, dim=0))
             reduced_grad = torch.sum(grad_list, dim=0)
