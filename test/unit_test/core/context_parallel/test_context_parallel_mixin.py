@@ -32,9 +32,9 @@ def forward_attn(cp_model, cp_size, cp_rank, que):
         x = x.transpose(1, 2).flatten(2, 3).contiguous().cuda()
         
         # cp attn compute result
-        q_split = cp_model.split_input(q_ori, dim=1)
-        k_split = cp_model.split_input(k_ori, dim=1)
-        v_split = cp_model.split_input(v_ori, dim=1)
+        q_split = cp_model.split_input(q_ori, dim=1).cuda()
+        k_split = cp_model.split_input(k_ori, dim=1).cuda()
+        v_split = cp_model.split_input(v_ori, dim=1).cuda()
         output_split = cp_model.forward_attn(q_split, k_split, v_split).cuda()
         output = cp_model.gather_output(output_split, dim=1)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
