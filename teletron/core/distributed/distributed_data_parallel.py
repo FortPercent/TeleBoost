@@ -8,7 +8,7 @@ import torch
 from megatron.core import parallel_state
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.transformer_config import TransformerConfig
-from megatron.core.distributed.param_and_grad_buffer import _ParamAndGradBuffer
+from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
 
 
 class DistributedDataParallel(MegatronModule):
@@ -112,7 +112,7 @@ class DistributedDataParallel(MegatronModule):
             buffers = []
             for (param_dtype, grad_dtype), params in param_and_grad_dtype_to_params.items():
                 buffers.append(
-                    _ParamAndGradBuffer(
+                    ParamAndGradBuffer(
                         param_dtype,
                         grad_dtype,
                         params,
@@ -181,7 +181,7 @@ class DistributedDataParallel(MegatronModule):
     def _make_param_hook(
         self,
         param: torch.nn.Parameter,
-        param_to_buffer: Dict[torch.nn.Parameter, _ParamAndGradBuffer],
+        param_to_buffer: Dict[torch.nn.Parameter, ParamAndGradBuffer],
     ):
         """
         Creates the all-reduce / reduce-scatter hook for backprop.
