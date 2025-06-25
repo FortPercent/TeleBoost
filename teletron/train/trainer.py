@@ -13,7 +13,6 @@ from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import (
     OptimizerConfig,
 )
-from teletron.models.wan.wan_producer import producer_process
 from teletron.utils import (
     print_rank_0,
     print_datetime,
@@ -45,6 +44,7 @@ from teletron.train.checkpoint import CheckPointMixin, unwrap_model
 from teletron.train.lr_scheduler import SchedulerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
+from teletron.core.distributed.distributed_encoder import producer_process
 
 
 logger = getLogger(__name__)
@@ -68,12 +68,22 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         transformer_group = get_transformer_model_group()
         if transformer_group is None:
             train_ds, _, _ = build_train_valid_test_datasets()
+            # producer_process(
+            #     rank=dist.get_rank(), 
+            #     world_size=dist.get_world_size(),
+            #     build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+            #     train_ds=train_ds,
+            # )
+            encoder_name="wan_encoder"
             producer_process(
                 rank=dist.get_rank(), 
                 world_size=dist.get_world_size(),
+                encoder_name=encoder_name,
+                device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
                 train_ds=train_ds,
             )
+            
             exit()        
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
