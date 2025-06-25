@@ -108,3 +108,12 @@ def get_encoder(name: str, device: torch.device, **kwargs: Any) -> BaseEncoder:
     
     encoder_class = _ENCODER_REGISTRY[name]
     return encoder_class(device=device, **kwargs)
+
+model_mapping = {
+    "parallelwanmodel": "wan_encoder",
+    "wanmodel": "wan_encoder"
+}
+
+def get_encoder_name(key):
+    return model_mapping.get(key.lower(), "unknown_encoder")
+    
