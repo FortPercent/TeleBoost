@@ -4,7 +4,6 @@ import numpy as np
 from torch.utils.data import Dataset
 from teletron.utils import get_args
 from megatron.core import mpu
-# from megatron.legacy.data.data_samplers import MegatronPretrainingSampler,MegatronPretrainingRandomSampler
 
 
 def build_pretraining_data_loader(dataset, consumed_samples, data_parallel_rank=None, data_parallel_size=None):
@@ -35,6 +34,9 @@ def build_pretraining_data_loader(dataset, consumed_samples, data_parallel_rank=
             data_parallel_rank=data_parallel_rank,
             data_parallel_size=data_parallel_size,
             data_sharding=args.data_sharding)
+    elif args.dataloader_type == 'common':
+        batch_sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, shuffle=True, drop_last=True)
     elif args.dataloader_type == "external":
         return dataset
     else:

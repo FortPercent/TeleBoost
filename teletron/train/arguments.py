@@ -170,7 +170,7 @@ class UnifiedArguments:
         }
     )
     koala_opt: str = field(
-        default="/teletron/datasets/koala.yml",
+        default="/teletron/datasets/koala_cfg/koala.yml",
         metadata={
             "help":"If DATASET_TYPE is KoalaDataset then need the koala dataset option file",
         }
