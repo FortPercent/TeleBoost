@@ -17,7 +17,7 @@ def forward_step(data_iterator, model):
     flow_scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
     prompt_emb = {}
-    batch = get_batch(data_iterator)
+    batch = next(data_iterator)
     latents = batch["latents"]
     noise = torch.randn_like(latents) if "noise" not in batch else batch["noise"]
 
