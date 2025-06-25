@@ -3,7 +3,7 @@ from abc import abstractmethod
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-
+# from megatron.core.tensor_parallel import checkpoint
 
 class TransformerGeneralMixin:
     def enable_activation_offload(self, blocks):

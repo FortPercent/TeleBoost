@@ -11,8 +11,7 @@ import multiprocessing as mp
 import argparse
 from unit_test.test_utils import spawn
 import logging
-import teletron
-from teletron.core.parallel_state import initialize_model_parallel_base
+# import teletron
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
@@ -32,10 +31,12 @@ WAN_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 @patch("teletron.utils.get_args")
 def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     from teletron.models.wan import ParallelWanModel, WanModel
+    from teletron.core.parallel_state import initialize_model_parallel_base 
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
+    args.activation_offload = True
     args.num_layers = 1 
     args.num_attention_heads = 40
     args.distributed_vae = False
@@ -64,8 +65,8 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
     parallel_wan_model = ParallelWanModel(wanConfig).cuda().to(torch.bfloat16)
 
     parallel_wan_model.load_state_dict(wan_model.state_dict())
-    wan_params = dict(wan_model.named_parameters())
-    wan_parallel_params = dict(parallel_wan_model.named_parameters())
+    # wan_params = dict(wan_model.named_parameters())
+    # wan_parallel_params = dict(parallel_wan_model.named_parameters())
 
     # from tensorwatch import watch_module_forward_backward, TensorWatch
     # watch_module_forward_backward(parallel_wan_model)

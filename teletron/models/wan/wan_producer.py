@@ -172,7 +172,7 @@ def producer_process(
                     
                     size_to_send = consumers_size_queues[current_comm_pair.consumer].popleft()
                     current_item_idx_to_send = items_initiated_send_for_consumer[current_comm_pair.consumer]
-                    print(f"Rank{current_comm_pair.producer} send data to Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
+                    #print(f"Rank{current_comm_pair.producer} send data to Rank{current_comm_pair.consumer}, tensor shape: {size_to_send}")
                     req = dist.isend(tensor=size_to_send, dst=current_comm_pair.consumer, tag=1)
 
                     send_size_in_flight.append((req, current_comm_pair.consumer, current_item_idx_to_send, size_to_send))
