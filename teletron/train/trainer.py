@@ -10,44 +10,43 @@ from megatron.core.enums import ModelType
 from megatron.core.distributed import finalize_model_grads
 from megatron.core import mpu, tensor_parallel
 from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.core.optimizer import ( OptimizerConfig, )
-from vast.train.samplers import build_sampler as build_sampler_vast
-from vast.datasets import DefaultCollator
+from megatron.core.optimizer import (
+    OptimizerConfig,
+)
 from teletron.models.wan.wan_producer import producer_process
 from teletron.utils import (
-                   print_rank_0,
-                   print_datetime,
-                   get_model_config,
-                   print_rank_last,
-                   is_last_rank,
-                   num_floating_point_operations,
-                   validate_args,
-                   set_args,
-                   get_args,
-                   update_num_microbatches,
-                   get_num_microbatches,
-                   )
-from teletron.datasets.build import build_dataset
-from teletron.train.utils import (_initialize_distributed,
-                                  _compile_dependencies,
-                                  set_jit_fusion_options,
-                                  core_transformer_config_from_args,
-                                  load_config_vast,
-                                  get_train_valid_test_num_samples,
-                                  forward_step,
-                                  _set_random_seed,
-                                  _initialize_tp_communicators,
-                                  training_log,
-                                  calc_params_l2_norm,
-                                  )
+    print_rank_0,
+    print_datetime,
+    get_model_config,
+    print_rank_last,
+    is_last_rank,
+    num_floating_point_operations,
+    validate_args,
+    set_args,
+    get_args,
+    update_num_microbatches,
+    get_num_microbatches,
+)
+from teletron.train.utils import (
+    _initialize_distributed,
+    _compile_dependencies,
+    set_jit_fusion_options,
+    core_transformer_config_from_args,
+    forward_step,
+    _set_random_seed,
+    _initialize_tp_communicators,
+    training_log,
+    calc_params_l2_norm,
+)
 from teletron.core.parallel_state import get_transformer_model_group
-from teletron.core.data_loader import build_pretraining_data_loader
-from teletron.datasets.hunyuanvideo_dataset_builder import (HunyuanVideoDatasetConfig,
-                                                            HunyuanVideoDatasetBuilder)
+from teletron.train.dataloader import DataloaderMixin
 from teletron.models.build import build_model
 from teletron.train.checkpoint import CheckPointMixin, unwrap_model
 from teletron.train.lr_scheduler import SchedulerMixin
 from logging import getLogger
+from teletron.datasets.build import build_train_valid_test_datasets
+
+
 logger = getLogger(__name__)
 _TRAIN_START_TIME = time.time()
 ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
@@ -58,18 +57,17 @@ def cyclic_iter(iter):
         for x in iter:
             yield x
 
-class Trainer(CheckPointMixin, SchedulerMixin):
-    def __init__(self, 
-                 args,
-                 dataset_provide_func=None, 
-                 ):
-        # args = args_tmp
-
+class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
+    def __init__(
+        self,
+        args,
+        dataset_provide_func=None,
+    ):
         self.initialize_megatron(args)
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
         if transformer_group is None:
-            train_ds, _, _ = self.build_train_valid_test_datasets()
+            train_ds, _, _ = build_train_valid_test_datasets()
             producer_process(
                 rank=dist.get_rank(), 
                 world_size=dist.get_world_size(),
@@ -87,16 +85,14 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
             time.time() - _TRAIN_START_TIME))
         print_datetime('after megatron is initialized')
-        
 
         self.model, self.optimizer, self.scheduler = \
                                 self.setup_model_and_optimizer(args.model_type)
-                
+
         self.train_itrt, self.valid_itrt, self.test_itrt = \
                                 self.get_iterator(len(self.model), dataset_provide_func)
-        
-        self.config = get_model_config(self.model[0])
 
+        self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  
                                   model_type,
@@ -104,11 +100,8 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                                   scale_lr_cond=None,
                                   lr_mult=1.0):
 
-        
         args = get_args()
         # timers = get_timers()
-        # set_jit_fusion_options()
-        
         assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
         # timers = get_timers()
         model = self.get_model(model_type)
@@ -121,7 +114,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         config.timers = None
         optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
                                         scale_lr_cond, lr_mult)
-        
+
         opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
         if args.load is not None or args.pretrained_checkpoint is not None:
             # timers('load-checkpoint', log_level=0).start(barrier=True)
@@ -144,22 +137,19 @@ class Trainer(CheckPointMixin, SchedulerMixin):
 
         return model, optimizer, opt_param_scheduler
 
-
-    def model_provider(self,
-                        pre_process=True,
-                        post_process=True,
-                        add_encoder=True,
-                        add_decoder=True,
-                        parallel_output=True):
-        args=get_args()
+    def model_provider(
+        self,
+        pre_process=True,
+        post_process=True,
+        add_encoder=True,
+        add_decoder=True,
+        parallel_output=True,
+    ):
+        args = get_args()
         cfg = core_transformer_config_from_args(args)
-        # breakpoint()
         return build_model(args.model, cfg)
 
-
-    def get_model(self,
-                   model_type=ModelType.encoder_or_decoder, 
-                   wrap_with_ddp=True):
+    def get_model(self, model_type=ModelType.encoder_or_decoder, wrap_with_ddp=True):
         args = get_args()
         args.model_type = model_type
         if mpu.get_pipeline_model_parallel_world_size() > 1 and \
@@ -205,15 +195,11 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                     pre_process=pre_process,
                     post_process=post_process
                 )
-            # breakpoint()
             model.model_type = model_type
-
-        # breakpoint()
 
         if not isinstance(model, list):
             model = [model]
 
-        # breakpoint()
         # Set tensor model parallel attributes if not set.
         # Only parameters that are already tensor model parallel have these
         # attributes set for them. We should make sure the default attributes
@@ -229,11 +215,8 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         # Fp16 conversion.
         if args.fp16 or args.bf16:
             model = [Float16Module(module=model_module, config=model_module.config) for model_module in model]
-        #import ipdb; ipdb.set_trace()
-        # breakpoint()
         if wrap_with_ddp:
             config = get_model_config(model[0])
-            # breakpoint()
             model = [DDP(config,
                         model_chunk,
                         data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
@@ -253,12 +236,12 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                     model_module.broadcast_params()
 
         return model
-        
 
-    def get_iterator(self, 
-                     len_model:int, 
-                     train_valid_test_dataset_provider=None,
-                     ):
+    def get_iterator(
+        self,
+        len_model: int,
+        train_valid_test_dataset_provider=None,
+    ):
         args = get_args()
         if args.virtual_pipeline_model_parallel_size is not None:
             train_itrt = []
@@ -272,173 +255,17 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                 valid_itrt.append(iterators[1])
                 test_itrt.append(iterators[2])
         else:
-            train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets()
+            train_ds, valid_ds, test_ds = build_train_valid_test_datasets()
             train_itrt, valid_itrt, test_itrt \
                 = self.build_train_valid_test_data_iterators(
                     train_valid_test_dataset_provider, train_ds_prev=train_ds)
         return train_itrt, valid_itrt, test_itrt
-            
-
-    def build_train_valid_test_datasets(self, dp_rank=None, dp_size=None):
-        """Build pretraining datasets."""
-        train_valid_test_num_samples = get_train_valid_test_num_samples()
-        print_rank_0(' > datasets target sizes (minimum size):')
-        print_rank_0('    train:      {}'.format(train_valid_test_num_samples[0]))
-        print_rank_0('    validation: {}'.format(train_valid_test_num_samples[1]))
-        print_rank_0('    test:       {}'.format(train_valid_test_num_samples[2]))
-        args = get_args()
-
-        print_rank_0("> building train, validation, and test datasets for multimodal ...")
-
-        if args.dataset_type == "FakeDataset" or args.dataset_type == "KoalaDataset":
-            train_ds = build_dataset(args.dataset_type)
-            valid_ds = None
-            test_ds = None
-        elif args.dataset_type == "VastDataset": 
-            global_config = load_config_vast()
-            train_ds_config = global_config.dataloaders.train
-            eval_ds_config = global_config.dataloaders.get("eval", None)
-            ds_config = HunyuanVideoDatasetConfig(
-                train_ds_config=train_ds_config,
-                eval_ds_config=eval_ds_config
-            )
-            dataset = build_dataset(train_ds_config.dataset)
-            train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
-                dataset,
-                train_valid_test_num_samples,
-                lambda: True,
-                ds_config,
-            ).build()
-        elif args.dataset_type == "TensorDataset":
-            global_config = load_config_vast()
-            train_ds = build_dataset(global_config.dataset)
-            valid_ds = None
-            test_ds = None
-        #     pass
-
-        elif args.dataset_type == "BucketDataset": 
-            global_config = load_config_vast()
-            assert global_config.sampler.type == "BucketVariableBatchSampler"
-            assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
-            assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
-            print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
-
-            dataset = build_dataset(global_config.dataset)
-            if dp_rank is None or dp_size is None:
-                sampler = build_sampler_vast(
-                    global_config.sampler,
-                    dataset=dataset, 
-                    rank=mpu.get_data_parallel_rank(),
-                    num_replicas=mpu.get_data_parallel_world_size(),
-                    seed=args.seed
-                )
-            else:
-                sampler = build_sampler_vast(
-                    global_config.sampler,
-                    dataset=dataset, 
-                    rank=dp_rank,
-                    num_replicas=dp_size,
-                    seed=args.seed
-                )
-            # 使用 iteration 和 num_replicas / world size 计算，近似最后访问的索引
-            if args.last_microbatch_size_index is None:
-                sampler.last_micro_batch_access_index = args.iteration * sampler.num_replicas
-            else:
-                sampler.last_micro_batch_access_index = args.last_microbatch_size_index
-            # else:
-                # sampler.last_micro_batch_access_index = iteration * sampler.num_replicas
-
-            collator = DefaultCollator(is_equal=True)
-            train_ds = torch.utils.data.DataLoader(
-                dataset,
-                batch_sampler=sampler,
-                collate_fn=collator,
-                num_workers=global_config.dataloader.num_workers
-            )
-            train_ds = iter(train_ds)
-            valid_ds = None
-            test_ds = None
-        else:
-            raise NotImplementedError
-
-        print_rank_0("> finished creating multimodal datasets ...")
-
-        return train_ds, valid_ds, test_ds
-
-    def build_train_valid_test_data_loaders(self,
-                                            is_tp_first = None,
-                                            dp_rank = None, 
-                                            dp_size = None,  
-                                            train_ds_prev = None):
-        """Build pretraining data loaders."""
-
-        args = get_args()
-
-        (train_dataloader, valid_dataloader, test_dataloader) = (None, None, None)
-
-        print_rank_0('> building train, validation, and test datasets ...')
-
-        if args.iteration > 0 and args.consumed_train_samples == 0:
-            assert args.train_samples is None, \
-                'only backward compatiblity support for iteration-based training'
-            args.consumed_train_samples = args.iteration * args.global_batch_size
-        if args.iteration > 0 and args.consumed_valid_samples == 0:
-            if args.train_samples is None:
-                args.consumed_valid_samples = (args.iteration // args.eval_interval) * \
-                    args.eval_iters * args.global_batch_size
-
-        # Rely on distributed-aware core datasets, temporary
-        # is_distributed = getattr(build_train_valid_test_datasets_provider, "is_distributed", False)
-        # print(f"cs rank: {dist.get_rank()}, is_distributed: {is_distributed}")
-
-        # Construct the data pipeline
-        # if is_distributed or mpu.get_tensor_model_parallel_rank() == 0:
-        # if is_tp_fist is None:
-        #     is_tp_fist = (mpu.get_tensor_model_parallel_rank() == 0)
-        
-        # if is_distributed or is_tp_fist:
-            # Build datasets.
-        if train_ds_prev is not None:
-            train_ds = train_ds_prev
-            valid_ds = None
-            test_ds = None
-        else:
-            train_ds, valid_ds, test_ds = self.build_train_valid_test_datasets()
-        # Build dataloders.
-        train_dataloader = build_pretraining_data_loader(
-            train_ds, args.consumed_train_samples, dp_rank, dp_size )
-        if args.skip_train:
-            valid_dataloader = build_pretraining_data_loader(valid_ds, 0, dp_rank, dp_size )
-        else:
-            valid_dataloader = build_pretraining_data_loader(
-                valid_ds, args.consumed_valid_samples, dp_rank, dp_size )
-        test_dataloader = build_pretraining_data_loader(test_ds, 0,  dp_rank, dp_size )
-
-        # Flags to know if we need to do training/validation/testing.
-        do_train = train_dataloader is not None and args.train_iters > 0
-        do_valid = valid_dataloader is not None and args.eval_iters > 0
-        do_test = test_dataloader is not None and args.eval_iters > 0
-        flags = torch.tensor(
-            [int(do_train), int(do_valid), int(do_test)],
-            dtype=torch.long, device='cuda')
-        # else:
-        #     flags = torch.tensor([0, 0, 0], dtype=torch.long, device='cuda')
-
-        if dp_rank is None or dp_size is None:
-            torch.distributed.broadcast(flags, 0)
-
-        args.do_train = getattr(args, "do_train", False) or flags[0].item()
-        args.do_valid = getattr(args, "do_valid", False) or flags[1].item()
-        args.do_test = getattr(args, "do_test", False) or flags[2].item()
-
-        return train_dataloader, valid_dataloader, test_dataloader
 
 
-    def build_train_valid_test_data_iterators(self,
-                    is_tp_first = None,
-                    dp_rank = None, 
-                    dp_size = None, 
-                    train_ds_prev=None):
+
+    def build_train_valid_test_data_iterators(
+        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None
+    ):
         """Build pretraining data iterators."""
 
         args = get_args()
@@ -448,7 +275,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         train_dataloader, valid_dataloader, test_dataloader = \
             self.build_train_valid_test_data_loaders(
                 is_tp_first, dp_rank, dp_size, train_ds_prev)
-        
+
         # Build iterators.
         print("Building iterators.")
         dl_type = args.dataloader_type
@@ -484,10 +311,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
 
         return train_data_iterator, valid_data_iterator, test_data_iterator
 
-
-    def initialize_megatron(self,
-                            args,
-        ):
+    def initialize_megatron(self, args):
 
         if args.distributed_vae:
             args.world_size -= args.distributed_vae_world_size
@@ -509,7 +333,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
             if isDiTRank is not None:
                 _set_random_seed(args.seed, args.data_parallel_random_init)
         args = get_args()
-        
+
         if args.lazy_mpu_init:
             args.use_cpu_initialization = True
             # delayed initialization of DDP-related stuff
@@ -533,12 +357,12 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                 _initialize_tp_communicators()
             # No continuation function
             return None
-    
 
-    def pretrain(self, 
-              forward_step_func=forward_step,
-              process_non_loss_data_func=None,
-              ):
+    def pretrain(
+        self,
+        forward_step_func=forward_step,
+        process_non_loss_data_func=None,
+    ):
         args = get_args()
 
         if args.distributed_vae:
@@ -557,7 +381,6 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                 req.wait()
         print_datetime('after dataloaders are built')
         print_rank_0('done with setup ...')
-
 
         if not args.skip_train:
             print_rank_0('training ...')
@@ -599,18 +422,17 @@ class Trainer(CheckPointMixin, SchedulerMixin):
                                     iteration, process_non_loss_data_func, self.config,
                                     verbose=True, write_to_tensorboard=not args.skip_train)
 
-
-
-
-    def train(self, 
-                   forward_step_func,
-                   model,
-                   optimizer,
-                   opt_param_scheduler,
-                   train_data_iterator, 
-                   valid_data_iterator,
-                   process_non_loss_data_func,
-                   config):
+    def train(
+        self,
+        forward_step_func,
+        model,
+        optimizer,
+        opt_param_scheduler,
+        train_data_iterator,
+        valid_data_iterator,
+        process_non_loss_data_func,
+        config,
+    ):
         args = get_args()
         # model = self.model
 
@@ -837,9 +659,16 @@ class Trainer(CheckPointMixin, SchedulerMixin):
             sys.exit()
 
         return iteration, num_floating_point_operations_so_far
-    
-    def train_step(self, forward_step_func, data_iterator,
-               model, optimizer, opt_param_scheduler, config):
+
+    def train_step(
+        self,
+        forward_step_func,
+        data_iterator,
+        model,
+        optimizer,
+        opt_param_scheduler,
+        config,
+    ):
         """Single training step."""
         args = get_args()
 
@@ -849,7 +678,7 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         optimizer.zero_grad()
 
         # import os, debugpy
-        # dist.barrier()  
+        # dist.barrier()
         # if int(os.environ.get("RANK","0")) == 0:
         #     debugpy.breakpoint()
         # dist.barrier()
@@ -908,11 +737,18 @@ class Trainer(CheckPointMixin, SchedulerMixin):
             return loss_reduced, skipped_iter, grad_norm, num_zeros_in_grad
         return {}, skipped_iter, grad_norm, num_zeros_in_grad
 
-    def evaluate_and_print_results(self,
-                                   prefix, forward_step_func,
-                               data_iterator, model,
-                               iteration, process_non_loss_data_func, config,
-                               verbose=False, write_to_tensorboard=True):
+    def evaluate_and_print_results(
+        self,
+        prefix,
+        forward_step_func,
+        data_iterator,
+        model,
+        iteration,
+        process_non_loss_data_func,
+        config,
+        verbose=False,
+        write_to_tensorboard=True,
+    ):
         """Helper function to evaluate and dump results on screen."""
         args = get_args()
 
@@ -934,13 +770,15 @@ class Trainer(CheckPointMixin, SchedulerMixin):
         print_rank_last(string)
         print_rank_last('-' * length)
 
-    def evaluate(self,
-                forward_step_func,
-                data_iterator,
-                model,
-                process_non_loss_data_func,
-                config,
-                verbose=False):
+    def evaluate(
+        self,
+        forward_step_func,
+        data_iterator,
+        model,
+        process_non_loss_data_func,
+        config,
+        verbose=False,
+    ):
         """Evaluation."""
         args = get_args()
 

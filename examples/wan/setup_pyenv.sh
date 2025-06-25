@@ -1,6 +1,7 @@
 #!/bin/bash
 
 setup_env_and_install() {
+    source .venv/bin/activate || { echo "❌ 激活虚拟环境失败！"; }
     [[ -d ".venv" ]] && { echo "✅ 虚拟环境已存在，跳过安装步骤..."; return 0; }
     
     echo "🔧 开始环境安装和依赖配置..."

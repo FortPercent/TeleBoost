@@ -1,19 +1,20 @@
 import math
-from teletron.utils import (print_rank_0,
-                            get_args)
+from teletron.utils import print_rank_0, get_args
 from teletron.train.utils import update_train_iters
 from megatron.core import mpu
-from megatron.core.optimizer import ( OptimizerConfig, 
-                                     _get_param_groups,
-                                     _update_min_and_max_lr_in_param_groups,
-                                     _get_megatron_optimizer_based_on_param_groups,
-                                     ChainedOptimizer,)
+from megatron.core.optimizer import (
+    OptimizerConfig,
+    _get_param_groups,
+    _update_min_and_max_lr_in_param_groups,
+    _get_megatron_optimizer_based_on_param_groups,
+    ChainedOptimizer,
+)
 from megatron.core.transformer.module import MegatronModule
 import torch
 from logging import getLogger
+
 logger = getLogger(__name__)
 from typing import Callable, List, Optional
-
 
 
 class OptimizerParamScheduler(object):

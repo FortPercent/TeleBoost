@@ -6,7 +6,6 @@ from einops import rearrange
 from unittest.mock import patch, Mock
 # from teletron.core import initialize_model_parallel
 from unit_test.test_utils import spawn
-from megatron.core import mpu
 import logging
 
 SPLIT_SUCCESS = "split input success rank"
@@ -30,13 +29,13 @@ def forward_attn(cp_model, cp_size, cp_rank, que):
         k = k.transpose(1, 2).contiguous()
         v = v.transpose(1, 2).contiguous()
         x = F.scaled_dot_product_attention(q, k, v)
-        x = x.transpose(1, 2).flatten(2, 3).contiguous().to(f"cuda:{cp_rank}")
+        x = x.transpose(1, 2).flatten(2, 3).contiguous().cuda()
         
         # cp attn compute result
-        q_split = cp_model.split_input(q_ori, dim=1)
-        k_split = cp_model.split_input(k_ori, dim=1)
-        v_split = cp_model.split_input(v_ori, dim=1)
-        output_split = cp_model.forward_attn(q_split, k_split, v_split).to(f"cuda:{cp_rank}")
+        q_split = cp_model.split_input(q_ori, dim=1).cuda()
+        k_split = cp_model.split_input(k_ori, dim=1).cuda()
+        v_split = cp_model.split_input(v_ori, dim=1).cuda()
+        output_split = cp_model.forward_attn(q_split, k_split, v_split).cuda()
         output = cp_model.gather_output(output_split, dim=1)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{x.shape}, {cp_size}")
@@ -50,12 +49,12 @@ def forward_attn(cp_model, cp_size, cp_rank, que):
 def gather_output(cp_model, cp_size, cp_rank, q):
     with torch.no_grad():
         input = torch.zeros((1, 100, 128)) + cp_rank
-        input = input.to(f"cuda:{cp_rank}")
+        input = input.cuda()
         x_list = []
         for i in range(cp_size):
             x = torch.zeros((1, 100, 128)) + i
             x_list.append(x)
-        output = torch.cat(x_list, dim=1).to(f"cuda:{cp_rank}")
+        output = torch.cat(x_list, dim=1).cuda()
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{output.shape}, {cp_size}")
     input_gather = cp_model.gather_output(input, dim=1)
@@ -85,12 +84,13 @@ def split_input(cp_model, cp_size, cp_rank, q):
 
 @patch("teletron.utils.get_args")
 def setupContextParallelMixin(cp_rank, cp_size, q, mock_teletron):
+    torch.cuda.set_device(cp_rank)
+    from megatron.core import mpu
     from teletron.core.context_parallel import ContextParallelMixin
     from teletron.core.parallel_state import initialize_model_parallel_base
     args = Mock()
     args.num_attention_heads = 16
     mock_teletron.return_value = args
-    
     class ContextParallelModel(ContextParallelMixin):
         def __init__(self, split_dim=1, gather_dim=1):
             self.cp_size = mpu.get_context_parallel_world_size()

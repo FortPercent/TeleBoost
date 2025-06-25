@@ -103,7 +103,7 @@ DATA_ARGS=(
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
-    --dataloader-type common
+    --dataloader-type cyclic
     --num-workers 8
 )
 
