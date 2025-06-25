@@ -10,7 +10,7 @@ from multiprocessing import Process
 import multiprocessing as mp 
 from unit_test.test_utils import spawn
 import logging
-import teletron
+# import teletron
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
