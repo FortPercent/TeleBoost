@@ -68,16 +68,14 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         self.initialize_megatron(args)
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
-        if transformer_group is None:
-            train_ds, _, _ = build_train_valid_test_datasets()
-            
+        if transformer_group is None:            
             producer_process(
                 rank=dist.get_rank(), 
                 world_size=dist.get_world_size(),
                 encoder_name=get_encoder_name(args.model),
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
-                train_ds=train_ds,
+                train_ds=None,
             )
             
             exit()        
@@ -275,7 +273,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
 
 
     def build_train_valid_test_data_iterators(
-        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None
+        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, return_ds=False
     ):
         """Build pretraining data iterators."""
 
@@ -283,9 +281,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
 
         # Build loaders.
         print("Building loaders.")
-        train_dataloader, valid_dataloader, test_dataloader = \
-            self.build_train_valid_test_data_loaders(
-                is_tp_first, dp_rank, dp_size, train_ds_prev)
+        
+        if return_ds is True:
+            train_dataloader, valid_dataloader, test_dataloader,train_ds = \
+                self.build_train_valid_test_data_loaders(
+                    is_tp_first,dp_rank,dp_size, train_ds_prev, return_ds=return_ds)
+        else:
+            train_dataloader, valid_dataloader, test_dataloader = \
+                self.build_train_valid_test_data_loaders(
+                    is_tp_first,dp_rank,dp_size, train_ds_prev)
 
         # Build iterators.
         print("Building iterators.")
@@ -320,19 +324,21 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         else:
             test_data_iterator = None
 
-        return train_data_iterator, valid_data_iterator, test_data_iterator
+        if return_ds is True:
+            return train_data_iterator, valid_data_iterator, test_data_iterator, train_ds
+        else:
+            return train_data_iterator, valid_data_iterator, test_data_iterator
 
     def initialize_megatron(self, args):
 
         if args.distributed_vae:
-            args.world_size -= args.distributed_vae_world_size
-            args.dit_world_size = args.world_size
-
+            args.world_size = (args.world_size - args.distributed_vae_world_size)  //args.consumer_models_num
+            args.dit_world_size = args.world_size * args.consumer_models_num
         validate_args(args)
         set_args(args)
 
         if args.distributed_vae:
-            args.world_size += args.distributed_vae_world_size
+            args.world_size = args.distributed_vae_world_size + args.dit_world_size
         def finish_mpu_init():
             args = get_args()
             _initialize_distributed()

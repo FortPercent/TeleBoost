@@ -92,9 +92,10 @@ def producer_process(
     merged_comm_pairs = merge_commpairs(comm_pairs)
     data_iterators = {}
     same_data_group = {}
+    train_ds0 = train_ds
     for idx, mcp in merged_comm_pairs.items():
-        data_iterators[idx], _, _ = build_train_valid_test_data_iterators(
-            is_tp_first=True, dp_rank=mcp.dp_rank, dp_size=mcp.dp_size, train_ds_prev=train_ds
+        data_iterators[idx], _, _,  train_ds0= build_train_valid_test_data_iterators(
+            is_tp_first=True, dp_rank=mcp.dp_rank, dp_size=mcp.dp_size, train_ds_prev=train_ds0, return_ds=True
         )
         first_consumer = mcp.consumer[0]
         same_data_group[first_consumer] = mcp.consumer
