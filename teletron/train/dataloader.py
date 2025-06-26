@@ -12,7 +12,7 @@ from teletron.datasets.build import build_train_valid_test_datasets
 class DataloaderMixin:
 
     def build_train_valid_test_data_loaders(self,
-        is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None
+        is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, return_ds=False
     ):
         args = get_args()
 
@@ -69,7 +69,10 @@ class DataloaderMixin:
         args.do_valid = getattr(args, "do_valid", False) or flags[1].item()
         args.do_test = getattr(args, "do_test", False) or flags[2].item()
 
-        return train_dataloader, valid_dataloader, test_dataloader
+        if return_ds is True:
+            return train_dataloader, valid_dataloader, test_dataloader, train_ds
+        else:
+            return train_dataloader, valid_dataloader, test_dataloader
 
     def build_pretraining_data_loader(self, dataset, consumed_samples, data_parallel_rank=None, data_parallel_size=None):
         """Build dataloader given an input dataset."""

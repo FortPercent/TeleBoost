@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=3,4,5,6,7
 # export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
@@ -100,6 +100,7 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
     --distributed-vae
     --distributed-vae-world-size 1
+    --consumer-models-num 1
 )
 DATA_ARGS=(
     --dataset-type VastDataset
