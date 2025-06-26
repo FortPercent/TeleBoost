@@ -100,7 +100,7 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
     --distributed-vae
     --distributed-vae-world-size 1
-    --consumer-models-num 2
+    --consumer-models-num 1
 )
 DATA_ARGS=(
     --dataset-type VastDataset
