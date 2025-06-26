@@ -9,17 +9,22 @@ from vast.models.dit.wan_dit import WanPrompter
 from vast.pipelines.wan.wan_video import WanVideoPipeline
 from vast.models.dit.wan_dit import ModelManager
 from teletron.models.wan.wan_encoder_utils import get_encoder_features
-
+from teletron.utils import get_args
 
 @register_encoder("wan_encoder")
 class WanVideoEncoder(BaseEncoder):
     """WAN视频模型的具体编码器实现。"""
-
+    
+    _OUTPUT_MOE_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise']
     _OUTPUT_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents']
 
     @staticmethod
     def get_output_schema() -> List[str]:
         """返回此编码器输出张量的固定名称和顺序。"""
+        args = get_args()
+        is_moe = (args.consumer_models_num > 1)
+        if is_moe is True:
+            return WanVideoEncoder._OUTPUT_MOE_SCHEMA
         return WanVideoEncoder._OUTPUT_SCHEMA
 
     def __init__(self, device: torch.device, **kwargs: Any):
@@ -77,14 +82,17 @@ class WanVideoEncoder(BaseEncoder):
         prompt_emb, image_emb, latents = get_encoder_features(
             batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder
         )
-
-        # noise = torch.randn_like(latents, device=self.device)
+        
         
         context = prompt_emb['context']
         img_clip_feature = image_emb["clip_feature"]
         img_emb_y = image_emb["y"]
 
-        tensors_to_send = [context, img_clip_feature, img_emb_y, latents]
+        if self.moe is True:
+            noise = torch.randn_like(latents, device=self.device)
+            tensors_to_send = [context, img_clip_feature, img_emb_y, latents, noise]
+        else:
+            tensors_to_send = [context, img_clip_feature, img_emb_y, latents]
 
         size_info_tensor = self._get_tensors_size(tensors_to_send, device=self.device)
 

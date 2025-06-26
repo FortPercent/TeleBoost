@@ -105,33 +105,60 @@ class WanDistBatchLoader(BaseBatchLoader):
         req.wait()
 
         if args.distributed_vae:
-            # 计算大小
-            transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
-            clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
-            first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
-            video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
-            # noise_size = video_embedding_size
-            
-            # 准备接收缓冲区
-            # total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-            total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-            recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+            if args.consumer_models_num == 1:
+                # 计算大小
+                transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
+                clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
+                first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
+                video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
+                # noise_size = video_embedding_size
+                
+                # 准备接收缓冲区
+                # total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
+                total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
+                recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
 
-            intervals = [0, 
-                         transformer_embedding_size, 
-                         transformer_embedding_size + clip_embedding_size,
-                         transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
-                         transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size,
-                        #  transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-                        ]
+                intervals = [0, 
+                            transformer_embedding_size, 
+                            transformer_embedding_size + clip_embedding_size,
+                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
+                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size,
+                            #  transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
+                            ]
+                # 异步接收并等待
+                req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
+                req.wait()
+                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+            else:
+                # 计算大小
+                transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
+                clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
+                first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
+                video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
+                noise_size = video_embedding_size
+                
+                # 准备接收缓冲区
+                total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
+                # total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
+                recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+
+                intervals = [0, 
+                            transformer_embedding_size, 
+                            transformer_embedding_size + clip_embedding_size,
+                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
+                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size,
+                             transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
+                            ]
             
-            # 异步接收并等待
-            req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
-            req.wait()
+                # 异步接收并等待
+                req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
+                req.wait()
+                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+                noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
 
             # 解包并重塑 Tensors
             # context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals)
-            context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+            
             context = context.view(tensors_info[0], tensors_info[1], tensors_info[2])
             clip_feature = clip_feature.view(tensors_info[3], tensors_info[4], tensors_info[5])
             img_y = img_y.view(tensors_info[6], tensors_info[7], tensors_info[8], tensors_info[9], tensors_info[10])
@@ -148,8 +175,9 @@ class WanDistBatchLoader(BaseBatchLoader):
             "clip_feature": clip_feature,
             "image_emb_y": img_y,
             "latents": latents,
-            # "noise": noise
         }
+        if args.consumer_models_num > 1:
+            batch['noise']=noise
         
         return batch
 
