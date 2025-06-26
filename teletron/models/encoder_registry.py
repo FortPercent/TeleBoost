@@ -5,12 +5,15 @@ from typing import Dict, Type, Any, List
 from abc import ABC, abstractmethod
 import torch
 from typing import Dict, Any, Tuple, List
+from teletron.utils import get_args
 
 class BaseEncoder(ABC):
 
     def __init__(self, device: torch.device, **kwargs: Any):
-
+        
+        args = get_args()
         self.device = device
+        self.moe = (args.consumer_models_num > 1)
 
     @abstractmethod
     def setup(self, **kwargs: Any) -> None:
