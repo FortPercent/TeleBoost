@@ -9,8 +9,8 @@ config = dict(
             dataset=dict(
                 type="TensorDataset",
                 pth_paths=[
-                    "/nvfile-heatstorage/dj/datasets/istock/part_1_50000",
-                    # "/nvfile-heatstorage/dj/datasets/istock/part_2_50000",
+                    # "/nvfile-heatstorage/dj/datasets/istock/part_1_50000",
+                    "/nvfile-heatstorage/dj/datasets/istock_wan_latents/part_2_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_3_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_4_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_5_50000",
@@ -51,8 +51,8 @@ config = dict(
                     # "/nvfile-heatstorage/dj/datasets/istock/part_40_50000",
                 ],
                 metadata_paths=[
-                    "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_1_50000.csv",
-                    # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_2_50000.csv",
+                    # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_1_50000.csv",
+                    "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_2_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_3_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_4_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_5_50000.csv",
