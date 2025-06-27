@@ -679,7 +679,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         sizes_info = {}
         type_info = {}
         batch=dict(data)
-        dtype_vast = torch.bfloat16
+        dtype = torch.bfloat16
 
         from teletron.core.parallel_state import get_comm_pair
         comm_pair = get_comm_pair()
@@ -830,7 +830,7 @@ def get_batch_on_this_tp_cp_rank_vast_dist(data_iterator):
         sizes_info = {}
         type_info = {}
         batch=dict(data)
-        dtype_vast = torch.bfloat16
+        dtype = torch.bfloat16
 
         from teletron.core.parallel_state import get_comm_pair, get_world_group
         comm_pair = get_comm_pair()
@@ -1003,6 +1003,8 @@ def set_config():
         from config.wan_i2v_multimask import config
     elif args.task_type == "wan_self_forcing":
         from config.wan_self_forcing import config
+    elif args.task_type == "vast":
+        from config.vast import config
     else:
         return None
     config_vast = load_config(config)

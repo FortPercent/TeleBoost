@@ -8,7 +8,6 @@ from typing import Callable, Any, Dict
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import (get_args)
 from teletron.models.encoder_registry import get_encoder
-from teletron.models.vast import vast_encoder 
 
 from teletron.models.encoder_registry import (BaseEncoder)
 
