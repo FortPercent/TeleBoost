@@ -1,16 +1,23 @@
 #!/bin/bash
 
+# Runs the "175B" parameter model
 export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=3,4,5,6,7
+# export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# export PYTHONPATH=
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+# TODO, change to your own path
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
-
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+# export MEMORY_SNAPSHOT=True
+# export PROF_SAVE_PATH="./log_memory_0607_2"
 GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
 echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 
@@ -29,8 +36,8 @@ WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 # WORLD_SIZE=16
 echo '$WORLD_SIZE' $WORLD_SIZE
 
-source ./examples/wan/setup_pyenv.sh
-setup_env_and_install
+#source ./examples/wan/setup_pyenv.sh
+#setup_env_and_install
 # reinstall with "rm -rf .venv"
 
 CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1_step100
@@ -67,7 +74,7 @@ TRAINING_ARGS=(
     # # --debug
     # --use-cpu-initialization
     --model ParallelWanModel # TODO support more models
-    --task-type wan_i2v_prone
+    --task-type vast
     --micro-batch-size ${MBS}
     # --global-batch-size ${GBS}
     --train-iters 10000
