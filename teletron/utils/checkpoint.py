@@ -166,7 +166,7 @@ def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
         return state_dict, checkpoint_name, release
     try:
         #import ipdb; ipdb.set_trace()
-        state_dict = torch.load(checkpoint_name, map_location='cpu')
+        state_dict = torch.load(checkpoint_name, map_location='cpu', weights_only=False)
         #import ipdb; ipdb.set_trace()
     except ModuleNotFoundError:
         # from megatron.legacy.fp16_deprecated import loss_scaler
@@ -179,7 +179,7 @@ def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
             'megatron.legacy.fp16_deprecated.loss_scaler']
         sys.modules['megatron.model'] = sys.modules['megatron.legacy.model']
         #import ipdb; ipdb.set_trace()
-        state_dict = torch.load(checkpoint_name, map_location='cpu')
+        state_dict = torch.load(checkpoint_name, map_location='cpu', weights_only=False)
         sys.modules.pop('fp16.loss_scaler', None)
         sys.modules.pop('megatron.fp16.loss_scaler', None)
         sys.modules.pop('megatron.model', None)

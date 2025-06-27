@@ -1,4 +1,5 @@
 import math
+from typing import Callable, List, Optional
 from teletron.utils import print_rank_0, get_args
 from teletron.train.utils import update_train_iters
 from megatron.core import mpu
@@ -14,7 +15,6 @@ import torch
 from logging import getLogger
 
 logger = getLogger(__name__)
-from typing import Callable, List, Optional
 
 
 class OptimizerParamScheduler(object):

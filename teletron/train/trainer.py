@@ -497,23 +497,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         num_microbatches = get_num_microbatches()
         eval_duration = 0.0
         eval_iterations = 0
-        # def track_e2e_metrics():
-        #     # Nested function to track a bunch of E2E APP metrics
-        #     if one_logger:
-        #         train_samples = args.consumed_train_samples - train_samples_start
-        #         train_iterations = iteration - iteration_start
-        #         if eval_iterations:
-        #             validation_iterations_time_msecs_avg = (eval_duration * 1000.0) / eval_iterations
-        #         else:
-        #             validation_iterations_time_msecs_avg = None
-
-        #         one_logger.log_metrics({
-        #             'train_iterations_end': iteration,
-        #             'train_samples_end': args.consumed_train_samples,
-        #             'train_iterations': train_iterations,
-        #             'train_samples': train_samples,
-        #             'validation_iterations_time_msecs_avg': validation_iterations_time_msecs_avg
-        #         })
 
         while iteration < args.train_iters:
             if args.profile and \
