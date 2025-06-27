@@ -19,3 +19,4 @@ tests/*
 *.png
 debug/
 .venv
+checkpoint/*
