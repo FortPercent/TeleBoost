@@ -5,9 +5,9 @@ from typing import Dict, Any, Tuple, List
 from teletron.models.encoder_registry import (register_encoder, BaseEncoder)
 
 
-from teletron.models.vast.models.dit.vast_dit import VastPrompter
-from teletron.models.vast.pipelines.vast.vast_video import VastVideoPipeline
-from teletron.models.vast.models.dit.vast_dit import ModelManager
+from vast.models.dit.wan_dit import WanPrompter
+from vast.pipelines.wan.wan_video import WanVideoPipeline
+from vast.models.dit.wan_dit import ModelManager
 from teletron.models.wan.wan_encoder_utils import get_encoder_features
 from teletron.utils import get_args
 
@@ -60,14 +60,14 @@ class WanVideoEncoder(BaseEncoder):
         model_manager = ModelManager(torch_dtype=torch.float32, device="cpu")
         model_manager.load_models(self.model_paths)
         
-        pipe = VastVideoPipeline.from_model_manager(model_manager)
+        pipe = WanVideoPipeline.from_model_manager(model_manager)
         
         self.text_encoder = pipe.text_encoder.to(device=self.device)
         self.image_encoder = pipe.image_encoder.to(device=self.device)
         self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
         del pipe # 释放不再需要的内存
 
-        self.prompter = VastPrompter()
+        self.prompter = WanPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
         print("WanVideoEncoder 设置完成。")
