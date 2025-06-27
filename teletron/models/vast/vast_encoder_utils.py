@@ -3,9 +3,6 @@ from einops import rearrange
 from torchvision.transforms.functional import to_pil_image
 import numpy as np
 
-
-
-
 def forward_vae(images):
     images = images.to(self.vae.dtype)
 
@@ -353,12 +350,12 @@ def extend_prompt(prompt, local_prompts, masks, mask_scales):
 #     return prompt_emb, image_emb, latents
 
 def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder):
-    dtype_wan = torch.bfloat16
+    dtype_vast = torch.bfloat16
     with torch.no_grad():
         prompt_emb = encode_prompt(prompter,batch["dense_prompt"][0])
         latents = encode_video(vae,
             rearrange(batch["images"], "b t c h w -> b c t h w").to(
-                dtype=dtype_wan, device=torch.cuda.current_device()
+                dtype=dtype_vast, device=torch.cuda.current_device()
             ),
             **tiler_kwargs,
         )[0]
@@ -391,24 +388,24 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder):
                                                 height, width, ref_mask, ref_images)
         
         
-        latents = latents.unsqueeze(0).to(dtype=dtype_wan, device=torch.cuda.current_device())
+        latents = latents.unsqueeze(0).to(dtype=dtype_vast, device=torch.cuda.current_device())
 
         # Data
         prompt_emb["context"] = prompt_emb["context"][0].to(
-            dtype=dtype_wan, device=torch.cuda.current_device()
+            dtype=dtype_vast, device=torch.cuda.current_device()
         )
         prompt_emb["context"] = prompt_emb["context"].unsqueeze(0)
 
         if "clip_feature" in image_emb:
             image_emb["clip_feature"] = (
                 image_emb["clip_feature"][0]
-                .to(dtype=dtype_wan, device=torch.cuda.current_device())
+                .to(dtype=dtype_vast, device=torch.cuda.current_device())
                 .unsqueeze(0)
             )
         if "y" in image_emb:
             image_emb["y"] = (
                 image_emb["y"][0]
-                .to(dtype=dtype_wan, device=torch.cuda.current_device())
+                .to(dtype=dtype_vast, device=torch.cuda.current_device())
                 .unsqueeze(0)
             )
     return prompt_emb, image_emb, latents
