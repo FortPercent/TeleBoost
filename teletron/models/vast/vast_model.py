@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     
 T5_CONTEXT_TOKEN_NUMBER = 512   
 
-class WanParams:
+class VastParams:
     hidden_size: int = 5120
     in_channels: int = 36
     out_channels: int = 16
@@ -279,17 +279,17 @@ class Head(nn.Module):
 class VastModel(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
-        # wan_config
-        wan_config = WanParams()
-        self.in_dim = wan_config.in_channels
-        self.ffn_dim = wan_config.ffn_dim
-        self.out_dim = wan_config.out_channels
-        self.text_dim = wan_config.text_dim
-        self.freq_dim = wan_config.freq_dim
-        self.eps = wan_config.eps
-        self.patch_size = wan_config.patch_size
-        self.has_image_input = wan_config.has_image_input
-        self.has_image_pos_emb = wan_config.has_image_pos_emb
+        # vast_config
+        vast_config = VastParams()
+        self.in_dim = vast_config.in_channels
+        self.ffn_dim = vast_config.ffn_dim
+        self.out_dim = vast_config.out_channels
+        self.text_dim = vast_config.text_dim
+        self.freq_dim = vast_config.freq_dim
+        self.eps = vast_config.eps
+        self.patch_size = vast_config.patch_size
+        self.has_image_input = vast_config.has_image_input
+        self.has_image_pos_emb = vast_config.has_image_pos_emb
 
         # config
         self.dim = config.hidden_size
