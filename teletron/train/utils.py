@@ -1122,6 +1122,8 @@ def set_config():
         from config.wan_i2v_multimask import config
     elif args.task_type == "wan_self_forcing":
         from config.wan_self_forcing import config
+    elif args.task_type == "vast":
+        from config.vast import config
     else:
         return None
     config_vast = load_config(config)
