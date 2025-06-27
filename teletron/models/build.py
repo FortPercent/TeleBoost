@@ -1,10 +1,10 @@
 from .registry import Registry
-from .wan.parallel_wan_model import ParallelWanModel
+from .vast.parallel_vast_model import ParallelVastModel
 
 
 
 registor = Registry("model")
-registor.register(ParallelWanModel)
+registor.register(ParallelVastModel)
 
 
 def build_model(name,config=None):

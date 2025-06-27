@@ -113,8 +113,8 @@ def get_encoder(name: str, device: torch.device, **kwargs: Any) -> BaseEncoder:
     return encoder_class(device=device, **kwargs)
 
 model_mapping = {
-    "parallelwanmodel": "wan_encoder",
-    "wanmodel": "wan_encoder"
+    "parallelvastmodel": "vast_encoder",
+    "vastmodel": "vast_encoder"
 }
 
 def get_encoder_name(key):
