@@ -246,8 +246,8 @@ if __name__ == "__main__":
     # Create a registry
     registor = Registry("MyRegistry")
     
-
     from .wan.parallel_wan_model import ParallelWanModel
+    from .vast.parallel_vast_model import ParallelVastModel
     def build_model(name,config=None):
         if config is None:
             return registor.build(name)
@@ -255,6 +255,7 @@ if __name__ == "__main__":
             return registor.build(name,config)
     # Register using different methods
     registor.register(ParallelWanModel)
+    registor.register(ParallelVastModel)
     
     # Build instances
     # processor1 = registor.build(")

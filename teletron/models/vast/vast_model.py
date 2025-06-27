@@ -276,7 +276,7 @@ class Head(nn.Module):
         return x
 
 
-class WanModel(torch.nn.Module):
+class VastModel(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         # wan_config
