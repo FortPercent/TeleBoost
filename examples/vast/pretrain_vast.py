@@ -11,6 +11,8 @@ def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
     # follow this format to add
     # group.add_argument("--test_valid", type=str, default="")
+    group.add_argument("--moe-step-factor-list", type=float, action='append')
+    
     return parser
 
 def forward_step(data_iterator, model):
@@ -20,8 +22,9 @@ def forward_step(data_iterator, model):
     batch = next(data_iterator)
     latents = batch["latents"]
     noise = torch.randn_like(latents) if "noise" not in batch else batch["noise"]
-
-    timestep_id = torch.randint(0, flow_scheduler.num_train_timesteps, (1,))
+    timestep_range = [0, flow_scheduler.num_train_timesteps] if "timestep_range" not in batch else batch["timestep_range"]
+    print("timestep_range", timestep_range)
+    timestep_id = torch.randint(timestep_range[0], timestep_range[1], (1,))
     timestep = flow_scheduler.timesteps[timestep_id].to(
         dtype=torch.bfloat16, device=torch.cuda.current_device()
     )
