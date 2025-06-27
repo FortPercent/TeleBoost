@@ -8,7 +8,9 @@ defaults:
 
 trainer:
   type: diffusion
-  model: Wan
+
+data:
+  type: diffusion
 
 actor_rollout_ref:
   model:
