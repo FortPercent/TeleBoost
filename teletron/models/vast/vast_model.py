@@ -392,4 +392,10 @@ class VastModel(torch.nn.Module):
         x = self.head(x, t)
         x = self.unpatchify(x, (f, h, w))
         return x
+    
+    def state_dict_for_save_checkpoint(self, destination=None, prefix='', keep_vars=False):
+        state_dict = self.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        return state_dict
 
+    def sharded_state_dict(self):
+        return self.state_dict()
