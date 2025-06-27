@@ -104,6 +104,14 @@ class VastDistBatchLoader(BaseBatchLoader):
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
 
+        training_step = 1000
+        i_moe = comm_pair.consumer // torch.distributed.get_world_size() 
+        timestep_range = [int(f * training_step) for f in args.moe_step_factor_list][i_moe:i_moe+2] 
+        print("comm_pair", comm_pair)
+        print("comm_pair.consumer", comm_pair.consumer)
+        print("i_moe", i_moe)
+        print("timestep_range", timestep_range)
+
         if args.distributed_vae:
             if args.consumer_models_num == 1:
                 # 计算大小
@@ -175,6 +183,7 @@ class VastDistBatchLoader(BaseBatchLoader):
             "clip_feature": clip_feature,
             "image_emb_y": img_y,
             "latents": latents,
+            'timestep_range': timestep_range,
         }
         if args.consumer_models_num > 1:
             batch['noise']=noise
