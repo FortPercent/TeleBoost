@@ -141,7 +141,7 @@ EVAL_AND_LOGGING_ARGS=(
 # echo $NCCL_IBEXT_DISABLE
 # export NCCL_DEBUG=INFO
 
-torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
+torchrun ${DISTRIBUTED_ARGS[@]} examples/vast/pretrain_vast.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
