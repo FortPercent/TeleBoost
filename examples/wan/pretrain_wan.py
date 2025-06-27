@@ -33,24 +33,23 @@ def forward_step(data_iterator, model):
     broadcast_timesteps(timestep)
     broadcast_timesteps(noise)
     prompt_emb["context"] = batch["context"]
-
+    training_target = flow_scheduler.training_target(latents, noise, timestep)
     image_emb = {}
     image_emb["y"] = batch["image_emb_y"]
-    print('y shape', image_emb['y'].shape)
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
-    print('x shape', latents.shape)
     image_emb["clip_feature"] = batch["clip_feature"]
-
-    print("batch[clip_feature].shape", batch["clip_feature"].shape)
-    print("noisy_latents.shape", noisy_latents.shape)
 
     output_tensor_list = model(x=noisy_latents, 
                                timestep=timestep, 
                                context=prompt_emb["context"],
                                clip_feature=image_emb["clip_feature"],
                                y=image_emb["y"])
-
-    return output_tensor_list, loss_func
+    
+    loss = torch.nn.functional.mse_loss(
+        output_tensor_list.float(), training_target.float()
+    )
+    loss = loss * flow_scheduler.training_weight(timestep)
+    return [loss], loss_func
 
 
 
