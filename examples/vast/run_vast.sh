@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=4,5,6
 # export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
@@ -25,7 +25,7 @@ echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
 # MASTER_ADDR='127.0.0.1'
 echo '$MASTER_ADDR'$MASTER_ADDR
-MASTER_PORT='11220'
+MASTER_PORT='11320'
 NNODES=${WORLD_SIZE:-'1'}
 NNODES=1
 
@@ -100,7 +100,8 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
     --distributed-vae
     --distributed-vae-world-size 1
-    --consumer-models-num 1
+    --consumer-models-num 2
+    --moe-step-factor-list 0.0 --moe-step-factor-list 0.833 --moe-step-factor-list 1.0
 )
 DATA_ARGS=(
     --dataset-type VastDataset
