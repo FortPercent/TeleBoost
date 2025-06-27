@@ -1,2 +1,2 @@
 from .wan_model import WanModel
-from .parallel_wan_model import ParallelWanModel
+from .parallel_vast_model import ParallelWanModel
