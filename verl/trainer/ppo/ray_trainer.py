@@ -94,7 +94,6 @@ class ResourcePoolManager:
             # that can utilize different WorkerGroup for differnt models
             resource_pool = RayResourcePool(process_on_nodes=process_on_nodes, use_gpu=True, max_colocate_count=1, name_prefix=resource_pool_name)
             self.resource_pool_dict[resource_pool_name] = resource_pool
-
         self._check_resource_available()
 
     def get_resource_pool(self, role: Role) -> RayResourcePool:
@@ -308,8 +307,8 @@ class RayPPOTrainer:
         self.hybrid_engine = config.actor_rollout_ref.hybrid_engine
         assert self.hybrid_engine, "Currently, only support hybrid engine"
 
-        if self.hybrid_engine:
-            assert Role.ActorRollout in role_worker_mapping, f"{role_worker_mapping.keys()=}"
+        # if self.hybrid_engine:
+        #     assert Role.ActorRollout in role_worker_mapping, f"{role_worker_mapping.keys()=}"
 
         self.role_worker_mapping = role_worker_mapping
         self.resource_pool_manager = resource_pool_manager
@@ -923,6 +922,8 @@ class RayPPOTrainer:
 
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
+                print("come heere")
+                print(batch_dict)
                 do_profile = self.global_steps in self.config.trainer.profile_steps if self.config.trainer.profile_steps is not None else False
                 if do_profile:
                     self.actor_rollout_wg.start_profile()

@@ -45,6 +45,7 @@ from verl.utils.debug import ProfilerConfig, WorkerProfiler, WorkerProfilerExten
 from tqdm.auto import tqdm
 import math
 from diffusers.image_processor import VaeImageProcessor
+from tensordict import TensorDict
 
 from omegaconf import DictConfig, open_dict
 
@@ -310,181 +311,227 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="red")
     def generate_samples(self, prompts: DataProto):
-        w, h, t = self.config.w, self.config.h, self.config.t
+        prompts = prompts.to(get_device_id())
+        num_frames = self.config.num_frames
+        size = (self.config.w, self.config.h)
         sample_steps = self.config.sampling_steps
         sigma_schedule = torch.linspace(1, 0, self.config.sampling_steps + 1)
-        def sd3_time_shift(shift, t):
-            return (shift * t) / (1 + (shift - 1) * t)
+        def sd3_time_shift(shift, num_frames):
+            return (shift * num_frames) / (1 + (shift - 1) * num_frames)
     
         sigma_schedule = sd3_time_shift(self.config.shift, sigma_schedule)
         
         def assert_eq(x, y, msg=None):
             assert x == y, f"{msg or 'Assertion failed'}: {x} != {y}"
 
-
+        context=prompts.batch['context']
+        caption=prompts.non_tensor_batch['caption']
+        B = len(caption)
+        
+        # B = caption.shape[0]
         assert_eq(
             len(sigma_schedule),
             sample_steps + 1,
             "sigma_schedule must have length sample_steps + 1",
         )
 
-        B = encoder_hidden_states.shape[0]
-        SPATIAL_DOWNSAMPLE = 8
-        IN_CHANNELS = 16
-        latent_w, latent_h = w // SPATIAL_DOWNSAMPLE, h // SPATIAL_DOWNSAMPLE
-
-        batch_size = 1  
-        batch_indices = torch.chunk(torch.arange(B), B // batch_size)
-
         all_latents = []
         all_log_probs = []
-        all_rewards = []  
-        all_image_ids = []
+        all_rewards = []
+
+        # VAE参数
+        vae_stride = [4, 8, 8]
+        patch_size = [1, 2, 2]
+        # 根据是否使用FP16选择数据类型
+
+        batch_size=1
+        batch_indices = torch.chunk(torch.arange(B), B // batch_size)
+        latent_dtype = torch.float16 #TODO
         if self.config.init_same_noise:
-            input_latents = torch.randn(
-                    (1, IN_CHANNELS, latent_h, latent_w),  #（c,t,h,w)
-                    device=torch.cuda.current_device(),
-                    dtype=torch.bfloat16,
-                )
+            latent_shape = (
+                16,
+                (num_frames - 1) // vae_stride[0] + 1,
+                size[1] // vae_stride[1],
+                size[0] // vae_stride[2]
+            )
+            input_latents = torch.randn(latent_shape, device=get_device_id(), dtype=latent_dtype)
 
         for index, batch_idx in enumerate(batch_indices):
-            batch_encoder_hidden_states = encoder_hidden_states[batch_idx]
-            batch_pooled_prompt_embeds = pooled_prompt_embeds[batch_idx]
-            batch_text_ids = text_ids[batch_idx]
-            batch_caption = [caption[i] for i in batch_idx]
-            if not self.config.init_same_noise:
-                input_latents = torch.randn(
-                        (len(batch_idx), IN_CHANNELS, latent_h, latent_w),  #（c,t,h,w)
-                        device=torch.cuda.current_device(),
-                        dtype=torch.bfloat16,
-                    )
-            def pack_latents(latents, batch_size, num_channels_latents, height, width):
-                latents = latents.view(batch_size, num_channels_latents, height // 2, 2, width // 2, 2)
-                latents = latents.permute(0, 2, 4, 1, 3, 5)
-                latents = latents.reshape(batch_size, (height // 2) * (width // 2), num_channels_latents * 4)
-
-                return latents
-            input_latents_new = pack_latents(input_latents, len(batch_idx), IN_CHANNELS, latent_h, latent_w)
-            def prepare_latent_image_ids(batch_size, height, width, device, dtype):
-                latent_image_ids = torch.zeros(height, width, 3)
-                latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None]
-                latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :]
-
-                latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
-
-                latent_image_ids = latent_image_ids.reshape(
-                    latent_image_id_height * latent_image_id_width, latent_image_id_channels
-                )
-
-                return latent_image_ids.to(device=device, dtype=dtype)
+            batch_captions = [caption[i] for i in batch_idx]
+            batch_contexts = [context[i].to(get_device_id()) for i in batch_idx]
             
-            image_ids = prepare_latent_image_ids(len(batch_idx), latent_h // 2, latent_w // 2, torch.cuda.current_device(), torch.bfloat16)
-            grpo_sample=True
-            progress_bar = tqdm(range(0, sample_steps), desc="Sampling Progress")
-            #TODO rollout
-            with torch.no_grad():
-                z, latents, batch_latents, batch_log_probs = self.run_sample_step(
-                    input_latents_new,
+            if not self.config.init_same_noise:
+                latent_shape = (
+                    16,
+                    (num_frames - 1) // vae_stride[0] + 1,
+                    size[1] // vae_stride[1],
+                    size[0] // vae_stride[2]
+                )
+                input_latents = torch.randn(latent_shape, device=get_device_id(), dtype=latent_dtype)
+
+            seq_len = math.ceil(
+                (latent_shape[2] * latent_shape[3]) / (patch_size[1] * patch_size[2]) * latent_shape[1]
+            )
+
+            grpo_sample = True
+            progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
+            
+           
+            with torch.no_grad():      
+                _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
+                    [input_latents],
                     progress_bar,
                     sigma_schedule,
                     self.actor_module_fsdp,
-                    batch_encoder_hidden_states,
-                    batch_pooled_prompt_embeds,
-                    batch_text_ids,
-                    image_ids,
+                    batch_contexts,
+                    seq_len,
                     grpo_sample,
                 )
-            
-            all_image_ids.append(image_ids)
+
+            batch_latents = batch_latents.unsqueeze(0)
+            batch_log_probs = batch_log_probs.unsqueeze(0)
+
             all_latents.append(batch_latents)
             all_log_probs.append(batch_log_probs)
-            self.vae.enable_tiling()
-            
-            image_processor = VaeImageProcessor(16)
-            rank = int(os.environ["RANK"])
-    
-    def run_sample_step(
+
+        if len(all_latents) > 1:
+            all_latents = torch.cat(all_latents, dim=0)
+            all_log_probs = torch.cat(all_log_probs, dim=0)
+        else:
+            all_latents = all_latents[0]
+            all_log_probs = all_log_probs[0]      
+
+        batch = TensorDict(
+            {
+                "latents": all_latents,
+                "rollout_log_probs": all_log_probs,  # we will recompute old log prob with actor
+            },
+            batch_size=B
+        )
+
+        non_tensor_batch = prompts.non_tensor_batch
+        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+
+
+    def run_wan_sample_step(
         self,
-        z,
-        progress_bar,
-        sigma_schedule,
+        latents,  # [(16, 7, 64, 64)]
+        progress_bar, 
+        sigma_schedule,  # 添加sigma_schedule
         transformer,
-        encoder_hidden_states, 
-        pooled_prompt_embeds, 
-        text_ids,
-        image_ids
+        context,
+        seq_len,
+        grpo_sample,
     ):
-        all_latents = [z]
-        all_log_probs = []
-        for i in progress_bar:  # Add progress bar
-            B = encoder_hidden_states.shape[0]
-            sigma = sigma_schedule[i]
-            timestep_value = int(sigma * 1000)
-            timesteps = torch.full([encoder_hidden_states.shape[0]], timestep_value, device=z.device, dtype=torch.long)
-            transformer.eval()
-            with torch.autocast("cuda", torch.bfloat16):
-                pred= transformer(
-                    hidden_states=z,
-                    encoder_hidden_states=encoder_hidden_states,
-                    timestep=timesteps/1000,
-                    guidance=torch.tensor(
-                        [3.5],
-                        device=z.device,
-                        dtype=torch.bfloat16
-                    ),
-                    txt_ids=text_ids.repeat(encoder_hidden_states.shape[1],1), # B, L
-                    pooled_projections=pooled_prompt_embeds,
-                    img_ids=image_ids,
-                    joint_attention_kwargs=None,
-                    return_dict=False,
-                )[0]
-            z, pred_original, log_prob = self.flux_step(pred, z.to(torch.float32), self.config.eta, sigmas=sigma_schedule, index=i, prev_sample=None, grpo=True, sde_solver=True)
-            z.to(torch.bfloat16)
-            all_latents.append(z)
-            all_log_probs.append(log_prob)
-        latents = pred_original
-        all_latents = torch.stack(all_latents, dim=1)  # (batch_size, num_steps + 1, 4, 64, 64)
-        all_log_probs = torch.stack(all_log_probs, dim=1)  # (batch_size, num_steps, 1)
-        return z, latents, all_latents, all_log_probs
-
-    def flux_step(
-        model_output: torch.Tensor,
-        latents: torch.Tensor,
-        eta: float,
-        sigmas: torch.Tensor,
-        index: int,
-        prev_sample: torch.Tensor,
-        grpo: bool,
-        sde_solver: bool,
-    ):
-        sigma = sigmas[index]
-        dsigma = sigmas[index + 1] - sigma
-        prev_sample_mean = latents + dsigma * model_output
-
-        pred_original_sample = latents - sigma * model_output
-
-        delta_t = sigma - sigmas[index + 1]
-        std_dev_t = eta * math.sqrt(delta_t)
-
-        if sde_solver:
-            score_estimate = -(latents-pred_original_sample*(1 - sigma))/sigma**2
-            log_term = -0.5 * eta**2 * score_estimate
-            prev_sample_mean = prev_sample_mean + log_term * dsigma
-
-        if grpo and prev_sample is None:
-            prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t 
+        """WAN采样步骤，支持(C,T,H,W)格式输入"""
+        if grpo_sample:
+            all_latents = [latents[0]]  # 存储初始latent (16, 7, 64, 64)
+            all_log_probs = []
             
+            for i in progress_bar:
+                B = len(context) if isinstance(context, list) else context.shape[0]
+                
+                # 确保设备一致
+                device = latents[0].device
+                
+                # 使用sigma值计算timestep
+                sigma = sigma_schedule[i]
+                timestep_value = int(sigma * 1000)
+                timestep = torch.full([B], timestep_value, device=device, dtype=torch.long)
+                
+                transformer.eval()
+                with torch.autocast("cuda", torch.float32):
+                    # WAN模型输入：x是(C,T,H,W)格式的列表
+
+                    #TODO!!!!
+                    #管理!!!
+                    transformer.to(device)
+
+                    pred = transformer(
+                        x=latents,  # [tensor(16, 7, 64, 64)]
+                        t=timestep,
+                        context=context,
+                        seq_len=seq_len
+                    )
+                    
+                    # 处理模型输出
+                    if isinstance(pred, dict) and 'rgb' in pred:
+                        model_output = pred['rgb'][0]
+                    elif isinstance(pred, list):
+                        model_output = pred[0]
+                    else:
+                        model_output = pred
+
+                # WAN的SDE采样步骤
+                next_latents, pred_original, log_prob = self.wan_step(
+                    model_output, 
+                    latents[0].to(torch.float32),  # (16, 7, 64, 64)
+                    self.config.eta, 
+                    sigma_schedule,  # 传入sigma_schedule
+                    i, 
+                    prev_sample=None, 
+                    grpo=True, 
+                    sde_solver=True  # 启用SDE求解器
+                )
+                
+                latents = [next_latents.to(torch.float32)]  # [(16, 7, 64, 64)]
+                all_latents.append(latents[0])  # 存储 (16, 7, 64, 64)
+                all_log_probs.append(log_prob)  # 存储 log概率
+            
+            final_latents = pred_original
+                    # all the tp ranks should contain the same data here. data in all ranks are valid
+
+            # 修正：WAN的all_latents维度是 (num_steps+1, 16, 7, 64, 64)
+            all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
+            all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
+            
+            # print(f"WAN after stack: all_latents={all_latents.shape}, all_log_probs={all_log_probs.shape}")
+            # (9, 16, 7, 64, 64), (8,)
+            
+            return latents, final_latents, all_latents, all_log_probs
+
+    def wan_step(
+        self,
+        model_output: torch.Tensor,  # 模型预测的flow
+        latents: torch.Tensor,       # 当前时间步的潜在表示 (16, 7, 64, 64)
+        eta: float,                  # 控制随机性强度
+        sigmas: torch.Tensor,        # sigma调度序列 (类似FLUX)
+        index: int,                  # 当前时间步索引  
+        prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
+        grpo: bool,                  # True时会得到logprob
+        sde_solver: bool,            # 使用SDE求解器
+    ):
+        """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
+        
+        sigma = sigmas[index]
+        dsigma = sigmas[index + 1] - sigma  # sigma差分
+        
+        # 确定性更新部分
+        prev_sample_mean = latents + dsigma * model_output
+        
+        # 预测的原始样本
+        pred_original_sample = latents - sigma * model_output
+        
+        delta_t = sigma - sigmas[index + 1]  # 时间差分
+        std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
+        
+        if sde_solver:  # 使用SDE求解器（和FLUX相同）
+            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
+            log_term = -0.5 * eta**2 * score_estimate  # 对数项修正
+            prev_sample_mean = prev_sample_mean + log_term * dsigma  # 修正的均值
+        
+        if grpo and prev_sample is None:
+            prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
         if grpo:
-            # log prob of prev_sample given prev_sample_mean and std_dev_t
+            # 计算log概率
             log_prob = (
                 -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2) / (2 * (std_dev_t**2))
             )
-            - math.log(std_dev_t)- torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
+            - math.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
-            # mean along all but batch dimension
+            # 在除batch维度外的所有维度上求平均
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             return prev_sample, pred_original_sample, log_prob
         else:
-            return prev_sample_mean,pred_original_sample
-
+            return prev_sample_mean, pred_original_sample

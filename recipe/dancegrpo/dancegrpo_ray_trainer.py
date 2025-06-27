@@ -34,8 +34,10 @@ from verl.trainer.ppo.metric_utils import (
     reduce_metrics,
 )
 from verl.utils.debug import marked_timer
-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_advantage, compute_response_mask
-
+from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_advantage, compute_response_mask, Role
+from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
+from omegaconf import OmegaConf, open_dict
+from verl.single_controller.ray.base import create_colocated_worker_cls
 
 class RayDanceGRPOTrainer(RayPPOTrainer):
     """
@@ -67,13 +69,13 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
-        if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
-            val_metrics = self._validate()
-            assert val_metrics, f"{val_metrics=}"
-            pprint(f"Initial validation metrics: {val_metrics}")
-            logger.log(data=val_metrics, step=self.global_steps)
-            if self.config.trainer.get("val_only", False):
-                return
+        # if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
+        #     val_metrics = self._validate()
+        #     assert val_metrics, f"{val_metrics=}"
+        #     pprint(f"Initial validation metrics: {val_metrics}")
+        #     logger.log(data=val_metrics, step=self.global_steps)
+        #     if self.config.trainer.get("val_only", False):
+        #         return
 
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
@@ -93,7 +95,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
                 num_gen_batches += 1
                 # pop those keys for generation TODO!!!
-                if "multi_modal_data" in new_batch.non_tensor_batch.keys():
+                if self.config.trainer.type=="diffusion":
+                    # print("new_batch keys:", new_batch.batch_keys.keys())
+                    # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
+                    gen_batch = new_batch.pop(
+                        batch_keys=["context"],
+                        non_tensor_batch_keys=["caption"],
+                    )
+                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.sampling_steps)
+                elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
                     gen_batch = new_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
@@ -109,7 +119,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw):
-                        gen_batch_output = self.actor_rollout_wg.generate_sample(gen_batch)
+                        gen_batch_output = self.actor_rollout_wg.generate_samples(gen_batch)
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
@@ -253,3 +263,93 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                 progress_bar.update(1)
                 self.global_steps += 1
+
+    def init_workers(self):
+        """Initialize distributed training workers using Ray backend.
+
+        Creates:
+        1. Ray resource pools from configuration
+        2. Worker groups for each role (actor, critic, etc.)
+        """
+        self.resource_pool_manager.create_resource_pool()
+
+        self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
+
+        # create actor and rollout
+        if self.hybrid_engine:
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.Actor)
+            actor_rollout_cls = RayClassWithInitArgs(
+                cls=self.role_worker_mapping[Role.Actor],
+                config=self.config.actor_rollout_ref,
+                role="actor",
+            )
+            self.resource_pool_to_cls[resource_pool]["actor"] = actor_rollout_cls
+        else:
+            raise NotImplementedError
+
+        # create critic
+        if self.use_critic:
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.Critic)
+            critic_cls = RayClassWithInitArgs(cls=self.role_worker_mapping[Role.Critic], config=self.config.critic)
+            self.resource_pool_to_cls[resource_pool]["critic"] = critic_cls
+
+        # create reference policy if needed
+        if self.use_reference_policy:
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.RefPolicy)
+            ref_policy_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RefPolicy], config=self.config.actor_rollout_ref, role="ref")
+            self.resource_pool_to_cls[resource_pool]["ref"] = ref_policy_cls
+
+        # create a reward model if reward_fn is None
+        if self.use_rm:
+            # we create a RM here
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
+            rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
+            self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
+
+        # initialize WorkerGroup
+        # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
+        # you should not use `create_colocated_worker_cls`.
+        # Instead, directly pass different resource pool to different worker groups.
+        # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
+        all_wg = {}
+        wg_kwargs = {}  # Setting up kwargs for RayWorkerGroup
+        if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
+            wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
+        if OmegaConf.select(self.config.trainer, "profile_steps") is not None:
+            wg_kwargs["profile_steps"] = OmegaConf.select(self.config.trainer, "profile_steps")
+            assert OmegaConf.select(self.config.trainer, "worker_nsight_options") is not None, "worker_nsight_options must be set when profile_steps is set"
+            wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(OmegaConf.select(self.config.trainer, "worker_nsight_options"))
+
+        for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
+            wg_dict = self.ray_worker_group_cls(resource_pool=resource_pool, ray_cls_with_init=worker_dict_cls, device_name=self.device_name, **wg_kwargs)
+            spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
+            all_wg.update(spawn_wg)
+
+        if self.use_critic:
+            self.critic_wg = all_wg["critic"]
+            self.critic_wg.init_model()
+
+        if self.use_reference_policy and not self.ref_in_actor:
+            self.ref_policy_wg = all_wg["ref"]
+            self.ref_policy_wg.init_model()
+
+        if self.use_rm:
+            self.rm_wg = all_wg["rm"]
+            self.rm_wg.init_model()
+
+        # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
+        self.actor_rollout_wg = all_wg["actor"]
+        self.actor_rollout_wg.init_model()
+
+        # create async rollout manager and request scheduler
+        self.async_rollout_mode = False
+        if self.config.actor_rollout_ref.rollout.mode == "async":
+            from verl.workers.rollout.async_server import AsyncLLMServerManager
+
+            self.async_rollout_mode = True
+            self.async_rollout_manager = AsyncLLMServerManager(
+                config=self.config,
+                worker_group=self.actor_rollout_wg,
+            )
+

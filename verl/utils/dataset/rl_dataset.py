@@ -115,8 +115,15 @@ class RLHFDataset(Dataset):
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)
         self.filter_prompts = config.get("filter_prompts", True)
         self.serialize_dataset = False
-        self._download()
-        self._read_files_and_tokenize()
+
+        if self.config.type=="diffusion":
+            self.json_path = data_files[0]
+            # self.cfg_rate = cfg_rate
+            self.datase_dir_path = os.path.dirname(data_files[0])
+            self._read_latent()
+        else:
+            self._download()
+            self._read_files_and_tokenize()
 
     def _download(self, use_origin_parquet=False):
         from verl.utils.fs import copy_to_local
@@ -124,6 +131,20 @@ class RLHFDataset(Dataset):
         data_files = self.data_files if not use_origin_parquet else self.original_data_files
         for i, parquet_file in enumerate(data_files):
             self.data_files[i] = copy_to_local(src=parquet_file, cache_dir=self.cache_dir, use_shm=self.use_shm)
+
+    def _read_latent(self):
+        # 加载处理后的数据
+        import json
+        from datasets import Dataset
+        print("begin to prepare new dataset")
+        
+        with open(self.json_path, 'r', encoding='utf-8') as f:
+            self.data = json.load(f)  # 通常是 List[Dict]
+        
+        # 正确传入 Dataset.from_list
+        self.dataframe = Dataset.from_list(self.data)
+
+        print(f"dataset len: {len(self.dataframe)}")
 
     def _read_files_and_tokenize(self):
         dataframes = []
@@ -205,106 +226,114 @@ class RLHFDataset(Dataset):
         Note that we also return the raw_input_ids so that it can be combined with other chat template
         """
         row_dict: dict = self.dataframe[item]
-        messages = self._build_messages(row_dict)
+        # messages = self._build_messages(row_dict)
         model_inputs = {}
 
-        if self.processor is not None:
-            from verl.utils.dataset.vision_utils import process_image, process_video
-
-            raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            multi_modal_data = {}
-
-            images = None
-            if self.image_key in row_dict:
-                images = [process_image(image) for image in row_dict.pop(self.image_key)]
-                multi_modal_data["image"] = images
-
-            videos = None
-            if self.video_key in row_dict:
-                videos = [process_video(video) for video in row_dict.pop(self.video_key)]
-                multi_modal_data["video"] = [video.numpy() for video in videos]
-
-            model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
-
-            input_ids = model_inputs.pop("input_ids")
-            attention_mask = model_inputs.pop("attention_mask")
-
-            if "second_per_grid_ts" in model_inputs:
-                model_inputs.pop("second_per_grid_ts")
-
-            # There's a trap here, multi_modal_inputs has to be a dict, not BatchFeature
-            row_dict["multi_modal_data"] = multi_modal_data
-            row_dict["multi_modal_inputs"] = dict(model_inputs)
-
-            # second_per_grid_ts isn't used for training, just for mrope
-            row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
-
+        if self.config.type=="diffusion":
+            # 加载numpy文件并转换为tensor
+            context_numpy = np.load(row_dict['context_path'])
+            context = torch.from_numpy(context_numpy)  # shape: (L, C)
+            
+            row_dict['context']=context
         else:
-            raw_prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            model_inputs = self.tokenizer(raw_prompt, return_tensors="pt", add_special_tokens=False)
-            input_ids = model_inputs.pop("input_ids")
-            attention_mask = model_inputs.pop("attention_mask")
+            if self.processor is not None:
+                from verl.utils.dataset.vision_utils import process_image, process_video
 
-        input_ids, attention_mask = verl_F.postprocess_data(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=self.max_prompt_length,
-            pad_token_id=self.tokenizer.pad_token_id,
-            left_pad=True,
-            truncation=self.truncation,
-        )
+                raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+                multi_modal_data = {}
 
-        if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-            from verl.models.transformers.qwen2_vl import get_rope_index
+                images = None
+                if self.image_key in row_dict:
+                    images = [process_image(image) for image in row_dict.pop(self.image_key)]
+                    multi_modal_data["image"] = images
 
-            position_ids = [
-                get_rope_index(
-                    self.processor,
-                    input_ids=input_ids[0],
-                    image_grid_thw=model_inputs.get("image_grid_thw"),
-                    video_grid_thw=model_inputs.get("video_grid_thw"),
-                    second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
-                    attention_mask=attention_mask[0],
-                )
-            ]  # (1, 3, seq_len)
+                videos = None
+                if self.video_key in row_dict:
+                    videos = [process_video(video) for video in row_dict.pop(self.video_key)]
+                    multi_modal_data["video"] = [video.numpy() for video in videos]
 
-        else:
-            position_ids = compute_position_id_with_mask(attention_mask)
+                model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
 
-        row_dict["input_ids"] = input_ids[0]
-        row_dict["attention_mask"] = attention_mask[0]
-        row_dict["position_ids"] = position_ids[0]
+                input_ids = model_inputs.pop("input_ids")
+                attention_mask = model_inputs.pop("attention_mask")
 
-        raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
-        if len(raw_prompt_ids) > self.max_prompt_length:
-            if self.truncation == "left":
-                raw_prompt_ids = raw_prompt_ids[-self.max_prompt_length :]
-            elif self.truncation == "right":
-                raw_prompt_ids = raw_prompt_ids[: self.max_prompt_length]
-            elif self.truncation == "middle":
-                left_half = self.max_prompt_length // 2
-                right_half = self.max_prompt_length - left_half
-                raw_prompt_ids = raw_prompt_ids[:left_half] + raw_prompt_ids[-right_half:]
-            elif self.truncation == "error":
-                raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.max_prompt_length}.")
+                if "second_per_grid_ts" in model_inputs:
+                    model_inputs.pop("second_per_grid_ts")
 
-        row_dict["raw_prompt_ids"] = raw_prompt_ids
-        # encode prompts without chat template
-        if self.return_raw_chat:
-            row_dict["raw_prompt"] = messages
+                # There's a trap here, multi_modal_inputs has to be a dict, not BatchFeature
+                row_dict["multi_modal_data"] = multi_modal_data
+                row_dict["multi_modal_inputs"] = dict(model_inputs)
 
-        # get prompts with chat template
-        if self.return_full_prompt:
-            row_dict["full_prompts"] = raw_prompt  # array of strings
+                # second_per_grid_ts isn't used for training, just for mrope
+                row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
 
-        # add index for each prompt
-        index = row_dict.get("extra_info", {}).get("index", 0)
-        tools_kwargs = row_dict.get("extra_info", {}).get("tools_kwargs", {})
-        need_tools_kwargs = row_dict.get("extra_info", {}).get("need_tools_kwargs", self.need_tools_kwargs)
-        if need_tools_kwargs and not tools_kwargs:
-            logger.warning("tools_kwargs is empty for index {}, data source: {}", index, row_dict["data_source"])
-        row_dict["index"] = index
-        row_dict["tools_kwargs"] = tools_kwargs
+            else:
+                raw_prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+                model_inputs = self.tokenizer(raw_prompt, return_tensors="pt", add_special_tokens=False)
+                input_ids = model_inputs.pop("input_ids")
+                attention_mask = model_inputs.pop("attention_mask")
+
+            input_ids, attention_mask = verl_F.postprocess_data(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=self.max_prompt_length,
+                pad_token_id=self.tokenizer.pad_token_id,
+                left_pad=True,
+                truncation=self.truncation,
+            )
+
+            if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
+                from verl.models.transformers.qwen2_vl import get_rope_index
+
+                position_ids = [
+                    get_rope_index(
+                        self.processor,
+                        input_ids=input_ids[0],
+                        image_grid_thw=model_inputs.get("image_grid_thw"),
+                        video_grid_thw=model_inputs.get("video_grid_thw"),
+                        second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
+                        attention_mask=attention_mask[0],
+                    )
+                ]  # (1, 3, seq_len)
+
+            else:
+                position_ids = compute_position_id_with_mask(attention_mask)
+
+            row_dict["input_ids"] = input_ids[0]
+            row_dict["attention_mask"] = attention_mask[0]
+            row_dict["position_ids"] = position_ids[0]
+
+            raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
+            if len(raw_prompt_ids) > self.max_prompt_length:
+                if self.truncation == "left":
+                    raw_prompt_ids = raw_prompt_ids[-self.max_prompt_length :]
+                elif self.truncation == "right":
+                    raw_prompt_ids = raw_prompt_ids[: self.max_prompt_length]
+                elif self.truncation == "middle":
+                    left_half = self.max_prompt_length // 2
+                    right_half = self.max_prompt_length - left_half
+                    raw_prompt_ids = raw_prompt_ids[:left_half] + raw_prompt_ids[-right_half:]
+                elif self.truncation == "error":
+                    raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.max_prompt_length}.")
+
+            row_dict["raw_prompt_ids"] = raw_prompt_ids
+            # encode prompts without chat template
+            if self.return_raw_chat:
+                row_dict["raw_prompt"] = messages
+
+            # get prompts with chat template
+            if self.return_full_prompt:
+                row_dict["full_prompts"] = raw_prompt  # array of strings
+
+            # add index for each prompt
+            index = row_dict.get("extra_info", {}).get("index", 0)
+            tools_kwargs = row_dict.get("extra_info", {}).get("tools_kwargs", {})
+            need_tools_kwargs = row_dict.get("extra_info", {}).get("need_tools_kwargs", self.need_tools_kwargs)
+            if need_tools_kwargs and not tools_kwargs:
+                logger.warning("tools_kwargs is empty for index {}, data source: {}", index, row_dict["data_source"])
+            row_dict["index"] = index
+            row_dict["tools_kwargs"] = tools_kwargs
+
         return row_dict
 
     def __getstate__(self):

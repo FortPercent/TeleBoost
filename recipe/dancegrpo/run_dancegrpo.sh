@@ -25,10 +25,10 @@ loss_agg_mode="token-mean"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
-train_prompt_bsz=512
+train_prompt_bsz=1
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=16
-train_prompt_mini_bsz=32
+train_prompt_mini_bsz=1
 
 # Ray
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
@@ -38,8 +38,9 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/chatrl/users/hxh/data/rule_based_rl/DAPO-Math-17k/data/dapo-math-17k.parquet"}
-TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/chatrl/users/hxh/data/rule_based_rl/DAPO-AIME-2024/data/aime-2024.parquet"}
+TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/GRPO/Dancegrpo/data/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/GRPO/Dancegrpo/data/rl_embeddings/processed_wan_prompt.json"}
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
 temperature=1.0
@@ -67,7 +68,7 @@ python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/nvfile-heatstorage/chatrl/public/models/Qwen2.5-7B-Instruct-1M' \
+    actor_rollout_ref.model.path='/nvfile-heatstorage/model_zoo/Wan2___1-T2V-1___3B' \
     actor_rollout_ref.cfg=0.0 \
     actor_rollout_ref.h=720 \
     actor_rollout_ref.w=720 \
@@ -125,7 +126,7 @@ python3 -m recipe.dancegrpo.main_dancegrpo \
     trainer.logger=['tensorboard'] \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=5 \
