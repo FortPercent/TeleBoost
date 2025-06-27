@@ -73,7 +73,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     # # --debug
     # --use-cpu-initialization
-    --model ParallelWanModel # TODO support more models
+    --model ParallelVastModel # TODO support more models
     --task-type vast
     --micro-batch-size ${MBS}
     # --global-batch-size ${GBS}
