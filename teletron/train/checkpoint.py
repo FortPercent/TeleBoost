@@ -222,13 +222,13 @@ class CheckPointMixin:
                 task_type= TaskType[args.lora_task_type]    # or SEQ_CLS, TOKEN_CLS etc.
             )
             if len(model) == 1:
-                model[0].load_state_dict(torch.load(base_model_path))
+                model[0].load_state_dict(torch.load(base_model_path, weights_only=False))
                 model[0]=get_peft_model(model[0], lora_config)
                 model[0].load_state_dict(state_dict['model'], strict=strict)
             else:
                 for i in range(len(model)):
                     mpu.set_virtual_pipeline_model_parallel_rank(i)
-                    model[i].load_state_dict(torch.load(base_model_path), strict=strict)
+                    model[i].load_state_dict(torch.load(base_model_path, weights_only=False), strict=strict)
                     model[i]=get_peft_model(model[i], lora_config)
                     model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
         else:
@@ -241,7 +241,6 @@ class CheckPointMixin:
             # }
 
             if len(model) == 1:
-                # breakpoint()
                 model[0].load_state_dict(state_dict['model'], strict=strict)
             else:
                 for i in range(len(model)):
@@ -322,8 +321,10 @@ class CheckPointMixin:
                             'attempting to load the rng state, '
                             'exiting ...'.format(checkpoint_name))
                 sys.exit()
+                
+        # TODO: need a more robust way to implement this function
         # for bucket sampler dataloader
-        args.last_micro_batch_access_index = state_dict["last_microbatch_size_index"]
+        # args.last_micro_batch_access_index = state_dict["last_microbatch_size_index"]
 
         # Some utilities want to load a checkpoint without distributed being initialized
         if torch.distributed.is_initialized():
@@ -346,8 +347,9 @@ class CheckPointMixin:
         state_dict['checkpoint_version'] = 3.0
         if iteration is not None:
             state_dict['iteration'] = iteration
+        # TODO:need a more robust way
         # save bucketSample last_microbatch_size_index
-        state_dict["last_microbatch_size_index"]=args.last_microbatch_size_index
+        # state_dict["last_microbatch_size_index"]=args.last_microbatch_size_index
 
         if len(model) == 1:
             state_dict['model'] = (model[0].sharded_state_dict()
