@@ -190,19 +190,21 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
     ):
         from torch import optim
         from torch.distributed.fsdp import CPUOffload, MixedPrecision
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq,GPT2Config
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
         from verl.utils.torch_dtypes import PrecisionType
 
         assert role in ["actor", "ref"]
 
+        print("begin to build_model_optimizer")
         log_gpu_memory_usage(f"Before init {role} from HF AutoModel", logger=logger)
         local_path = model_path
 
         # note that we have to create model in fp32. Otherwise, the optimizer is in bf16, which is incorrect
         # TODO(zhangchi.usc1992): 1. support create from random initialized model. 2. Support init with FSDP directly
-        self.tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
+        tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
+        self.tokenizer = hf_tokenizer(tokenizer_path, trust_remote_code=trust_remote_code)
         self.processor = hf_processor(local_path, trust_remote_code=trust_remote_code)
 
         torch_dtype = fsdp_config.get("model_dtype", None)
@@ -212,39 +214,41 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             torch_dtype = PrecisionType.to_dtype(torch_dtype)
 
         # override model kwargs
-        actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
-
+        actor_model_config=GPT2Config.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
         # patch for kimi-vl
-        if getattr(actor_model_config, "model_type", None) == "kimi_vl":
-            actor_model_config.text_config.topk_method = "greedy"
+        # if getattr(actor_model_config, "model_type", None) == "kimi_vl":
+        #     actor_model_config.text_config.topk_method = "greedy"
 
-        self.generation_config = get_generation_config(local_path, trust_remote_code=trust_remote_code)
+        # self.generation_config = None
 
-        override_config_kwargs = {
-            "bos_token_id": self.tokenizer.bos_token_id,
-            "eos_token_id": self.tokenizer.eos_token_id,
-            "pad_token_id": self.tokenizer.pad_token_id,
-        }
-        override_config_kwargs.update(override_model_config)
-        update_model_config(actor_model_config, override_config_kwargs=override_config_kwargs)
-        if self.rank == 0:
-            print(f"Model config after override: {actor_model_config}")
+        # override_config_kwargs = {
+        #     "bos_token_id": self.tokenizer.bos_token_id,
+        #     "eos_token_id": self.tokenizer.eos_token_id,
+        #     "pad_token_id": self.tokenizer.pad_token_id,
+        # }
+        # override_config_kwargs.update(override_model_config)
+        # update_model_config(actor_model_config, override_config_kwargs=override_config_kwargs)
+        # if self.rank == 0:
+        #     print(f"Model config after override: {actor_model_config}")
 
         # NOTE(fix me): tie_word_embedding causes meta_tensor init to hang
-        init_context = get_init_weight_context_manager(use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh)
+        init_context = get_init_weight_context_manager(mesh=self.device_mesh)
 
         with init_context(), warnings.catch_warnings():
             warnings.simplefilter("ignore")
             if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
                 actor_module_class = AutoModelForVision2Seq
             else:
-                actor_module_class = AutoModelForCausalLM
+                #TODO
+                # from diffusers import AutoModel
+                # actor_module_class = AutoModel
+                from wan.modules.model import WanModel
+                actor_module_class = WanModel
 
             actor_module = actor_module_class.from_pretrained(
-                pretrained_model_name_or_path=local_path,
+                local_path,
                 torch_dtype=torch_dtype,
-                config=actor_model_config,
-                trust_remote_code=trust_remote_code,
+                trust_remote_code=trust_remote_code
             )
 
             # Apply Liger kernel to the model if use_liger is set to True
@@ -266,9 +270,9 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
 
             # some parameters may not in torch_dtype. TODO(zhangchi.usc1992) remove this after we switch to fsdp2
             actor_module.to(torch_dtype)
-
-            if enable_gradient_checkpointing:
-                actor_module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            # print(actor_module)
+            # if enable_gradient_checkpointing:
+            #     actor_module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             if self._is_lora:
                 print("Applying LoRA to actor module")
                 actor_module.enable_input_require_grads()
@@ -348,6 +352,46 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             actor_module_fsdp = actor_module
         else:
             raise NotImplementedError(f"not implement {fsdp_strategy}")
+        
+        if enable_gradient_checkpointing:
+            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+                CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper)
+            from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+            from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+            from functools import partial
+            
+            non_reentrant_wrapper = partial(
+                checkpoint_wrapper,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            )
+            def apply_fsdp_checkpointing(model, no_split_modules, p=1):
+                # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
+                """apply activation checkpointing to model
+                returns None as model is updated directly
+                """
+                print("--> applying fdsp activation checkpointing...")
+                block_idx = 0
+                cut_off = 1 / 2
+                # when passing p as a fraction number (e.g. 1/3), it will be interpreted
+                # as a string in argv, thus we need eval("1/3") here for fractions.
+                p = eval(p) if isinstance(p, str) else p
+
+                def selective_checkpointing(submodule):
+                    nonlocal block_idx
+                    nonlocal cut_off
+
+                    if isinstance(submodule, no_split_modules):
+                        block_idx += 1
+                        if block_idx * p >= cut_off:
+                            cut_off += 1
+                            return True
+                    return False
+
+                apply_activation_checkpointing(
+                    actor_module_fsdp,
+                    checkpoint_wrapper_fn=non_reentrant_wrapper,
+                    check_fn=selective_checkpointing,
+                )
 
         if enable_activation_offload:
             enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
