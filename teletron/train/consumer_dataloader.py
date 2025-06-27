@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
-from teletron.models.wan.wan_encoder import WanVideoEncoder
+from teletron.models.vast.vast_encoder import VastEncoder
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
     features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))])
@@ -88,7 +88,7 @@ class BaseBatchLoader(ABC):
                     self._broadcast_object(value)
             return batch
 
-class WanDistBatchLoader(BaseBatchLoader):
+class VastDistBatchLoader(BaseBatchLoader):
 
     def _prepare_batch_on_rank_zero(self):
         if self.data_iterator is None:
@@ -128,7 +128,7 @@ class WanDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, VastEncoder.get_output_schema())
             else:
                 # 计算大小
                 transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
@@ -153,7 +153,7 @@ class WanDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, VastEncoder.get_output_schema())
                 noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
 
             # 解包并重塑 Tensors
@@ -253,12 +253,12 @@ def create_batch_loader(args, data_iterator):
     model_name_lower = args.model.lower()
     is_distributed_vae = args.distributed_vae
 
-    if 'wan' in model_name_lower:
+    if 'vast' in model_name_lower:
         if is_distributed_vae:
-            print("Info: Creating WanDistBatchLoader.")
-            return WanDistBatchLoader(data_iterator)
+            print("Info: Creating VastDistBatchLoader.")
+            return VastDistBatchLoader(data_iterator)
         else:
-            raise NotImplementedError("A non-distributed VAE loader for WanModel is not implemented.")
+            raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")
     
     elif 'hunyuan' in model_name_lower:
         if is_distributed_vae:
