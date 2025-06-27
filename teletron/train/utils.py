@@ -679,7 +679,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
         sizes_info = {}
         type_info = {}
         batch=dict(data)
-        dtype_wan = torch.bfloat16
+        dtype = torch.bfloat16
 
         from teletron.core.parallel_state import get_comm_pair
         comm_pair = get_comm_pair()
@@ -809,21 +809,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
     
     return batch
 
-
-# def get_batch_on_this_tp_cp_rank_vast(data_iterator, model_name="wan", max_length=None):
-#     args = get_args()
-#     if args.distributed_vae:
-#         if model_name =="wan":
-#             return get_batch_on_this_tp_cp_rank_wan_dist(data_iterator)
-#         elif model_name == "hunyuan":
-#             return get_batch_on_this_tp_cp_rank_vast_dist(data_iterator)
-#     else:
-#         if model_name =="wan":
-#             return get_batch_on_this_tp_cp_rank_wan(data_iterator)
-#         elif model_name == "hunyuan":
-#             return get_batch_on_this_tp_cp_rank_vast_origin(data_iterator)
-
-def get_batch_on_this_tp_cp_rank_wan_dist(data_iterator):
+def get_batch_on_this_tp_cp_rank_vast_dist(data_iterator):
     def _broadcast(item):
         if item is not None:
             torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
@@ -844,7 +830,7 @@ def get_batch_on_this_tp_cp_rank_wan_dist(data_iterator):
         sizes_info = {}
         type_info = {}
         batch=dict(data)
-        dtype_wan = torch.bfloat16
+        dtype = torch.bfloat16
 
         from teletron.core.parallel_state import get_comm_pair, get_world_group
         comm_pair = get_comm_pair()
@@ -933,111 +919,6 @@ def get_batch_on_this_tp_cp_rank_wan_dist(data_iterator):
 
     return batch
 
-def get_batch_on_this_tp_cp_rank_wan(data_iterator):
-    pass
-
-def get_batch_on_this_tp_cp_rank_vast_dist(data_iterator):
-    args = get_args()
-    transformer_dim = 4096
-    img_dim = 16
-    image_scale = 8
-    frame_scale = 4
-    clip_dim=768
-
-    def _broadcast(item):
-        if item is not None:
-           torch.distributed.broadcast(item, mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-    
-    if mpu.get_tensor_context_parallel_rank() == 0:
-        if data_iterator is not None:
-           data = next(data_iterator)
-        else:
-           data = None
-
-        from teletron.core.parallel_state import get_comm_pair
-        comm_pair = get_comm_pair()
-        
-        sizes_info = torch.empty((15), device=torch.cuda.current_device(), dtype=torch.int32)
-        req = dist.irecv(sizes_info, comm_pair.producer, tag=0)
-        req.wait()
-        # print(f"size info: {sizes_info}")
-
-        transformer_embedding_size = sizes_info[0]*sizes_info[1]*sizes_info[2]
-        clip_embedding_size = sizes_info[3]*sizes_info[4]
-        first_img_embedding_size = sizes_info[5]*sizes_info[6]*sizes_info[7]*sizes_info[8]*sizes_info[9]
-        video_embedding_size = sizes_info[10]*sizes_info[11]*sizes_info[12]*sizes_info[13]*sizes_info[14]
-
-        recv_tensor = torch.empty((transformer_embedding_size +clip_embedding_size +first_img_embedding_size + video_embedding_size ), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-
-        intervals = [0, 
-                        transformer_embedding_size,
-                        transformer_embedding_size + clip_embedding_size,
-                        transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
-                        transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-                        ]
-        
-        req = dist.irecv(recv_tensor, comm_pair.producer, tag = 0)
-        req.wait()
-
-        tf_embed, clip_embed, img_embed,latents = unpack_tensors(recv_tensor, intervals)
-        
-        batch = {
-            'prompt_embeds': tf_embed.view(sizes_info[0],sizes_info[1],sizes_info[2]),
-            'clip_text_embed': clip_embed.view(sizes_info[3], sizes_info[4]),
-            'first_ref_image': img_embed.view(sizes_info[5],sizes_info[6],sizes_info[7],sizes_info[8],sizes_info[9]),
-            'latents': latents.view(sizes_info[10],sizes_info[11],sizes_info[12],sizes_info[13],sizes_info[14])
-        }
-        
-        print(f"consumer {dist.get_rank()} , latents: {batch['latents'].shape}, value: {batch['latents'][0,0,0,0,:5]}", flush=True)
-
-
-        # Step 2: 广播大小信息
-        sizes_info = {key: tensor.size() if tensor is not None else None for key, tensor in batch.items()}
-        sizes_info = torch.distributed.broadcast_object_list([sizes_info],mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-
-        batch['first_ref_image'] = batch['first_ref_image'].contiguous()
-        batch['prompt_embeds'] = batch['prompt_embeds'].contiguous()
-        batch['clip_text_embed'] = batch['clip_text_embed'].contiguous()
-        batch['latents'] = batch['latents'].contiguous()
-        
-        _broadcast(batch['first_ref_image'])
-        _broadcast(batch['prompt_embeds'])
-        _broadcast(batch['clip_text_embed'])
-        _broadcast(batch['latents'])
-
-    else:
-        sizes_info = None 
-        sizes_info_list = [sizes_info]
-        torch.distributed.broadcast_object_list(sizes_info_list,mpu.get_tensor_context_parallel_src_rank(), group=mpu.get_tensor_context_parallel_group())
-
-        # images=torch.empty(sizes_info_list[0]['images'], dtype=torch.float32, device = torch.cuda.current_device())
-        first_ref_image=torch.empty(sizes_info_list[0]['first_ref_image'], dtype=torch.bfloat16, device = torch.cuda.current_device())
-        prompt_embeds=torch.empty(sizes_info_list[0]['prompt_embeds'], dtype=torch.bfloat16, device = torch.cuda.current_device())
-        clip_text_embed=torch.empty(sizes_info_list[0]['clip_text_embed'], dtype=torch.bfloat16, device = torch.cuda.current_device())
-        if "latents" in sizes_info_list[0] and sizes_info_list[0]['latents'] is not None: 
-            latents=torch.empty(sizes_info_list[0]['latents'], dtype=torch.bfloat16, device = torch.cuda.current_device())
-        else:
-            latents = None
-
-        # _broadcast(images)
-        _broadcast(first_ref_image)
-        _broadcast(prompt_embeds)
-        _broadcast(clip_text_embed)
-        _broadcast(latents)
-
-        batch = {
-            # 'images':images,
-            'first_ref_image': first_ref_image,
-            'prompt_embeds': prompt_embeds,
-            'clip_text_embed': clip_text_embed,
-            'latents':latents
-        }
-        # print(f"Rank{dist.get_rank()}:first img: {batch['first_ref_image'][0,0,0,0,:5]}, prompt{batch['prompt_embeds'][0,0,52:57]}, clip{batch['clip_text_embed'][0,:5]}, latents{batch['latents'][0,0,0,0,:5]}")
-        # print(f"consumer {dist.get_rank()} 接受 来自 cp组, 数据发送完毕", flush=True
-        # print(f"consumer{dist.get_rank()} forward data: {latents[0,0,0,0,:10]}")
-        # breakpoint()
-    return batch
-
 def get_batch_on_this_tp_cp_rank_vast_origin(data_iterator):
     args = get_args()
 
@@ -1122,6 +1003,8 @@ def set_config():
         from config.wan_i2v_multimask import config
     elif args.task_type == "wan_self_forcing":
         from config.wan_self_forcing import config
+    elif args.task_type == "vast":
+        from config.vast import config
     else:
         return None
     config_vast = load_config(config)
