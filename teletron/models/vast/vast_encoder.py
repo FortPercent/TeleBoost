@@ -29,12 +29,7 @@ class VastEncoder(BaseEncoder):
         args = get_args()
         kwargs['model_paths'] = args.encoder_model_path
         kwargs['tokenizer_path'] = args.encoder_tokenizer_path
-        # kwargs['model_paths'] = [
-        # '/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
-        # '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
-        # '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth'
-        # ]
-        # kwargs['tokenizer_path'] = "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl"
+
         kwargs['tiler_kwargs'] = {
             "tiled": True, 
             "tile_size":  (34, 34), 

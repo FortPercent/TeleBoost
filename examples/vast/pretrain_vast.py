@@ -16,7 +16,7 @@ def extra_args(parser):
     group.add_argument("--encoder_model_path", type=str, nargs = '+',default=
                        ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
                         '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
-                        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pt']
+                        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
                        )
     group.add_argument("--encoder_tokenizer_path", type=str, default=
                        "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
