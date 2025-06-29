@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=4,5,6
+export CUDA_VISIBLE_DEVICES=5,6
 # export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
@@ -100,8 +100,8 @@ MODEL_PARALLEL_ARGS=(
     --context-parallel-size ${CP}
     --distributed-vae
     --distributed-vae-world-size 1
-    --consumer-models-num 2
-    --moe-step-factor-list 0.0 --moe-step-factor-list 0.833 --moe-step-factor-list 1.0
+    --consumer-models-num 1
+    --moe-step-factor-list 0.0 --moe-step-factor-list 1.0 #0.833 --moe-step-factor-list 1.0
 )
 DATA_ARGS=(
     --dataset-type VastDataset
@@ -117,7 +117,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
-    # --save $CHECKPOINT_PATH 
+    --save $CHECKPOINT_PATH 
     # --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
