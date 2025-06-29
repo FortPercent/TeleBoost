@@ -40,7 +40,7 @@ echo '$WORLD_SIZE' $WORLD_SIZE
 #setup_env_and_install
 # reinstall with "rm -rf .venv"
 
-CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/prone_wan_tp1_pp1_layer_1_step100
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_1_layer_debug_wo_trans
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
@@ -118,7 +118,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 100
     --eval-interval 10000 
     --save $CHECKPOINT_PATH 
-    # --load $CHECKPOINT_PATH 
+    --load $CHECKPOINT_PATH 
     #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
