@@ -14,17 +14,24 @@ class ContextParallelTeleaiDitBlock(ContextParallelMixin, DiTBlock):
         self.enable_context_parallel(self.self_attn.attn)
 
     def forward(self, x, context, t_mod, freqs):
-        # msa: multi-head self-attention  mlp: multi-layer perceptron
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
-        input_x = self.modulate_with_cp_grad_reduce(
-            self.norm1(x), shift_msa, scale_msa)
-        attn_output = self.self_attn(input_x, freqs)
-        x = self.gate_with_cp_grad_reduce(x, gate_msa, attn_output)
-        x = x + self.cross_attn(self.norm3(x), context)
-        input_x = self.modulate_with_cp_grad_reduce(
-            self.norm2(x), shift_mlp, scale_mlp)
-        x = self.gate_with_cp_grad_reduce(x, gate_mlp, self.ffn(input_x))
+        modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)
+        modulation = modulation + t_mod
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = modulation.chunk(6, dim=1)
+
+        normed_x1 = self.norm1(x)
+        modulated_x1 = self.modulate_with_cp_grad_reduce(normed_x1, shift_msa, scale_msa)
+        attn_output = self.self_attn(modulated_x1, freqs)
+        gated_x1 = self.gate_with_cp_grad_reduce(x, gate_msa, attn_output)
+
+        normed_x3 = self.norm3(gated_x1)
+        cross_attn_output = self.cross_attn(normed_x3, context)
+        x = gated_x1 + cross_attn_output
+
+        normed_x2 = self.norm2(x)
+        modulated_x2 = self.modulate_with_cp_grad_reduce(normed_x2, shift_mlp, scale_mlp)
+        ffn_output = self.ffn(modulated_x2)
+        x = self.gate_with_cp_grad_reduce(x, gate_mlp, ffn_output)
+
         return x
 
 
@@ -64,40 +71,44 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
 
             param.register_hook(self.cp_grad_reduce)
 
-    def forward(self,
-                x: torch.Tensor,
-                timestep: torch.Tensor,
-                context: torch.Tensor,
-                clip_feature: Optional[torch.Tensor] = None,
-                y: Optional[torch.Tensor] = None,
-                cn_images=None,
-                **kwargs,):
-        # Do whatever necessary before forward transformer blocks
-        t = self.time_embedding(
-            sinusoidal_embedding_1d(self.freq_dim, timestep))
-        t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
-        context = self.text_embedding(context)
+    def forward(
+        self,
+        x: torch.Tensor,
+        timestep: torch.Tensor,
+        context: torch.Tensor,
+        clip_feature: Optional[torch.Tensor] = None,
+        y: Optional[torch.Tensor] = None,
+        cn_images=None,
+        **kwargs,
+    ):
+        t_emb = sin_pos_emb_1d(self.freq_dim, timestep)
+        t = self.time_emb(t_emb)
+        t_mod = self.time_proj(t)
+        t_mod = t_mod.unflatten(1, (6, self.dim))
+
+        context_emb = self.text_emb(context)
 
         if self.has_image_input:
-            x = torch.cat([x, y], dim=1)  # (b, c_x + c_y, f, h, w)
-            clip_embdding = self.img_emb(clip_feature)
-            context = torch.cat([clip_embdding, context], dim=1)
+            if y is not None:
+                x = torch.cat([x, y], dim=1)
+            if clip_feature is not None:
+                clip_embedding = self.img_emb(clip_feature)
+                context_emb = torch.cat([clip_embedding, context_emb], dim=1)
 
         if cn_images is not None:
-            x = torch.cat([x, cn_images], dim=1)  # (b, c_x + c_y, f, h, w)
+            x = torch.cat([x, cn_images], dim=1)
 
         x, (f, h, w) = self.patchify(x)
 
-        freqs = torch.cat([
-            self.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            self.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            self.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
-        ], dim=-1).reshape(f * h * w, 1, -1).to(x.device)
+        freq_f = self.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1)
+        freq_h = self.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1)
+        freq_w = self.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+        freqs = torch.cat([freq_f, freq_h, freq_w], dim=-1)
+        freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
-        # Split input sequence and rope (with methods from CPMixin), and forward CP transformer blocks
         x = self.split_input(x, dim=1)
         freqs = self.split_input(freqs, dim=0)
-        x = self.blocks(x, context, t_mod, freqs)
+        x = self.blocks(x, context_emb, t_mod, freqs)
         x = self.gather_output(x, dim=1)
 
         # Now x is in full shape, just do regular forward
