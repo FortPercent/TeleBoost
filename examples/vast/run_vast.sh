@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=5,6
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 # export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export PYTHONPATH=
@@ -40,7 +40,9 @@ echo '$WORLD_SIZE' $WORLD_SIZE
 #setup_env_and_install
 # reinstall with "rm -rf .venv"
 
-CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_1_layer_debug_wo_trans
+# CHECKPOINT_PATH=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_1_layer_debug_wo_trans
+CHECKPOINT_PATH=/nvfile-heatstorage/yxy/zbk/data/ckpt/
+# CHECKPOINT_PATH=/nvfile-heatstorage/yxy/zbk/data/ckpt/origin/wan_prone10_step5000
 TENSORBOARD_LOGS_PATH=./logs
 # VOCAB_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_vocab.json
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
@@ -61,7 +63,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 1
+    --num-layers 25
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
@@ -119,7 +121,6 @@ EVAL_AND_LOGGING_ARGS=(
     --eval-interval 10000 
     --save $CHECKPOINT_PATH 
     --load $CHECKPOINT_PATH 
-    #--pretrained-checkpoint  /nvfile-heatstorage/teleai-infra/HunyuanVideo/transformer
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
     # --ckpt-format torch # TODO, not support now
