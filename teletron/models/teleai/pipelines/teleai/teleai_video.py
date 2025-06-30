@@ -1,57 +1,47 @@
 import types
-from teletron.models.vast.models.dit.vast_dit import ModelManager
-from teletron.models.vast.models.dit.vast_dit import  VastModel
-from teletron.models.vast.models.dit.vast_dit import VastTextEncoder
-from teletron.models.vast.models.dit.vast_dit import VastVideoVAE
-from teletron.models.vast.models.dit.vast_dit import VastImageEncoder
-from teletron.models.vast.models.dit.vast_dit import VastPrompter
+from teletron.models.teleai.models.dit.teleai_dit import ModelManager
+from teletron.models.teleai.models.dit.teleai_dit import  TeleaiModel
+from teletron.models.teleai.models.dit.teleai_dit import TeleaiTextEncoder
+from teletron.models.teleai.models.dit.teleai_dit import TeleaiVideoVAE
+from teletron.models.teleai.models.dit.teleai_dit import TeleaiImageEncoder
+from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
 
 
-from teletron.models.vast.schedulers.flow_match import FlowMatchScheduler
 from .base import BasePipeline
 import torch, os
-from einops import rearrange
-import numpy as np
-from PIL import Image
-from tqdm import tqdm
-from typing import Optional
-
-# from ..vram_management import enable_vram_management, AutoWrappedModule, AutoWrappedLinear
-
-from teletron.models.vast.models.dit.vast_dit.vast_video_text_encoder import T5RelativeEmbedding, T5LayerNorm
-from teletron.models.vast.models.dit.vast_dit.vast_video_dit import RMSNorm, sinusoidal_embedding_1d
-from teletron.models.vast.models.dit.vast_dit.vast_video_vae import RMS_norm, CausalConv3d, Upsample
 
 
 
-class VastVideoPipeline(BasePipeline):
+
+
+class TeleaiVideoPipeline(BasePipeline):
 
     def __init__(self, device="cuda", torch_dtype=torch.float16, tokenizer_path=None):
         super().__init__(device=device, torch_dtype=torch_dtype)
-        self.prompter = VastPrompter(tokenizer_path=tokenizer_path)
-        self.text_encoder: VastTextEncoder = None
-        self.image_encoder: VastImageEncoder = None
-        self.dit: VastModel = None
-        self.vae: VastVideoVAE = None
+        self.prompter = TeleaiPrompter(tokenizer_path=tokenizer_path)
+        self.text_encoder: TeleaiTextEncoder = None
+        self.image_encoder: TeleaiImageEncoder = None
+        self.dit: TeleaiModel = None
+        self.vae: TeleaiVideoVAE = None
         self.model_names = ['text_encoder', 'dit', 'vae', 'image_encoder']
         
 
     def fetch_models(self, model_manager: ModelManager):
-        text_encoder_model_and_path = model_manager.fetch_model("vast_video_text_encoder", require_model_path=True)
+        text_encoder_model_and_path = model_manager.fetch_model("teleai_video_text_encoder", require_model_path=True)
         if text_encoder_model_and_path is not None:
             self.text_encoder, tokenizer_path = text_encoder_model_and_path
             self.prompter.fetch_models(self.text_encoder)
             self.prompter.fetch_tokenizer(os.path.join(os.path.dirname(tokenizer_path), "google/umt5-xxl"))
-        self.dit = model_manager.fetch_model("vast_video_dit")
-        self.vae = model_manager.fetch_model("vast_video_vae")
-        self.image_encoder = model_manager.fetch_model("vast_video_image_encoder")
+        self.dit = model_manager.fetch_model("teleai_video_dit")
+        self.vae = model_manager.fetch_model("teleai_video_vae")
+        self.image_encoder = model_manager.fetch_model("teleai_video_image_encoder")
 
 
     @staticmethod
     def from_model_manager(model_manager: ModelManager, torch_dtype=None, device=None,):
         if device is None: device = model_manager.device
         if torch_dtype is None: torch_dtype = model_manager.torch_dtype
-        pipe = VastVideoPipeline(device=device, torch_dtype=torch_dtype)
+        pipe = TeleaiVideoPipeline(device=device, torch_dtype=torch_dtype)
         pipe.fetch_models(model_manager)
         return pipe
     
