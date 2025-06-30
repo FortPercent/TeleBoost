@@ -1,10 +1,10 @@
 import types
-from vast.models.dit.vast_dit import ModelManager
-from vast.models.dit.vast_dit import VastModel
-from vast.models.dit.vast_dit import VastTextEncoder
-from vast.models.dit.vast_dit import VastVideoVAE
-from vast.models.dit.vast_dit import VastImageEncoder
-from vast.models.dit.vast_dit import VastPrompter
+from teletron.models.vast.models.dit.vast_dit import ModelManager
+from teletron.models.vast.models.dit.vast_dit import  VastModel
+from teletron.models.vast.models.dit.vast_dit import VastTextEncoder
+from teletron.models.vast.models.dit.vast_dit import VastVideoVAE
+from teletron.models.vast.models.dit.vast_dit import VastImageEncoder
+from teletron.models.vast.models.dit.vast_dit import VastPrompter
 
 
 from vast.schedulers.flow_match import FlowMatchScheduler
@@ -18,9 +18,9 @@ from typing import Optional
 
 # from ..vram_management import enable_vram_management, AutoWrappedModule, AutoWrappedLinear
 
-from vast.models.dit.vast_dit.vast_video_text_encoder import T5RelativeEmbedding, T5LayerNorm
-from vast.models.dit.vast_dit.vast_video_dit import RMSNorm, sinusoidal_embedding_1d
-from vast.models.dit.vast_dit.vast_video_vae import RMS_norm, CausalConv3d, Upsample
+from teletron.models.vast.models.dit.vast_dit.vast_video_text_encoder import T5RelativeEmbedding, T5LayerNorm
+from teletron.models.vast.models.dit.vast_dit.vast_video_dit import RMSNorm, sinusoidal_embedding_1d
+from teletron.models.vast.models.dit.vast_dit.vast_video_vae import RMS_norm, CausalConv3d, Upsample
 
 
 
