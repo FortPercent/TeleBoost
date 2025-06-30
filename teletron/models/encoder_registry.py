@@ -73,6 +73,7 @@ class BaseEncoder(ABC):
         return torch.tensor(size_info, dtype=torch.int32, device=device)
 
 _ENCODER_REGISTRY: Dict[str, Type[BaseEncoder]] = {}
+# _ENCODER_REGISTRY["teleai_encoder"] = TeleaiEncoder
 
 def register_encoder(name: str):
     """
@@ -82,6 +83,10 @@ def register_encoder(name: str):
         name (str): 编码器的唯一名称。
     """
     def decorator(cls: Type[BaseEncoder]):
+        print("......................................")
+        print("here")
+        print(cls.__name__)
+        print("......................................")
         if name in _ENCODER_REGISTRY:
             raise ValueError(f"错误: 编码器 '{name}' 已被注册。")
         if not issubclass(cls, BaseEncoder):
@@ -106,6 +111,9 @@ def get_encoder(name: str, device: torch.device, **kwargs: Any) -> BaseEncoder:
     Raises:
         ValueError: 如果请求的名称在注册表中不存在。
     """
+    print("......................................")
+    print(_ENCODER_REGISTRY)
+    print("......................................")
     if name not in _ENCODER_REGISTRY:
         raise ValueError(f"错误: 编码器 '{name}' 未在注册表中找到。可用选项: {list(_ENCODER_REGISTRY.keys())}")
     
@@ -115,11 +123,14 @@ def get_encoder(name: str, device: torch.device, **kwargs: Any) -> BaseEncoder:
 model_mapping = {
     "parallelwanmodel": "wan_encoder",
     "wanmodel": "wan_encoder",
-    "parallelvastmodel": "vast_encoder",
-    "vastmodel": "vast_encoder"
+    "parallelteleaimodel": "teleai_encoder",
+    "teleaimodel": "teleai_encoder"
 
 }
 
 def get_encoder_name(key):
+    print("................................")
+    print(key)
+    print("................................")
     return model_mapping.get(key.lower(), "unknown_encoder")
     

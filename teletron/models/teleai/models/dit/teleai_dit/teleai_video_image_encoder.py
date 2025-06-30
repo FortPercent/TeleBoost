@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
-from .vast_video_dit import flash_attention
+from .teleai_video_dit import flash_attention
 
 
 class SelfAttention(nn.Module):
@@ -849,7 +849,7 @@ def clip_xlm_roberta_vit_h_14(
     return _clip(pretrained, pretrained_name, XLMRobertaCLIP, **cfg)
 
 
-class VastImageEncoder(torch.nn.Module):
+class TeleaiImageEncoder(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -881,10 +881,10 @@ class VastImageEncoder(torch.nn.Module):
         
     @staticmethod
     def state_dict_converter():
-        return VastImageEncoderStateDictConverter()
+        return TeleaiImageEncoderStateDictConverter()
     
     
-class VastImageEncoderStateDictConverter:
+class TeleaiImageEncoderStateDictConverter:
     def __init__(self):
         pass
 

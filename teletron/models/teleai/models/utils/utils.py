@@ -72,7 +72,7 @@ def wrap_call(func):
 def get_device():
     if torch.cuda.is_available():
         device = torch.device(
-            "cuda:{}".format(int(os.environ.get("VAST_MODELS_DEFAULT_DEVICE", "0")))
+            "cuda:{}".format(int(os.environ.get("Teleai_MODELS_DEFAULT_DEVICE", "0")))
         )
     else:
         device = torch.device("cpu")

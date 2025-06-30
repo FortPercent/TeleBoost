@@ -206,7 +206,7 @@ def init_weights(m):
             m.embedding.weight, std=(2 * m.num_buckets * m.num_heads)**-0.5)
 
 
-class VastTextEncoderStateDictConverter:
+class TeleaiTextEncoderStateDictConverter:
     def __init__(self):
         pass
 
@@ -217,7 +217,7 @@ class VastTextEncoderStateDictConverter:
         return state_dict
 
 
-class VastTextEncoder(nn.Module):
+class TeleaiTextEncoder(nn.Module):
     def __init__(self,
                  vocab=256384,
                  dim=4096,
@@ -228,7 +228,7 @@ class VastTextEncoder(nn.Module):
                  num_buckets=32,
                  shared_pos=False,
                  dropout=0.1):
-        super(VastTextEncoder, self).__init__()
+        super(TeleaiTextEncoder, self).__init__()
         self.dim = dim
         self.dim_attn = dim_attn
         self.dim_ffn = dim_ffn
@@ -286,4 +286,4 @@ class VastTextEncoder(nn.Module):
 
     @staticmethod
     def state_dict_converter():
-        return VastTextEncoderStateDictConverter()
+        return TeleaiTextEncoderStateDictConverter()

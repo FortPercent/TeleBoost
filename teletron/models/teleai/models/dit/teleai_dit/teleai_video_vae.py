@@ -596,7 +596,7 @@ class VideoVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-class VastVideoVAE(nn.Module):
+class TeleaiVideoVAE(nn.Module):
 
     def __init__(self, z_dim=16):
         super().__init__()
@@ -790,10 +790,10 @@ class VastVideoVAE(nn.Module):
 
     @staticmethod
     def state_dict_converter():
-        return VastVideoVAEStateDictConverter()
+        return TeleaiVideoVAEStateDictConverter()
 
 
-class VastVideoVAEStateDictConverter:
+class TeleaiVideoVAEStateDictConverter:
 
     def __init__(self):
         pass
