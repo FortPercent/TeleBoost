@@ -163,8 +163,8 @@ class UnifiedArguments:
                     "Overloads yaml if using koala dataset. Example:45"
         }
     )
-    video_resolution: str = field(
-        default="1280,720",
+    video_resolution: tuple[int, int] = field(
+        default=(1280,720),
         metadata={
             "help":"video resolution to train, overloads yaml if using koala dataset."\
                    "Example: 1280,720 (comma-separated)"
