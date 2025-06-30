@@ -74,10 +74,10 @@ class ParallelVastModel(ContextParallelMixin, TransformerGeneralMixin, VastModel
                 cn_images=None,
                 **kwargs,):
         # Do whatever necessary before forward transformer blocks
-        t = self.time_embedding(
+        t = self.time_emb(
             sinusoidal_embedding_1d(self.freq_dim, timestep))
-        t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
-        context = self.text_embedding(context)
+        t_mod = self.time_proj(t).unflatten(1, (6, self.dim))
+        context = self.text_emb(context)
 
         if self.has_image_input:
             x = torch.cat([x, y], dim=1)  # (b, c_x + c_y, f, h, w)
