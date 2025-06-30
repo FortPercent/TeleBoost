@@ -139,23 +139,23 @@ class SelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.q = nn.Linear(dim, dim)
-        self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim)
-        self.o = nn.Linear(dim, dim)
-        self.norm_q = RMSNorm(dim, eps=eps)
-        self.norm_k = RMSNorm(dim, eps=eps)
+        self.query = nn.Linear(dim, dim)
+        self.key = nn.Linear(dim, dim)
+        self.value = nn.Linear(dim, dim)
+        self.out_proj = nn.Linear(dim, dim)
+        self.norm_query = RMSNorm(dim, eps=eps)
+        self.norm_key = RMSNorm(dim, eps=eps)
         
         self.attn = AttentionModule(self.num_heads)
 
     def forward(self, x, freqs):
-        q = self.norm_q(self.q(x))
-        k = self.norm_k(self.k(x))
-        v = self.v(x)
+        q = self.norm_query(self.query(x))
+        k = self.norm_key(self.key(x))
+        v = self.value(x)
         q = rope_apply(q, freqs, self.num_heads)
         k = rope_apply(k, freqs, self.num_heads)
         x = self.attn(q, k, v)
-        return self.o(x)
+        return self.out_proj(x)
 
 
 class CrossAttention(nn.Module):
@@ -165,17 +165,17 @@ class CrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.q = nn.Linear(dim, dim)
-        self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim)
-        self.o = nn.Linear(dim, dim)
-        self.norm_q = RMSNorm(dim, eps=eps)
-        self.norm_k = RMSNorm(dim, eps=eps)
+        self.query = nn.Linear(dim, dim)
+        self.key = nn.Linear(dim, dim)
+        self.value = nn.Linear(dim, dim)
+        self.out_proj = nn.Linear(dim, dim)
+        self.norm_query = RMSNorm(dim, eps=eps)
+        self.norm_key = RMSNorm(dim, eps=eps)
         self.has_image_input = has_image_input
         if has_image_input:
-            self.k_img = nn.Linear(dim, dim)
-            self.v_img = nn.Linear(dim, dim)
-            self.norm_k_img = RMSNorm(dim, eps=eps)
+            self.img_key = nn.Linear(dim, dim)
+            self.img_value = nn.Linear(dim, dim)
+            self.norm_image_key = RMSNorm(dim, eps=eps)
             
         self.attn = AttentionModule(self.num_heads)
         self.attn2 = AttentionModule(self.num_heads)
@@ -188,16 +188,16 @@ class CrossAttention(nn.Module):
         else:
             ctx = y
             
-        q = self.norm_q(self.q(x))
-        k = self.norm_k(self.k(ctx))
-        v = self.v(ctx)
+        q = self.norm_query(self.query(x))
+        k = self.norm_key(self.key(ctx))
+        v = self.value(ctx)
         x = self.attn(q, k, v)
         if self.has_image_input:
-            k_img = self.norm_k_img(self.k_img(img))
-            v_img = self.v_img(img)
+            k_img = self.norm_image_key(self.img_key(img))
+            v_img = self.img_value(img)
             y = self.attn2(q, k_img, v_img)
             x = x + y
-        return self.o(x)
+        return self.out_proj(x)
 
 
 class GateModule(nn.Module):
@@ -296,19 +296,19 @@ class VastModel(torch.nn.Module):
         self.num_heads = config.num_attention_heads
         self.num_layers = config.num_layers
 
-        self.patch_embedding = nn.Conv3d(
+        self.patch_emb = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
-        self.text_embedding = nn.Sequential(
+        self.text_emb = nn.Sequential(
             nn.Linear(self.text_dim, self.dim),
             nn.GELU(approximate='tanh'),
             nn.Linear(self.dim, self.dim)
         )
-        self.time_embedding = nn.Sequential(
+        self.time_emb = nn.Sequential(
             nn.Linear(self.freq_dim, self.dim),
             nn.SiLU(),
             nn.Linear(self.dim, self.dim)
         )
-        self.time_projection = nn.Sequential(
+        self.time_proj = nn.Sequential(
             nn.SiLU(), nn.Linear(self.dim, self.dim * 6))
         self.blocks = nn.ModuleList([
             DiTBlock(self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
@@ -322,7 +322,7 @@ class VastModel(torch.nn.Module):
             self.img_emb = MLP(1280, self.dim, has_pos_emb=self.has_image_pos_emb)  # clip_feature_dim = 1280
 
     def patchify(self, x: torch.Tensor):
-        x = self.patch_embedding(x)
+        x = self.patch_emb(x)
         grid_size = x.shape[2:]
         x = rearrange(x, 'b c f h w -> b (f h w) c').contiguous()
         return x, grid_size  # x, grid_size: (f, h, w)
@@ -345,10 +345,10 @@ class VastModel(torch.nn.Module):
                 cn_images=None, 
                 **kwargs,
                 ):
-        t = self.time_embedding(
+        t = self.time_emb(
             sinusoidal_embedding_1d(self.freq_dim, timestep))
-        t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
-        context = self.text_embedding(context)
+        modified_t = self.time_proj(t).unflatten(1, (6, self.dim))
+        context = self.text_emb(context)
         
         if self.has_image_input:
             x = torch.cat([x, y], dim=1)  # (b, c_x + c_y, f, h, w)
@@ -377,17 +377,17 @@ class VastModel(torch.nn.Module):
                     with torch.autograd.graph.save_on_cpu():
                         x = torch.utils.checkpoint.checkpoint(
                             create_custom_forward(block),
-                            x, context, t_mod, freqs,
+                            x, context, modified_t, freqs,
                             use_reentrant=False,
                         )
                 else:
                     x = torch.utils.checkpoint.checkpoint(
                         create_custom_forward(block),
-                        x, context, t_mod, freqs,
+                        x, context, modified_t, freqs,
                         use_reentrant=False,
                     )
             else:
-                x = block(x, context, t_mod, freqs)
+                x = block(x, context, modified_t, freqs)
 
         x = self.head(x, t)
         x = self.unpatchify(x, (f, h, w))
