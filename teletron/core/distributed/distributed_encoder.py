@@ -10,7 +10,7 @@ from teletron.utils import (get_args)
 from teletron.models.encoder_registry import get_encoder
 
 from teletron.models.encoder_registry import (BaseEncoder)
-
+from teletron.models.teleai.teleai_encoder import TeleaiEncoder
 
 NUM_ITEMS_PER_CONSUMER = 100000
 MAX_QUEUE_PER_CONSUMER_ON_PRODUCER = 2
@@ -74,7 +74,8 @@ def producer_process(
         build_train_valid_test_data_iterators (Callable): 用于构建数据迭代器的函数。
         train_ds (Any, optional): 预加载的训练数据集。
     """
-    encoder = get_encoder(name=encoder_name, device=device)
+    # encoder = get_encoder(name=encoder_name, device=device)
+    encoder = TeleaiEncoder(device=device)
     encoder.setup()
 
     args = get_args()

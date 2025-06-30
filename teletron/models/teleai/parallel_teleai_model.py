@@ -3,12 +3,11 @@ import torch
 import torch.nn as nn
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
-from .vast_model import VastModel, DiTBlock, sinusoidal_embedding_1d
-from megatron.core import mpu
+from .teleai_model import TeleaiModel, DiTBlock, sinusoidal_embedding_1d
 import logging
 
 
-class ContextParallelVastDitBlock(ContextParallelMixin, DiTBlock):
+class ContextParallelTeleaiDitBlock(ContextParallelMixin, DiTBlock):
     def __init__(self, *args, **kwargs):
         DiTBlock.__init__(self, *args, **kwargs)
         # from ContextParallelMixin
@@ -29,13 +28,13 @@ class ContextParallelVastDitBlock(ContextParallelMixin, DiTBlock):
         return x
 
 
-class ParallelVastModel(ContextParallelMixin, TransformerGeneralMixin, VastModel):
+class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiModel):
     def __init__(self, config):
-        VastModel.__init__(self, config)
+        TeleaiModel.__init__(self, config)
         self.config = config
 
         self.blocks = nn.ModuleList([
-            ContextParallelVastDitBlock(
+            ContextParallelTeleaiDitBlock(
                 self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
             for _ in range(self.num_layers)
         ])

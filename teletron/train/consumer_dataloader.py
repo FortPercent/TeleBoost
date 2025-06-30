@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
-from teletron.models.vast.vast_encoder import VastEncoder
+from teletron.models.teleai.teleai_encoder import TeleaiEncoder
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
     features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))])
@@ -136,7 +136,7 @@ class VastDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, VastEncoder.get_output_schema())
+                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
             else:
                 # 计算大小
                 transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
@@ -161,7 +161,7 @@ class VastDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, VastEncoder.get_output_schema())
+                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
                 noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
 
             # 解包并重塑 Tensors
@@ -262,7 +262,7 @@ def create_batch_loader(args, data_iterator):
     model_name_lower = args.model.lower()
     is_distributed_vae = args.distributed_vae
 
-    if 'vast' in model_name_lower:
+    if 'teleai' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating VastDistBatchLoader.")
             return VastDistBatchLoader(data_iterator)

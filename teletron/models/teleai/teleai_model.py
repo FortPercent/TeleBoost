@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     
 T5_CONTEXT_TOKEN_NUMBER = 512   
 
-class VastParams:
+class TeleaiParams:
     hidden_size: int = 5120
     in_channels: int = 36
     out_channels: int = 16
@@ -276,20 +276,20 @@ class Head(nn.Module):
         return x
 
 
-class VastModel(torch.nn.Module):
+class TeleaiModel(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
-        # vast_config
-        vast_config = VastParams()
-        self.in_dim = vast_config.in_channels
-        self.ffn_dim = vast_config.ffn_dim
-        self.out_dim = vast_config.out_channels
-        self.text_dim = vast_config.text_dim
-        self.freq_dim = vast_config.freq_dim
-        self.eps = vast_config.eps
-        self.patch_size = vast_config.patch_size
-        self.has_image_input = vast_config.has_image_input
-        self.has_image_pos_emb = vast_config.has_image_pos_emb
+        # teleai_config
+        teleai_config = TeleaiParams()
+        self.in_dim = teleai_config.in_channels
+        self.ffn_dim = teleai_config.ffn_dim
+        self.out_dim = teleai_config.out_channels
+        self.text_dim = teleai_config.text_dim
+        self.freq_dim = teleai_config.freq_dim
+        self.eps = teleai_config.eps
+        self.patch_size = teleai_config.patch_size
+        self.has_image_input = teleai_config.has_image_input
+        self.has_image_pos_emb = teleai_config.has_image_pos_emb
 
         # config
         self.dim = config.hidden_size
