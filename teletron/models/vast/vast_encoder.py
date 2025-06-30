@@ -2,9 +2,9 @@
 import torch
 from typing import Dict, Any, Tuple, List
 from teletron.models.encoder_registry import (register_encoder, BaseEncoder)
-from vast.models.dit.wan_dit import WanPrompter as VastPrompter
-from vast.pipelines.wan.wan_video import WanVideoPipeline as VastVideoPipeline
-from vast.models.dit.wan_dit import ModelManager 
+from teletron.models.vast.models.dit.vast_dit import VastPrompter
+from teletron.models.vast.pipelines.vast.vast_video import VastVideoPipeline
+from teletron.models.vast.models.dit.vast_dit import ModelManager
 from teletron.models.vast.vast_encoder_utils import get_encoder_features
 from teletron.utils import get_args
 
