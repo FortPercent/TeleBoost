@@ -9,17 +9,17 @@ from .vast_video_image_encoder import VastImageEncoder
 model_loader_configs = [
     # These configs are provided for detecting model type automatically.
     # The format is (state_dict_keys_hash, state_dict_keys_hash_with_shape, model_names, model_classes, model_resource)
-    (None, "9269f8db9040a9d860eaca435be61814", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "aafcfd9672c3a2456dc46e1cb6e52c70", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "6bfcfb3b342cb286ce886889d519a77e", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "aa40ad461177ea9e288b34f0c103beac", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "62418131bd4d2431eec21cc3c186dd13", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "3ef3b1f8e1dab83d5b71fd7b617f859f", ["wan_video_dit"], [VastModel], "civitai"),
-    (None, "cb104773c6c2cb6df4f9529ad5c60d0b", ["wan_video_dit"], [VastModel], "diffusers"),
-    (None, "9c8818c2cbea55eca56c7b447df170da", ["wan_video_text_encoder"], [VastTextEncoder], "civitai"),
-    (None, "5941c53e207d62f20f9025686193c40b", ["wan_video_image_encoder"], [VastImageEncoder], "civitai"),
-    (None, "1378ea763357eea97acdef78e65d6d96", ["wan_video_vae"], [VastVideoVAE], "civitai"),
-    (None, "ccc42284ea13e1ad04693284c7a09be6", ["wan_video_vae"], [VastVideoVAE], "civitai"),
+    (None, "9269f8db9040a9d860eaca435be61814", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "aafcfd9672c3a2456dc46e1cb6e52c70", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "6bfcfb3b342cb286ce886889d519a77e", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "aa40ad461177ea9e288b34f0c103beac", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "62418131bd4d2431eec21cc3c186dd13", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "3ef3b1f8e1dab83d5b71fd7b617f859f", ["vast_video_dit"], [VastModel], "civitai"),
+    (None, "cb104773c6c2cb6df4f9529ad5c60d0b", ["vast_video_dit"], [VastModel], "diffusers"),
+    (None, "9c8818c2cbea55eca56c7b447df170da", ["vast_video_text_encoder"], [VastTextEncoder], "civitai"),
+    (None, "5941c53e207d62f20f9025686193c40b", ["vast_video_image_encoder"], [VastImageEncoder], "civitai"),
+    (None, "1378ea763357eea97acdef78e65d6d96", ["vast_video_vae"], [VastVideoVAE], "civitai"),
+    (None, "ccc42284ea13e1ad04693284c7a09be6", ["vast_video_vae"], [VastVideoVAE], "civitai"),
 ]
 huggingface_model_loader_configs = [
     # These configs are provided for detecting model type automatically.
