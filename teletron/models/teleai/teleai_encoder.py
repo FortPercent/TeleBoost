@@ -2,15 +2,15 @@
 import torch
 from typing import Dict, Any, Tuple, List
 from teletron.models.encoder_registry import (register_encoder, BaseEncoder)
-from teletron.models.vast.models.dit.vast_dit import VastPrompter
-from teletron.models.vast.pipelines.vast.vast_video import VastVideoPipeline
-from teletron.models.vast.models.dit.vast_dit import ModelManager
-from teletron.models.vast.vast_encoder_utils import get_encoder_features
+from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
+from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
+from teletron.models.teleai.models.dit.teleai_dit import ModelManager
+from teletron.models.teleai.teleai_encoder_utils import get_encoder_features
 from teletron.utils import get_args
 
-@register_encoder("vast_encoder")
-class VastEncoder(BaseEncoder):
-    """Vast视频模型的具体编码器实现。"""
+@register_encoder("teleai_encoder")
+class TeleaiEncoder(BaseEncoder):
+    """Teleai视频模型的具体编码器实现。"""
     
     _OUTPUT_MOE_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise']
     _OUTPUT_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents']
@@ -21,8 +21,8 @@ class VastEncoder(BaseEncoder):
         args = get_args()
         is_moe = (args.consumer_models_num > 1)
         if is_moe is True:
-            return VastEncoder._OUTPUT_MOE_SCHEMA
-        return VastEncoder._OUTPUT_SCHEMA
+            return TeleaiEncoder._OUTPUT_MOE_SCHEMA
+        return TeleaiEncoder._OUTPUT_SCHEMA
 
     def __init__(self, device: torch.device, **kwargs: Any):
         super().__init__(device)
@@ -40,7 +40,7 @@ class VastEncoder(BaseEncoder):
         self.tiler_kwargs = kwargs.get("tiler_kwargs", {})
 
         if not self.model_paths or not self.tokenizer_path:
-            raise ValueError("VastEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
+            raise ValueError("TeleaiEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
 
         # 将模型组件初始化为None，它们将在setup()中被加载
         self.text_encoder = None
@@ -49,28 +49,28 @@ class VastEncoder(BaseEncoder):
         self.prompter = None
 
     def setup(self) -> None:
-        """加载所有必需的vast模型组件到指定设备。"""
-        print(f"在设备 {self.device} 上设置 VastEncoder...")
+        """加载所有必需的teleai模型组件到指定设备。"""
+        print(f"在设备 {self.device} 上设置 TeleaiEncoder...")
         
         model_manager = ModelManager(torch_dtype=torch.float32, device="cpu")
         model_manager.load_models(self.model_paths)
         
-        pipe = VastVideoPipeline.from_model_manager(model_manager)
+        pipe = TeleaiVideoPipeline.from_model_manager(model_manager)
         
         self.text_encoder = pipe.text_encoder.to(device=self.device)
         self.image_encoder = pipe.image_encoder.to(device=self.device)
         self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
         del pipe # 释放不再需要的内存
 
-        self.prompter = VastPrompter()
+        self.prompter = TeleaiPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
-        print("VastEncoder 设置完成。")
+        print("TeleaiEncoder 设置完成。")
 
 
     def encode(self, raw_batch: Dict[str, Any]) -> Tuple[List[torch.Tensor], torch.Tensor]:
         """
-        使用vast模型对数据批次进行编码。
+        使用teleai模型对数据批次进行编码。
         """
         batch = dict(raw_batch)
 

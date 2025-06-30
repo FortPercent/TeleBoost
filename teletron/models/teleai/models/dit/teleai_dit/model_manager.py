@@ -1,8 +1,8 @@
 import os, torch, json, importlib
 from typing import List
 
-from .vast_model_config import model_loader_configs, huggingface_model_loader_configs, patch_model_loader_configs
-from vast.models.utils.utils import load_state_dict, init_weights_on_device, hash_state_dict_keys, split_state_dict_with_prefix
+from .teleai_model_config import model_loader_configs, huggingface_model_loader_configs, patch_model_loader_configs
+from teleai.models.utils.utils import load_state_dict, init_weights_on_device, hash_state_dict_keys, split_state_dict_with_prefix
 
 
 def load_model_from_single_file(state_dict, model_names, model_classes, model_resource, torch_dtype, device):

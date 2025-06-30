@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
 from einops import rearrange
-from vast.models.utils.utils import hash_state_dict_keys
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -24,6 +23,20 @@ except ModuleNotFoundError:
     SAGE_ATTN_AVAILABLE = False
     
 T5_CONTEXT_TOKEN_NUMBER = 512   
+
+class TeleaiParams:
+    hidden_size: int = 5120
+    in_channels: int = 36
+    out_channels: int = 16
+    text_dim: int = 4096
+    freq_dim: int = 256
+    ffn_dim: int = 13824
+    eps: float = 1e-6
+    patch_size: Tuple[int, int, int] = (1,2,2)
+    num_attention_heads: int = 40
+    num_layers: int = 3
+    has_image_input: bool = True
+    has_image_pos_emb: bool = False
 
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False):
     if compatibility_mode:
@@ -165,6 +178,7 @@ class CrossAttention(nn.Module):
             self.norm_k_img = RMSNorm(dim, eps=eps)
             
         self.attn = AttentionModule(self.num_heads)
+        self.attn2 = AttentionModule(self.num_heads)
 
     def forward(self, x: torch.Tensor, y: torch.Tensor):
         if self.has_image_input:
@@ -173,6 +187,7 @@ class CrossAttention(nn.Module):
             ctx = y[:, image_context_length:]
         else:
             ctx = y
+            
         q = self.norm_q(self.q(x))
         k = self.norm_k(self.k(ctx))
         v = self.v(ctx)
@@ -180,7 +195,7 @@ class CrossAttention(nn.Module):
         if self.has_image_input:
             k_img = self.norm_k_img(self.k_img(img))
             v_img = self.v_img(img)
-            y = flash_attention(q, k_img, v_img, num_heads=self.num_heads)
+            y = self.attn2(q, k_img, v_img)
             x = x + y
         return self.o(x)
 
@@ -209,16 +224,20 @@ class DiTBlock(nn.Module):
             approximate='tanh'), nn.Linear(ffn_dim, dim))
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
         self.gate = GateModule()
+        self.gate2 = GateModule()
 
     def forward(self, x, context, t_mod, freqs):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
+
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
         input_x = modulate(self.norm1(x), shift_msa, scale_msa)
-        x = self.gate(x, gate_msa, self.self_attn(input_x, freqs))
+        attn_output = self.self_attn(input_x, freqs)
+        # print("before gate", attn_output.shape, gate_msa.shape, x.shape)
+        x = self.gate(x, gate_msa, attn_output)
         x = x + self.cross_attn(self.norm3(x), context)
         input_x = modulate(self.norm2(x), shift_mlp, scale_mlp)
-        x = self.gate(x, gate_mlp, self.ffn(input_x))
+        x = self.gate2(x, gate_mlp, self.ffn(input_x))
         return x
 
 
@@ -257,54 +276,50 @@ class Head(nn.Module):
         return x
 
 
-class VastModel(torch.nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        in_dim: int,
-        ffn_dim: int,
-        out_dim: int,
-        text_dim: int,
-        freq_dim: int,
-        eps: float,
-        patch_size: Tuple[int, int, int],
-        num_heads: int,
-        num_layers: int,
-        has_image_input: bool,
-        has_image_pos_emb: bool,
-    ):
+class TeleaiModel(torch.nn.Module):
+    def __init__(self, config):
         super().__init__()
-        self.dim = dim
-        self.freq_dim = freq_dim
-        self.has_image_input = has_image_input
-        self.patch_size = patch_size
+        # teleai_config
+        teleai_config = TeleaiParams()
+        self.in_dim = teleai_config.in_channels
+        self.ffn_dim = teleai_config.ffn_dim
+        self.out_dim = teleai_config.out_channels
+        self.text_dim = teleai_config.text_dim
+        self.freq_dim = teleai_config.freq_dim
+        self.eps = teleai_config.eps
+        self.patch_size = teleai_config.patch_size
+        self.has_image_input = teleai_config.has_image_input
+        self.has_image_pos_emb = teleai_config.has_image_pos_emb
+
+        # config
+        self.dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.num_layers = config.num_layers
 
         self.patch_embedding = nn.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size)
+            self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
         self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim),
+            nn.Linear(self.text_dim, self.dim),
             nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim)
+            nn.Linear(self.dim, self.dim)
         )
         self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim),
+            nn.Linear(self.freq_dim, self.dim),
             nn.SiLU(),
-            nn.Linear(dim, dim)
+            nn.Linear(self.dim, self.dim)
         )
         self.time_projection = nn.Sequential(
-            nn.SiLU(), nn.Linear(dim, dim * 6))
-        # breakpoint()
+            nn.SiLU(), nn.Linear(self.dim, self.dim * 6))
         self.blocks = nn.ModuleList([
-            DiTBlock(has_image_input, dim, num_heads, ffn_dim, eps)
-            for _ in range(num_layers)
+            DiTBlock(self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
+            for _ in range(self.num_layers)
         ])
-        self.head = Head(dim, out_dim, patch_size, eps)
-        head_dim = dim // num_heads
+        self.head = Head(self.dim, self.out_dim, self.patch_size, self.eps)
+        head_dim = self.dim // self.num_heads
         self.freqs = precompute_freqs_cis_3d(head_dim)
 
-        if has_image_input:
-            self.img_emb = MLP(1280, dim, has_pos_emb=has_image_pos_emb)  # clip_feature_dim = 1280
-        self.has_image_pos_emb = has_image_pos_emb
+        if self.has_image_input:
+            self.img_emb = MLP(1280, self.dim, has_pos_emb=self.has_image_pos_emb)  # clip_feature_dim = 1280
 
     def patchify(self, x: torch.Tensor):
         x = self.patch_embedding(x)
@@ -357,8 +372,6 @@ class VastModel(torch.nn.Module):
             return custom_forward
 
         for block in self.blocks:
-            if block is None:
-                continue
             if self.training and use_gradient_checkpointing:
                 if use_gradient_checkpointing_offload:
                     with torch.autograd.graph.save_on_cpu():
@@ -380,227 +393,3 @@ class VastModel(torch.nn.Module):
         x = self.unpatchify(x, (f, h, w))
         return x
 
-    @staticmethod
-    def state_dict_converter():
-        return VastModelStateDictConverter()
-    
-    
-class VastModelStateDictConverter:
-    def __init__(self):
-        pass
-
-    def from_diffusers(self, state_dict):
-        rename_dict = {
-            "blocks.0.attn1.norm_k.weight": "blocks.0.self_attn.norm_k.weight",
-            "blocks.0.attn1.norm_q.weight": "blocks.0.self_attn.norm_q.weight",
-            "blocks.0.attn1.to_k.bias": "blocks.0.self_attn.k.bias",
-            "blocks.0.attn1.to_k.weight": "blocks.0.self_attn.k.weight",
-            "blocks.0.attn1.to_out.0.bias": "blocks.0.self_attn.o.bias",
-            "blocks.0.attn1.to_out.0.weight": "blocks.0.self_attn.o.weight",
-            "blocks.0.attn1.to_q.bias": "blocks.0.self_attn.q.bias",
-            "blocks.0.attn1.to_q.weight": "blocks.0.self_attn.q.weight",
-            "blocks.0.attn1.to_v.bias": "blocks.0.self_attn.v.bias",
-            "blocks.0.attn1.to_v.weight": "blocks.0.self_attn.v.weight",
-            "blocks.0.attn2.norm_k.weight": "blocks.0.cross_attn.norm_k.weight",
-            "blocks.0.attn2.norm_q.weight": "blocks.0.cross_attn.norm_q.weight",
-            "blocks.0.attn2.to_k.bias": "blocks.0.cross_attn.k.bias",
-            "blocks.0.attn2.to_k.weight": "blocks.0.cross_attn.k.weight",
-            "blocks.0.attn2.to_out.0.bias": "blocks.0.cross_attn.o.bias",
-            "blocks.0.attn2.to_out.0.weight": "blocks.0.cross_attn.o.weight",
-            "blocks.0.attn2.to_q.bias": "blocks.0.cross_attn.q.bias",
-            "blocks.0.attn2.to_q.weight": "blocks.0.cross_attn.q.weight",
-            "blocks.0.attn2.to_v.bias": "blocks.0.cross_attn.v.bias",
-            "blocks.0.attn2.to_v.weight": "blocks.0.cross_attn.v.weight",
-            "blocks.0.ffn.net.0.proj.bias": "blocks.0.ffn.0.bias",
-            "blocks.0.ffn.net.0.proj.weight": "blocks.0.ffn.0.weight",
-            "blocks.0.ffn.net.2.bias": "blocks.0.ffn.2.bias",
-            "blocks.0.ffn.net.2.weight": "blocks.0.ffn.2.weight",
-            "blocks.0.norm2.bias": "blocks.0.norm3.bias",
-            "blocks.0.norm2.weight": "blocks.0.norm3.weight",
-            "blocks.0.scale_shift_table": "blocks.0.modulation",
-            "condition_embedder.text_embedder.linear_1.bias": "text_embedding.0.bias",
-            "condition_embedder.text_embedder.linear_1.weight": "text_embedding.0.weight",
-            "condition_embedder.text_embedder.linear_2.bias": "text_embedding.2.bias",
-            "condition_embedder.text_embedder.linear_2.weight": "text_embedding.2.weight",
-            "condition_embedder.time_embedder.linear_1.bias": "time_embedding.0.bias",
-            "condition_embedder.time_embedder.linear_1.weight": "time_embedding.0.weight",
-            "condition_embedder.time_embedder.linear_2.bias": "time_embedding.2.bias",
-            "condition_embedder.time_embedder.linear_2.weight": "time_embedding.2.weight",
-            "condition_embedder.time_proj.bias": "time_projection.1.bias",
-            "condition_embedder.time_proj.weight": "time_projection.1.weight",
-            "patch_embedding.bias": "patch_embedding.bias",
-            "patch_embedding.weight": "patch_embedding.weight",
-            "scale_shift_table": "head.modulation",
-            "proj_out.bias": "head.head.bias",
-            "proj_out.weight": "head.head.weight",
-        }
-        state_dict_ = {}
-        for name, param in state_dict.items():
-            if name in rename_dict:
-                state_dict_[rename_dict[name]] = param
-            else:
-                name_ = ".".join(name.split(".")[:1] + ["0"] + name.split(".")[2:])
-                if name_ in rename_dict:
-                    name_ = rename_dict[name_]
-                    name_ = ".".join(name_.split(".")[:1] + [name.split(".")[1]] + name_.split(".")[2:])
-                    state_dict_[name_] = param
-        if hash_state_dict_keys(state_dict) == "cb104773c6c2cb6df4f9529ad5c60d0b":
-            config = {
-                "model_type": "t2v",
-                "patch_size": (1, 2, 2),
-                "text_len": 512,
-                "in_dim": 16,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 40,
-                "window_size": (-1, -1),
-                "qk_norm": True,
-                "cross_attn_norm": True,
-                "eps": 1e-6,
-            }
-        else:
-            config = {}
-        return state_dict_, config
-    
-    def from_civitai(self, state_dict):
-        if hash_state_dict_keys(state_dict) == "9269f8db9040a9d860eaca435be61814":
-            config = {
-                "has_image_input": False,
-                "patch_size": [1, 2, 2],
-                "in_dim": 16,
-                "dim": 1536,
-                "ffn_dim": 8960,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 12,
-                "num_layers": 30,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "aafcfd9672c3a2456dc46e1cb6e52c70":
-            config = {
-                "has_image_input": False,
-                "patch_size": [1, 2, 2],
-                "in_dim": 16,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 40,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "6bfcfb3b342cb286ce886889d519a77e":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 36,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 40,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "6d6ccde6845b95ad9114ab993d917893":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 36,
-                "dim": 1536,
-                "ffn_dim": 8960,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 12,
-                "num_layers": 30,
-                "eps": 1e-6
-            }
-        elif hash_state_dict_keys(state_dict) == "349723183fc063b2bfc10bb2835cf677":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 48,
-                "dim": 1536,
-                "ffn_dim": 8960,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 12,
-                "num_layers": 30,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "efa44cddf936c70abd0ea28b6cbe946c":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 48,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 40,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "3ef3b1f8e1dab83d5b71fd7b617f859f":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 36,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 40,
-                "eps": 1e-6,
-                "has_image_pos_emb": True
-            }
-        elif hash_state_dict_keys(state_dict) == "aa40ad461177ea9e288b34f0c103beac":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 36,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 30,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        elif hash_state_dict_keys(state_dict) == "62418131bd4d2431eec21cc3c186dd13":
-            config = {
-                "has_image_input": True,
-                "patch_size": [1, 2, 2],
-                "in_dim": 36,
-                "dim": 5120,
-                "ffn_dim": 13824,
-                "freq_dim": 256,
-                "text_dim": 4096,
-                "out_dim": 16,
-                "num_heads": 40,
-                "num_layers": 20,
-                "eps": 1e-6,
-                "has_image_pos_emb": False
-            }
-        else:
-            config = {}
-        return state_dict, config
