@@ -81,7 +81,7 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
         cn_images=None,
         **kwargs,
     ):
-        t_emb = sin_pos_emb_1d(self.freq_dim, timestep)
+        t_emb = sinusoidal_embedding_1d(self.freq_dim, timestep)
         t = self.time_emb(t_emb)
         t_mod = self.time_proj(t)
         t_mod = t_mod.unflatten(1, (6, self.dim))
