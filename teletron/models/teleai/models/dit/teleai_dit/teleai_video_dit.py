@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
 from einops import rearrange
-from teleai.models.utils.utils import hash_state_dict_keys
+from teletron.models.teleai.models.utils.utils import hash_state_dict_keys
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
