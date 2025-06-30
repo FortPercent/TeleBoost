@@ -77,7 +77,7 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
     return (x * (1 + scale) + shift)
 
-def sin_pos_emb_1d(dim, position):
+def sinusoidal_embedding_1d(dim, position):
     sinusoid = torch.outer(position.type(torch.float64), torch.pow(
         10000, -torch.arange(dim//2, dtype=torch.float64, device=position.device).div(dim//2)))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
@@ -383,7 +383,7 @@ class TeleaiModel(torch.nn.Module):
         **kwargs,
     ):
         # Compute the time embedding using a sinusoidal embedding followed by a feedforward network
-        time_embedding = sin_pos_emb_1d(self.freq_dim, timestep)
+        time_embedding = sinusoidal_embedding_1d(self.freq_dim, timestep)
         t = self.time_emb(time_embedding)
         projected_time = self.time_proj(t)
         modified_t = projected_time.unflatten(1, (6, self.dim))
