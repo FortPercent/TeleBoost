@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
 from einops import rearrange
-from vast.models.utils.utils import hash_state_dict_keys
+from teletron.models.teleai.models.utils.utils import hash_state_dict_keys
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -257,7 +257,7 @@ class Head(nn.Module):
         return x
 
 
-class VastModel(torch.nn.Module):
+class TeleaiModel(torch.nn.Module):
     def __init__(
         self,
         dim: int,
@@ -382,10 +382,10 @@ class VastModel(torch.nn.Module):
 
     @staticmethod
     def state_dict_converter():
-        return VastModelStateDictConverter()
+        return TeleaiModelStateDictConverter()
     
     
-class VastModelStateDictConverter:
+class TeleaiModelStateDictConverter:
     def __init__(self):
         pass
 

@@ -73,6 +73,7 @@ class BaseEncoder(ABC):
         return torch.tensor(size_info, dtype=torch.int32, device=device)
 
 _ENCODER_REGISTRY: Dict[str, Type[BaseEncoder]] = {}
+# _ENCODER_REGISTRY["teleai_encoder"] = TeleaiEncoder
 
 def register_encoder(name: str):
     """
@@ -115,8 +116,8 @@ def get_encoder(name: str, device: torch.device, **kwargs: Any) -> BaseEncoder:
 model_mapping = {
     "parallelwanmodel": "wan_encoder",
     "wanmodel": "wan_encoder",
-    "parallelvastmodel": "vast_encoder",
-    "vastmodel": "vast_encoder"
+    "parallelteleaimodel": "teleai_encoder",
+    "teleaimodel": "teleai_encoder"
 
 }
 
