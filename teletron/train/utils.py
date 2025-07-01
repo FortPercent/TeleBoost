@@ -1005,8 +1005,11 @@ def set_config():
         from config.wan_self_forcing import config
     elif args.task_type == "vast":
         from config.vast import config
+    elif args.task_type == "teleai_i2v":
+        from config.i2v import config
     else:
         return None
+    assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
     config_vast = load_config(config)
     return config_vast
 

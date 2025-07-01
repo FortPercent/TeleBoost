@@ -1,5 +1,5 @@
 from .base_prompter import BasePrompter
-from .vast_video_text_encoder import VastTextEncoder
+from .teleai_video_text_encoder import TeleaiTextEncoder
 from transformers import AutoTokenizer
 import os, torch
 import ftfy
@@ -81,7 +81,7 @@ class HuggingfaceTokenizer:
         return text
 
 
-class VastPrompter(BasePrompter):
+class TeleaiPrompter(BasePrompter):
 
     def __init__(self, tokenizer_path=None, text_len=512):
         super().__init__()
@@ -93,7 +93,7 @@ class VastPrompter(BasePrompter):
         if tokenizer_path is not None:
             self.tokenizer = HuggingfaceTokenizer(name=tokenizer_path, seq_len=self.text_len, clean='whitespace')
 
-    def fetch_models(self, text_encoder: VastTextEncoder = None):
+    def fetch_models(self, text_encoder: TeleaiTextEncoder = None):
         self.text_encoder = text_encoder
 
     def encode_prompt(self, prompt, positive=True, device="cuda"):

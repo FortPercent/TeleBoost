@@ -60,8 +60,12 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         test_ds = None
     elif args.dataset_type == "VastDataset": 
         global_config = set_config()
-        train_ds_config = global_config.dataloaders.train
-        eval_ds_config = global_config.dataloaders.get("eval", None)
+        if args.task_type == "teleai_i2v":
+            train_ds_config = global_config
+            eval_ds_config = None
+        else:
+            train_ds_config = global_config.dataloaders.train
+            eval_ds_config = global_config.dataloaders.get("eval", None)
         ds_config = HunyuanVideoDatasetConfig(
             train_ds_config=train_ds_config,
             eval_ds_config=eval_ds_config
