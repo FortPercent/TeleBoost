@@ -130,7 +130,7 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 1
+    --save-interval 100
     --eval-interval 10000 
     --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE

@@ -6,7 +6,7 @@ dst_fps = 16
 dst_num_frames = 81
 
 # Temporary code for quick debugging
-debug = True # open
+debug = False # open
 if debug:
     GPU_IDS = [0]
     NUM_WORKERS = 1
