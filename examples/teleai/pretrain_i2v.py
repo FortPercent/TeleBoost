@@ -65,6 +65,7 @@ def forward_step(data_iterator, model):
         output_tensor_list.float(), training_target.float()
     )
     loss = loss * flow_scheduler.training_weight(timestep)
+    print("loss", loss)
     return [loss], loss_func
 
 
