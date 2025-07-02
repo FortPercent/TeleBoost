@@ -59,7 +59,7 @@ class TeleaiEncoder(BaseEncoder):
         
         self.text_encoder = pipe.text_encoder.to(device=self.device)
         self.image_encoder = pipe.image_encoder.to(device=self.device)
-        self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
+        self.vae = pipe.vae.to(device=self.device, dtype=self.dtype)
         del pipe # 释放不再需要的内存
 
         self.prompter = TeleaiPrompter()
@@ -75,7 +75,7 @@ class TeleaiEncoder(BaseEncoder):
         batch = dict(raw_batch)
 
         prompt_emb, image_emb, latents = get_encoder_features(
-            batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder
+            batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder, dtype=self.dtype
         )
         
         
