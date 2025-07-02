@@ -88,9 +88,9 @@ def save_to_meg_tensor(dst_dict, args):
 
     tracker_filepath = os.path.join(checkpoint, "latest_checkpointed_iteration.txt")
     with open(tracker_filepath, "w") as f:
-        f.write("release")
+        f.write(args.folder_name)
 
-    release_dir = os.path.join(checkpoint, "release")
+    release_dir = os.path.join(checkpoint, args.folder_name)
     os.makedirs(release_dir, exist_ok=True)
 
     config = GPT2Config.from_pretrained("/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer")
@@ -264,6 +264,7 @@ def add_extra_args(parser):
     group.add_argument("--load-path", type=str)
     group.add_argument("--save-path", type=str)
     group.add_argument("--num-layers", type=int)
+    group.add_argument("--folder-name", type=str)
     group.add_argument("--target-params-dtype", type=str)
     group.add_argument(
         "--max_shard_size",
