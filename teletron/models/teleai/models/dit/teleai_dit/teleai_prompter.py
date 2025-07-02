@@ -98,7 +98,7 @@ class TeleaiPrompter(BasePrompter):
 
     def encode_prompt(self, prompt, positive=True, device="cuda"):
         prompt = self.process_prompt(prompt, positive=positive)
-        self.text_encoder.to(device)
+        # self.text_encoder.to(device)
         ids, mask = self.tokenizer(prompt, return_mask=True, add_special_tokens=True)
         ids = ids.to(device)
         mask = mask.to(device)
@@ -106,5 +106,5 @@ class TeleaiPrompter(BasePrompter):
         prompt_emb = self.text_encoder(ids, mask)
         for i, v in enumerate(seq_lens):
             prompt_emb[:, v:] = 0
-        self.text_encoder.to('cpu') # offload
+        # self.text_encoder.to('cpu') # offload
         return prompt_emb
