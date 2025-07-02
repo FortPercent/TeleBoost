@@ -23,7 +23,7 @@ WORLD_GROUP = None
 # groups that include the first tp-cp ranks and the vae rank
 _DATA_TRANSMIT_GROUP = []
 
-from teletron.utils import get_args
+
 
 from dataclasses import dataclass
 
@@ -172,7 +172,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
         WORLD_GROUP = torch.distributed.new_group(
             range(0, torch.distributed.get_world_size())
         )
-
+        from teletron.utils import get_args
         margs = get_args()
         if margs.distributed_vae:
             
@@ -256,7 +256,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
     return wrapper
 
 def initialize_comm_pair( tensor_model_parallel_size, pipeline_model_parallel_size, context_parallel_size):
-    
+    from teletron.utils import get_args
     args = get_args()
     models_num = args.consumer_models_num
     world_size = args.dit_world_size                    
@@ -310,7 +310,7 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
     
     assert torch.distributed.is_initialized()
     if base_process_group == -100:
-        
+        from teletron.utils import get_args
         margs = get_args()
         extra_model_parallel_world_size = margs.distributed_vae_world_size
         total_world_size = torch.distributed.get_world_size()
@@ -348,7 +348,7 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
 
     num_tensor_model_parallel_groups: int = world_size // tensor_model_parallel_size
     num_pipeline_model_parallel_groups: int = world_size // pipeline_model_parallel_size
-    
+    from teletron.utils import get_args
     args = get_args()
     models_num = args.consumer_models_num
 
