@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Runs the "175B" parameter model
+# Run model
 export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-# export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-# export PYTHONPATH=
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+
 # TODO, change to your own path
+export PYTHONPATH=
+# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
@@ -18,30 +18,69 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
-GPUS_PER_NODE=$(echo $CUDA_VISIBLE_DEVICES | awk -F"," '{print NF}')
-echo '$GPUS_PER_NODE' $MASTER_ADDR $GPUS_PER_NODE
 
-# Change for multinode config
+
+# TODO: Recommended config: N_GPU_FOR_TRAIN / N_MOE / CP <= N_GPU_FOR_DATA 
+# Parallel config 
+CP=2
+TP=1
+MBS=1
+N_MOE=2
+
+# Multi-node config 
+N_GPU_FOR_TRAIN=64
+N_GPU_FOR_DATA=16
+# Single-node config 
+N_GPU_FOR_TRAIN=6
+N_GPU_FOR_DATA=2
+
+
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
-# MASTER_ADDR='127.0.0.1'
-echo '$MASTER_ADDR' $MASTER_ADDR
 MASTER_PORT='11321'
-NNODES=${WORLD_SIZE:-'1'}
-NNODES=10
-#NNODES=1 # TODO
-echo '$NNODES' $NNODES
-
 NODE_RANK=${RANK:-'0'}
-echo '$NODE_RANK' $NODE_RANK
-WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
-WORLD_SIZE=64
-#WORLD_SIZE=6 # TODO
-echo '$WORLD_SIZE' $WORLD_SIZE
 
+N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
+NNODES=$(($N_GPU/8))
+WORLD_SIZE=$N_GPU_FOR_TRAIN
+N_VAE=$N_GPU_FOR_DATA
+GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
+TOTAL_MOE_NODES=$((NNODES - N_VAE / 8))
+NODES_PER_MOE=$((TOTAL_MOE_NODES / N_MOE))
+I_MOE=$((NODE_RANK / NODES_PER_MOE))
+if [ $NNODES -eq 1 ]; then
+    N_PROC=$N_GPU
+else
+    N_PROC=8
+fi
+if [ $N_MOE -eq 1 ]; then
+    MOE_ARGS=(
+        --moe-step-factor-list 0.0 
+        --moe-step-factor-list 1.0 
+    )
+elif [ $N_MOE -eq 2 ]; then
+    MOE_ARGS=(
+        --moe-step-factor-list 0.0 
+        --moe-step-factor-list 0.833 
+        --moe-step-factor-list 1.0
+    )
+elif [ $N_MOE -eq 4 ]; then
+    MOE_ARGS=(
+        --moe-step-factor-list 0.0 
+        --moe-step-factor-list 0.625 
+        --moe-step-factor-list 0.833
+        --moe-step-factor-list 0.937 
+        --moe-step-factor-list 1.0
+    )
+else
+    echo "N_MOE must be 1, 2 or 4"
+    exit 1
+fi
 
-#source ./examples/wan/setup_pyenv.sh
-#setup_env_and_install
-# reinstall with "rm -rf .venv"
+echo '$MASTER_ADDR' $MASTER_ADDR
+echo '$I_MOE & $N_MOE' $I_MOE $N_MOE
+echo '$NODE_RANK & $NNODES' $NODE_RANK $NNODES
+echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
+echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
 
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
@@ -51,23 +90,10 @@ mkdir -p $CHECKPOINT_PATH_SAVE
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
-TP=1
-CP=2
-MBS=1
-GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 
-N_VAE=16
-N_MOE=2
-# N_VAE=2 # TODO
-# N_MOE=1
-TOTAL_MOE_NODES=$((NNODES - N_VAE // 8))
-NODES_PER_MOE=$((TOTAL_MOE_NODES / N_MOE))
-#REMAINDER=$((TOTAL_MOE_NODES % N_MOE))
-export I_MOE=$((NODE_RANK / NODES_PER_MOE))
-echo '$I_MOE' $I_MOE
 
 DISTRIBUTED_ARGS=(
-    --nproc_per_node $GPUS_PER_NODE 
+    --nproc_per_node $N_PROC 
     --nnodes $NNODES 
     --node_rank $NODE_RANK
     --master_addr $MASTER_ADDR 
@@ -85,12 +111,9 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    # # --debug
-    # --use-cpu-initialization
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    # --global-batch-size ${GBS}
     --train-iters 10000
     --weight-decay 1e-3
     --init-method-std 0.006 
@@ -115,8 +138,6 @@ MODEL_PARALLEL_ARGS=(
     --distributed-vae
     --distributed-vae-world-size $N_VAE
     --consumer-models-num $N_MOE
-    --moe-step-factor-list 0.0 --moe-step-factor-list 0.833 --moe-step-factor-list 1.0
-    #--moe-step-factor-list 0.0 --moe-step-factor-list 1.0 # TODO
 )
 DATA_ARGS=(
     --dataset-type VastDataset
@@ -166,6 +187,7 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/teleai/pretrain_i2v.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
+    ${MOE_ARGS[@]} \
     ${DATA_ARGS[@]}    \
     ${EVAL_AND_LOGGING_ARGS[@]} \
     ${LORA_CFG[@]} \
