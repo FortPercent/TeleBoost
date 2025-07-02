@@ -7,6 +7,16 @@ import torch
 from typing import Dict, Any, Tuple, List
 from teletron.utils import get_args
 
+def get_dtype(dtype_str: str):
+    if dtype_str == 'float32':
+        return torch.float32
+    elif dtype_str == 'float16':
+        return torch.float16
+    elif dtype_str == 'bfloat16':
+        return torch.bfloat16
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype_str}. Supported options are 'float32', 'float16', 'bfloat16'.")
+
 class BaseEncoder(ABC):
 
     def __init__(self, device: torch.device, **kwargs: Any):
@@ -14,6 +24,7 @@ class BaseEncoder(ABC):
         args = get_args()
         self.device = device
         self.moe = (args.consumer_models_num > 1)
+        self.dtype = get_dtype(args.encoder_dtype)
 
     @abstractmethod
     def setup(self, **kwargs: Any) -> None:
@@ -50,7 +61,7 @@ class BaseEncoder(ABC):
         pass
 
     @staticmethod
-    def _pack_tensors(tensors_to_pack: List[torch.Tensor]) -> torch.Tensor:
+    def _pack_tensors(tensors_to_pack: List[torch.Tensor], dtype=torch.bfloat16) -> torch.Tensor:
         """
         将一个张量列表展平并拼接成一个单一的扁平化张量。
         这是一个辅助函数，可以在具体实现中被调用。
@@ -58,7 +69,7 @@ class BaseEncoder(ABC):
         if not tensors_to_pack:
             return torch.tensor([])
         
-        flattened_tensors = [torch.flatten(t) for t in tensors_to_pack]
+        flattened_tensors = [t.flatten().to(dtype) for t in tensors_to_pack]
         return torch.cat(flattened_tensors, dim=0)
 
     @staticmethod

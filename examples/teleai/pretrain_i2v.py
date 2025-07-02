@@ -44,7 +44,7 @@ def forward_step(data_iterator, model):
     broadcast_timesteps(timestep)
     broadcast_timesteps(noise)
     prompt_emb["context"] = batch["context"]
-
+    training_target = flow_scheduler.training_target(latents, noise, timestep)
     image_emb = {}
     image_emb["y"] = batch["image_emb_y"]
     #print('y shape', image_emb['y'].shape)
@@ -61,7 +61,11 @@ def forward_step(data_iterator, model):
                                clip_feature=image_emb["clip_feature"],
                                y=image_emb["y"])
 
-    return output_tensor_list, loss_func
+    loss = torch.nn.functional.mse_loss(
+        output_tensor_list.float(), training_target.float()
+    )
+    loss = loss * flow_scheduler.training_weight(timestep)
+    return [loss], loss_func
 
 
 

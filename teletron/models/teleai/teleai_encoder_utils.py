@@ -43,6 +43,7 @@ def encode_image(
     tiled=False,
     tile_size=(34, 34),
     tile_stride=(18, 16),
+    dtype=torch.bfloat16
 ):
     image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
@@ -60,17 +61,17 @@ def encode_image(
         dim=1,
     )
     y = vae.encode(
-        [vae_input.to(dtype=torch.bfloat16, device=torch.cuda.current_device())],
+        [vae_input.to(dtype=dtype, device=torch.cuda.current_device())],
         device=torch.cuda.current_device(),
         tiled=tiled,
         tile_size=tile_size,
         tile_stride=tile_stride,
     )[0]
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     y = torch.concat([msk, y])
     y = y.unsqueeze(0)
-    clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    clip_context = clip_context.to(dtype=dtype, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
 
 def encode_image_with_mask(
@@ -84,21 +85,22 @@ def encode_image_with_mask(
         ref_images, 
         tiled=False, 
         tile_size=(34, 34), 
-        tile_stride=(18, 16)
+        tile_stride=(18, 16),
+        dtype=torch.bfloat16
     ):
     image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
     ref_images = rearrange(ref_images, 'b t c h w -> b c t h w')
     y = encode_video(
         vae, 
-        ref_images.to(dtype=torch.bfloat16, device=torch.cuda.current_device()),
+        ref_images.to(dtype=dtype, device=torch.cuda.current_device()),
         tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)[0]
     y = y.unsqueeze(0)
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     msk = msk.transpose(1, 2).to(torch.cuda.current_device())
     y = torch.concat([msk, y], dim=1)
-    clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    clip_context = clip_context.to(dtype=dtype, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
 
 
@@ -113,6 +115,7 @@ def encode_first_last_image(
     tiled=False,
     tile_size=(34, 34),
     tile_stride=(18, 16),
+    dtype=torch.bfloat16
 ):
     first_image = preprocess_image(pil_first_image.resize((width, height))).to(
         torch.cuda.current_device()
@@ -148,17 +151,17 @@ def encode_first_last_image(
         dim=1,
     )
     y = vae.encode(
-        [vae_input.to(dtype=torch.bfloat16, device=torch.cuda.current_device())],
+        [vae_input.to(dtype=dtype, device=torch.cuda.current_device())],
         device=torch.cuda.current_device(),
         tiled=tiled,
         tile_size=tile_size,
         tile_stride=tile_stride,
     )[0]
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     y = torch.concat([msk, y])
     y = y.unsqueeze(0)
-    clip_context = clip_context.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
-    y = y.to(dtype=torch.bfloat16, device=torch.cuda.current_device())
+    clip_context = clip_context.to(dtype=dtype, device=torch.cuda.current_device())
+    y = y.to(dtype=dtype, device=torch.cuda.current_device())
     return {"clip_feature": clip_context, "y": y}
 
 # def report_memory():
@@ -296,8 +299,7 @@ def extend_prompt(prompt, local_prompts, masks, mask_scales):
     return prompt, local_prompts, masks, mask_scales
 
 
-def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder):
-    dtype = torch.bfloat16
+def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtype=torch.bfloat16):
     with torch.no_grad():
         prompt_emb = encode_prompt(prompter,batch["dense_prompt"][0])
         latents = encode_video(vae,
@@ -318,21 +320,21 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder):
                 raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
             )
             image_emb = encode_first_last_image(
-                vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width
+                vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width, dtype=dtype
             )
         elif 'raw_first_image' in batch:
             raw_first_image = batch["raw_first_image"]
             pil_image = to_pil_image(
                 raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
             )
-            image_emb = encode_image(vae, image_encoder, pil_image, num_frames, height, width)
+            image_emb = encode_image(vae, image_encoder, pil_image, num_frames, height, width, dtype=dtype)
         elif 'ref_images' in batch:
             first_image = (batch['ref_images'] + 1) / 2 * 255
             ref_mask = batch["ref_mask"]
             ref_images = batch["ref_images"]
             pil_image = to_pil_image(first_image[0][0].cpu().permute(1,2,0).numpy().astype(np.uint8))
             image_emb = encode_image_with_mask(vae, image_encoder, pil_image, num_frames,
-                                                height, width, ref_mask, ref_images)
+                                                height, width, ref_mask, ref_images, dtype=dtype)
         
         
         latents = latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
