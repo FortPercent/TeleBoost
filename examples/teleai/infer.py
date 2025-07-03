@@ -17,12 +17,12 @@ DEFAULT_CONFIG = {
     "num_frames": 81,
     "cfg_scale": 5.0,
     "num_inference_step": 50,
-    "tile": True,
+    "tile": False,
     "save_fps": 16,
     "negative_prompt":"色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿",
     "flow_shift": 5
 }
-SAVEDIR = "wan_i2v/moe_9B_800steps_highnoise"
+SAVEDIR = "tele_expr3_2x9b_step900_fp32"
 GPU_IDS = [7]# 4, 5, 6, 7]
 MODEL_OFFLOAD = True
 
@@ -89,7 +89,7 @@ def load_pipeline(
             "/nvfile-heatstorage/myk/vast/dense_models/models_t5_umt5-xxl-enc-bf16.pth",
             "/nvfile-heatstorage/myk/vast/dense_models/Wan2.1_VAE.pth",
         ],
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float32,
     )
 
     model_list = []
@@ -180,7 +180,19 @@ def run_inference_pipeline(
 
     # 启动单次多进程推理
     print(f"\n{'='*40}\n开始批量处理所有测试用例\n{'='*40}")
-    inference_worker(rank=0, world_size=1, inference_configs=inference_config_list, gpu_ids=gpu_ids, moe_config=moe_config)
+    world_size = len(gpu_ids)
+    #inference_worker(rank=0, world_size=1, inference_configs=inference_config_list, gpu_ids=gpu_ids, moe_config=moe_config)
+    mp.spawn(
+        partial(
+            inference_worker,
+            world_size=world_size,
+            inference_configs=inference_config_list,
+            gpu_ids=gpu_ids,
+            moe_config=moe_config
+        ),
+        nprocs=world_size,
+        join=True,
+    )
 
 if __name__ == "__main__":
     from argparse import ArgumentParser 

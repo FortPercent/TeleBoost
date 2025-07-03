@@ -145,7 +145,7 @@ class TeleaiVideoPipeline(BasePipeline):
 
     def encode_prompt(self, prompt, positive=True):
         prompt_emb = self.prompter.encode_prompt(prompt, positive=positive, device=self.device)
-        return {"context": prompt_emb}
+        return {"context": prompt_emb.to(self.torch_dtype)}
     
     def encode_image(self, image, num_frames, height, width, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
         image = self.preprocess_image(resize_and_crop(image, (width, height))).to(self.device)
@@ -158,7 +158,7 @@ class TeleaiVideoPipeline(BasePipeline):
         msk = msk.transpose(1, 2)[0]
         
         vae_input = torch.concat([image.transpose(0, 1), torch.zeros(3, num_frames-1, height, width).to(image.device)], dim=1)
-        y = self.vae.encode([vae_input.to(dtype=self.torch_dtype, device=self.device)], device=self.device, 
+        y = self.vae.encode([vae_input.to(dtype=torch.float32, device=self.device)], device=self.device, 
                             tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)[0]
         y = y.to(dtype=self.torch_dtype, device=self.device)
         y = torch.concat([msk, y])
@@ -248,10 +248,10 @@ class TeleaiVideoPipeline(BasePipeline):
     
     def encode_video(self, input_video, tiled=True, tile_size=(34, 34), tile_stride=(18, 16)):
         latents = self.vae.encode(input_video, device=self.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)
-        return latents
+        return latents.to(torch.bfloat16)
     
     def decode_video(self, latents, tiled=True, tile_size=(34, 34), tile_stride=(18, 16)):
-        frames = self.vae.decode(latents, device=self.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)
+        frames = self.vae.decode(latents.to(torch.float32), device=self.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)
         return frames
     
     def prepare_unified_sequence_parallel(self):
