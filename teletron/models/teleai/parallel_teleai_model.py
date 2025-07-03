@@ -63,8 +63,8 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
         # list the parameters that needs grad reduce and register tensor grad hook
 
         for name, param in self.named_parameters():
-            if name.startswith("patch_embedding") or \
-                name.startswith("time") or\
+            if name.startswith("patch_emb") or \
+                name.startswith("time") or \
                     name.startswith("head") or \
                     "modulation" in name:
                 continue
