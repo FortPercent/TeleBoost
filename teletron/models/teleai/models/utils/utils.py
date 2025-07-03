@@ -83,19 +83,19 @@ def load_state_dict(weight_path):
     if os.path.isdir(weight_path):
         if os.path.exists(os.path.join(weight_path, WEIGHTS_NAME)):
             return torch.load(
-                os.path.join(weight_path, WEIGHTS_NAME), map_location="cpu"
+                os.path.join(weight_path, WEIGHTS_NAME), map_location="cpu", weights_only=False
             )
         elif os.path.exists(os.path.join(weight_path, SAFETENSORS_WEIGHTS_NAME)):
             return safetensors.torch.load_file(
-                os.path.join(weight_path, SAFETENSORS_WEIGHTS_NAME), device="cpu"
+                os.path.join(weight_path, SAFETENSORS_WEIGHTS_NAME), device="cpu", weights_only=False
             )
         else:
             assert False
     elif os.path.isfile(weight_path):
         if weight_path.endswith(".safetensors"):
-            return safetensors.torch.load_file(weight_path, device="cpu")
+            return safetensors.torch.load_file(weight_path, device="cpu", weights_only=False)
         else:
-            return torch.load(weight_path, map_location="cpu")
+            return torch.load(weight_path, map_location="cpu", weights_only=False)
     else:
         assert False
 
