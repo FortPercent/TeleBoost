@@ -8,6 +8,7 @@ from teletron.utils import (get_args,
                             print_rank_0,
                             print_rank_last,
                             get_num_microbatches,
+                            update_num_microbatches
                             )
 from teletron.utils.config import get_current_global_batch_size
 import time

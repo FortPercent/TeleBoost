@@ -181,7 +181,7 @@ def encode_video(vae, input_video, tiled=True, tile_size=(34, 34), tile_stride=(
     latents = vae.encode(
         input_video,
         device=torch.cuda.current_device(),
-        tiled=tiled,
+        tiled=False,
         tile_size=tile_size,
         tile_stride=tile_stride,
     )
