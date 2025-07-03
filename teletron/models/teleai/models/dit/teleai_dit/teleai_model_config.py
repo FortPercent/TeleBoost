@@ -1,10 +1,9 @@
 from typing_extensions import Literal, TypeAlias
 
-from .teleai_video_dit import TeleaiModel
+from ....teleai_model import TeleaiModel
 from .teleai_video_vae import TeleaiVideoVAE
 from .teleai_video_text_encoder import TeleaiTextEncoder
 from .teleai_video_image_encoder import TeleaiImageEncoder
-
 
 model_loader_configs = [
     # These configs are provided for detecting model type automatically.
@@ -15,12 +14,23 @@ model_loader_configs = [
     (None, "aa40ad461177ea9e288b34f0c103beac", ["teleai_video_dit"], [TeleaiModel], "civitai"),
     (None, "62418131bd4d2431eec21cc3c186dd13", ["teleai_video_dit"], [TeleaiModel], "civitai"),
     (None, "3ef3b1f8e1dab83d5b71fd7b617f859f", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "aa40ad461177ea9e288b34f0c103beac", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "9269f8db9040a9d860eaca435be61814", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "6d6ccde6845b95ad9114ab993d917893", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "91f4f5076a3a121b156bce461ab80364", ["teleai_video_dit"], [TeleaiModel], "civitai"),
     (None, "cb104773c6c2cb6df4f9529ad5c60d0b", ["teleai_video_dit"], [TeleaiModel], "diffusers"),
+    (None, "a52f8463e0c5cee29bb9405ff07ab99b", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "5b210f9487d327bc11656d0fb361d1a5", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "53c212a667e18989a4f452a2f8ac4c93", ["teleai_video_dit"], [TeleaiModel], "civitai"),
+    (None, "83412a0551cf730c434f92be218ae526", ["teleai_video_dit"], [TeleaiModel], "civitai"), #litian add
+
+    (None, "8d2b69be69f87312ec3ec746c499b47c", ["teleai_video_dit"], [TeleaiModel], "civitai"),
     (None, "9c8818c2cbea55eca56c7b447df170da", ["teleai_video_text_encoder"], [TeleaiTextEncoder], "civitai"),
     (None, "5941c53e207d62f20f9025686193c40b", ["teleai_video_image_encoder"], [TeleaiImageEncoder], "civitai"),
     (None, "1378ea763357eea97acdef78e65d6d96", ["teleai_video_vae"], [TeleaiVideoVAE], "civitai"),
     (None, "ccc42284ea13e1ad04693284c7a09be6", ["teleai_video_vae"], [TeleaiVideoVAE], "civitai"),
 ]
+
 huggingface_model_loader_configs = [
     # These configs are provided for detecting model type automatically.
     # The format is (architecture_in_huggingface_config, huggingface_lib, model_name, redirected_architecture)
