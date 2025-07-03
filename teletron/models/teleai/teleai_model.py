@@ -24,6 +24,7 @@ except ModuleNotFoundError:
 
 T5_CONTEXT_TOKEN_NUMBER = 512
 
+from .converter import TeleaiModelStateDictConverter
 
 class TeleaiParams:
     hidden_size: int = 5120
@@ -437,3 +438,7 @@ class TeleaiModel(torch.nn.Module):
         x = self.head(x, t)
         x = self.unpatchify(x, (f, h, w))
         return x
+    
+    @staticmethod
+    def state_dict_converter():
+        return TeleaiModelStateDictConverter()
