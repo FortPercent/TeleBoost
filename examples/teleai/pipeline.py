@@ -264,7 +264,7 @@ class TeleaiVideoPipeline(BasePipeline):
         self.prefetch_gpu_model_name = model_name
         # return model
     
-    def denoising_with_dit(self, latents, prompt_emb_posi, image_emb, extra_input, progress_bar_cmd):
+    def denoising_with_dit(self, latents, prompt_emb_posi, image_emb, extra_input, progress_bar_cmd, cfg_scale, prompt_emb_nega):
         if self.model_offload:
             self.prefetch_model_from_cpu(self.alloc_denoising_model(self.scheduler.timesteps[0], return_name=True))
         history_video = []
@@ -284,7 +284,13 @@ class TeleaiVideoPipeline(BasePipeline):
             timestep = timestep.unsqueeze(0).to(dtype=self.torch_dtype, device=self.device)
             if self.model_offload:
                 with torch.cuda.stream(self.compute_stream):
-                    noise_pred = dit(latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input)
+                    # noise_pred = dit(latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input)
+                    noise_pred_posi = dit(latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input)
+                    if cfg_scale != 1.0:
+                        noise_pred_nega = dit(latents, timestep=timestep, **prompt_emb_nega, **image_emb, **extra_input)
+                        noise_pred = noise_pred_nega + cfg_scale * (noise_pred_posi - noise_pred_nega)
+                    else:
+                        noise_pred = noise_pred_posi
             else:
                 noise_pred = dit(latents, timestep=timestep, **prompt_emb_posi, **image_emb, **extra_input)
             
@@ -392,7 +398,7 @@ class TeleaiVideoPipeline(BasePipeline):
 
         # Denoise
         self.load_models_to_device(self.denoising_model_name_list())
-        history_video, latents = self.denoising_with_dit(latents, prompt_emb_posi, image_emb, extra_input, progress_bar_cmd)
+        history_video, latents = self.denoising_with_dit(latents, prompt_emb_posi, image_emb, extra_input, progress_bar_cmd, cfg_scale, prompt_emb_nega)
 
         
         # history_video = []
