@@ -20,3 +20,4 @@ tests/*
 debug/
 .venv
 checkpoint/*
+results/*
