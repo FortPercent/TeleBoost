@@ -22,7 +22,7 @@ DEFAULT_CONFIG = {
     "negative_prompt":"色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿",
     "flow_shift": 5
 }
-SAVEDIR = "debug"
+
 GPU_IDS = [0,1,2,3,4,5,6,7]# 4, 5, 6, 7]
 MODEL_OFFLOAD = True
 
@@ -116,7 +116,8 @@ def inference_worker(
     world_size: int,
     inference_configs: List[Tuple[str, InferenceConfig]],
     gpu_ids: List[int],
-    moe_config: Dict
+    moe_config: Dict,
+    save_dir: str 
 ):
     device_id = gpu_ids[rank]
     torch.cuda.set_device(device_id)
@@ -130,13 +131,13 @@ def inference_worker(
     pipe = load_pipeline(device, moe_config)
     for test_name, config in infer_task:
         try:
-            save_dir = Path(__file__).parent / "results" / SAVEDIR
+            save_dir = Path(__file__).parent / "results" / save_dir
             save_dir.mkdir(parents=True, exist_ok=True)
 
             save_name = generate_video_filename(test_name, config)
-            save_path = save_dir / save_name
+            save_dir = save_dir / save_name
 
-            if os.path.exists(save_path):
+            if os.path.exists(save_dir):
                 continue
            
             # 准备参考图像
@@ -156,15 +157,17 @@ def inference_worker(
                 sigma_shift=config.flow_shift,
                 verbose=False,
             )
-            export_to_video(output, str(save_path), fps=config.save_fps)
-            print(f"[Rank {rank}] 保存成功: {save_path}")
+            export_to_video(output, str(save_dir), fps=config.save_fps)
+            print(f"[Rank {rank}] 保存成功: {save_dir}")
 
         except Exception:
             print(f"[Rank {rank}] 处理任务 {test_name} 时出错: {traceback.format_exc()}")
     
 def run_inference_pipeline(
     prompt_configs: Dict[str, Dict[str, str]],
-    gpu_ids: List[int] = None, moe_config: Dict = None 
+    gpu_ids: List[int] = None,
+    moe_config: Dict = None,
+    save_dir: str = None
 ):
     """运行完整推理流程（优化后版本）"""
 
@@ -188,7 +191,8 @@ def run_inference_pipeline(
             world_size=world_size,
             inference_configs=inference_config_list,
             gpu_ids=gpu_ids,
-            moe_config=moe_config
+            moe_config=moe_config,
+            save_dir=save_dir,
         ),
         nprocs=world_size,
         join=True,
@@ -199,6 +203,8 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--models", nargs='+', help='Path of moe model component weights, from high noise to low noise')
     parser.add_argument("--timesteps", nargs='+', type=int, help="Timesteps to switch model, from high to low")
+    parser.add_argument("--save", type=str, default='debug', help="Save path")
+    
     # TODO: support variable num layers
     args = parser.parse_args()
     if len(args.models) < 2 or len(args.timesteps) < 2:
@@ -220,7 +226,8 @@ if __name__ == "__main__":
     run_inference_pipeline(
         prompt_configs=PROMPT_CONFIGS,
         gpu_ids=GPU_IDS,
-        moe_config=moe_config
+        moe_config=moe_config,
+        save_dir=args.save
     )
     # except Exception as e:
     #     print(f"主程序运行出错: {str(e)}")
