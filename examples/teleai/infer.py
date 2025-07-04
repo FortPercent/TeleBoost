@@ -22,8 +22,8 @@ DEFAULT_CONFIG = {
     "negative_prompt":"色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿",
     "flow_shift": 5
 }
-SAVEDIR = "tele_expr3_2x9b_step900_fp32"
-GPU_IDS = [7]# 4, 5, 6, 7]
+SAVEDIR = "debug"
+GPU_IDS = [0,1,2,3,4,5,6,7]# 4, 5, 6, 7]
 MODEL_OFFLOAD = True
 
 class InferenceConfig:

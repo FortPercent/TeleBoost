@@ -19,24 +19,31 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
 
+####################################### 
+# TODO: set config below
+# TODO: Recommended ratio: N_GPU_FOR_TRAIN / N_MOE / CP <= N_GPU_FOR_DATA 
+# TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
-# TODO: Recommended config: N_GPU_FOR_TRAIN / N_MOE / CP <= N_GPU_FOR_DATA 
 # Parallel config 
 CP=2
 TP=1
 MBS=1
-N_MOE=2
+N_LAYERS=25
 
 # Multi-node config 
-N_GPU_FOR_TRAIN=64
-N_GPU_FOR_DATA=16
-# Single-node config 
-# N_GPU_FOR_TRAIN=6
-# N_GPU_FOR_DATA=2
+# N_MOE=2
+# N_GPU_FOR_TRAIN=64
+# N_GPU_FOR_DATA=16
 
+# Single-node config 
+N_MOE=1
+N_GPU_FOR_TRAIN=6
+N_GPU_FOR_DATA=2
+
+####################################### 
 
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
-MASTER_PORT='11321'
+MASTER_PORT='11322'
 NODE_RANK=${RANK:-'0'}
 
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
@@ -101,7 +108,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 25
+    --num-layers $N_LAYERS
     --hidden-size 5120        
     --num-attention-heads 40
     --seq-length 512          
