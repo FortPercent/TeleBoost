@@ -36,7 +36,7 @@ class TeleaiParams:
     eps: float = 1e-6
     patch_size: Tuple[int, int, int] = (1, 2, 2)
     num_attention_heads: int = 40
-    num_layers: int = 3
+    num_layers: int = 25
     has_image_input: bool = True
     has_image_pos_emb: bool = False
 
@@ -326,9 +326,15 @@ class TeleaiModel(torch.nn.Module):
         self.has_image_pos_emb = teleai_config.has_image_pos_emb
 
         # config
-        self.dim = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.num_layers = config.num_layers
+        #import ipdb; ipdb.set_trace()
+        self.dim = teleai_config.hidden_size
+        self.num_heads = teleai_config.num_attention_heads
+        if isinstance(config, dict):
+            self.num_layers = config['num_layers']
+        elif hasattr(config, 'num_layers'):
+            self.num_layers = config.num_layers
+        else:
+            self.num_layers = teleai_config.num_layers
 
         self.patch_emb = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
