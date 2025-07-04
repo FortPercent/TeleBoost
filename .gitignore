@@ -14,9 +14,7 @@ ckpt
 ckpt*
 *.log
 *.pyc
-__pycache__/*
-tests/*
-*.png
+__pycache__/**.png
 debug/
 .venv
 checkpoint/*
