@@ -404,11 +404,11 @@ class DiffusionRewardModelWorker(RewardModelWorker):
             non_tensor_batch_keys=["caption"],
         )
         decoded_image=datas.batch['video_frames']
-        decoded_images = decoded_image.chunk(4, dim=0)
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
         decoded_images = [x.squeeze(0) for x in decoded_images]
         caption=datas.non_tensor_batch['caption']
         import numpy as np
-        batch_caption = np.array_split(caption, 4)
+        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
         batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         all_rewards = []  

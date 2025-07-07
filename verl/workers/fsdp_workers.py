@@ -67,7 +67,16 @@ from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
 from diffusers.image_processor import VaeImageProcessor
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (CheckpointImpl, apply_activation_checkpointing,
+                                                                         checkpoint_wrapper)
+import functools
+from functools import partial
+non_reentrant_wrapper = partial(
+    checkpoint_wrapper,
+    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+)
 
+check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -177,6 +186,35 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             self.config.ref.log_prob_micro_batch_size //= self.device_mesh.size() // self.ulysses_sequence_parallel_size
             self.config.ref.log_prob_micro_batch_size_per_gpu = self.config.ref.log_prob_micro_batch_size
 
+    def apply_fsdp_checkpointing(self,model, no_split_modules, p=1):
+        # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
+        """apply activation checkpointing to model
+        returns None as model is updated directly
+        """
+        print("--> applying fdsp activation checkpointing...")
+        block_idx = 0
+        cut_off = 1 / 2
+        # when passing p as a fraction number (e.g. 1/3), it will be interpreted
+        # as a string in argv, thus we need eval("1/3") here for fractions.
+        p = eval(p) if isinstance(p, str) else p
+
+        def selective_checkpointing(submodule):
+            nonlocal block_idx
+            nonlocal cut_off
+
+            if isinstance(submodule, no_split_modules):
+                block_idx += 1
+                if block_idx * p >= cut_off:
+                    cut_off += 1
+                    return True
+            return False
+
+        apply_activation_checkpointing(
+            model,
+            checkpoint_wrapper_fn=non_reentrant_wrapper,
+            check_fn=selective_checkpointing,
+        )
+        
     def _build_model_optimizer(
         self,
         model_path,
@@ -270,20 +308,20 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 use_fused_kernels=use_fused_kernels,
                 fused_kernels_backend=fused_kernels_backend,
             )
-
             # some parameters may not in torch_dtype. TODO(zhangchi.usc1992) remove this after we switch to fsdp2
             actor_module.to(torch_dtype)
-            # print(actor_module)
-            # if enable_gradient_checkpointing:
-            #     actor_module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            if enable_gradient_checkpointing:
+                #TODO:selective
+                from wan.modules.model import WanAttentionBlock
+                self.apply_fsdp_checkpointing(actor_module, WanAttentionBlock, 1.0)
             if self._is_lora:
                 print("Applying LoRA to actor module")
                 actor_module.enable_input_require_grads()
                 # Convert config to regular Python types before creating PEFT model
                 lora_config = {"task_type": TaskType.CAUSAL_LM, "r": self.config.model.lora_rank, "lora_alpha": self.config.model.lora_alpha, "target_modules": convert_to_regular_types(self.config.model.target_modules), "bias": "none"}
                 actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))
-        torch.distributed.barrier()
 
+        torch.distributed.barrier()
         if self.rank == 0:
             print_model_size(actor_module)
 
@@ -355,49 +393,9 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             actor_module_fsdp = actor_module
         else:
             raise NotImplementedError(f"not implement {fsdp_strategy}")
-        
-        if enable_gradient_checkpointing:
-            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-                CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper)
-            from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
-            from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-            from functools import partial
             
-            non_reentrant_wrapper = partial(
-                checkpoint_wrapper,
-                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-            )
-            def apply_fsdp_checkpointing(model, no_split_modules, p=1):
-                # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
-                """apply activation checkpointing to model
-                returns None as model is updated directly
-                """
-                print("--> applying fdsp activation checkpointing...")
-                block_idx = 0
-                cut_off = 1 / 2
-                # when passing p as a fraction number (e.g. 1/3), it will be interpreted
-                # as a string in argv, thus we need eval("1/3") here for fractions.
-                p = eval(p) if isinstance(p, str) else p
-
-                def selective_checkpointing(submodule):
-                    nonlocal block_idx
-                    nonlocal cut_off
-
-                    if isinstance(submodule, no_split_modules):
-                        block_idx += 1
-                        if block_idx * p >= cut_off:
-                            cut_off += 1
-                            return True
-                    return False
-
-                apply_activation_checkpointing(
-                    actor_module_fsdp,
-                    checkpoint_wrapper_fn=non_reentrant_wrapper,
-                    check_fn=selective_checkpointing,
-                )
-
-        if enable_activation_offload:
-            enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
+        # if enable_activation_offload:
+        #     enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
 
         log_gpu_memory_usage(f"After {role} FSDP init", logger=logger)
 
