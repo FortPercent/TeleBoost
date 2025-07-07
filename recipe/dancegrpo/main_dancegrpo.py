@@ -77,12 +77,6 @@ class TaskRunner:
         mapping = {
             Role.ActorRollout: global_pool_id,
         }
-
-        # use reference model
-        if config.algorithm.use_kl_in_reward or config.actor_rollout_ref.actor.use_kl_loss:
-            role_worker_mapping[Role.RefPolicy] = ray.remote(ActorRolloutRefWorker)
-            mapping[Role.RefPolicy] = global_pool_id
-
         # we should adopt a multi-source reward function here
         # - for rule-based rm, we directly call a reward score
         # - for model-based rm, we call a model

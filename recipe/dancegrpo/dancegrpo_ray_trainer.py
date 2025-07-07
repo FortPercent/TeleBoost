@@ -45,8 +45,6 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         batch_keys=['rewards'],
     )
     advantages=torch.zeros_like(datas.batch['rewards'])
-    print("become to compute advantages")
-    print(datas.batch['rewards'])
     #TODO when batchsize not equal to 1
     group_mean = datas.batch['rewards'].mean()
     group_std = datas.batch['rewards'].std() + 1e-8
@@ -110,8 +108,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
                 num_gen_batches += 1
-                print(new_batch.__len__)
-                print("-"*100)
+                
                 # pop those keys for generation TODO!!!
                 if self.config.trainer.type=="diffusion":
                     # print("new_batch keys:", new_batch.batch_keys.keys())
@@ -120,7 +117,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         batch_keys=["context"],
                         non_tensor_batch_keys=["caption"],
                     )
-                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.sampling_steps)
+                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
                 elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
                     gen_batch = new_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
