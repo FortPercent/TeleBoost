@@ -335,7 +335,7 @@ class DiffusionRollout(BaseRollout):
                 next_latents, pred_original, log_prob = self.wan_step(
                     model_output, 
                     latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                    self.config.eta, 
+                    self.config.actor.eta, 
                     sigma_schedule,  # 传入sigma_schedule
                     i, 
                     prev_sample=None, 

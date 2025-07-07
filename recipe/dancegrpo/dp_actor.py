@@ -47,7 +47,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         
         # num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
 
-        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule"]
+        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages"]
         non_tensor_select_keys = ["caption"]
         
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
@@ -75,12 +75,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
                 # 其余训练逻辑保持不变...
                 advantages = torch.clamp(
-                    sample["advantages"],
+                    data.batch["advantages"],
                     -adv_clip_max,
                     adv_clip_max,
                 )
 
-                ratio = torch.exp(new_log_probs - sample["log_probs"][:, step_idx])
+                ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
 
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
@@ -88,14 +88,14 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     1.0 - clip_range,
                     1.0 + clip_range,
                 )
-                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (args.gradient_accumulation_steps * train_timesteps)
+                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.config.gradient_accumulation_steps * train_timesteps)
 
                 loss.backward()
                 avg_loss = loss.detach().clone()
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
                 total_loss += avg_loss.item()
                 
-            if (i + 1) % args.gradient_accumulation_steps == 0:
+            if (i + 1) % slef.config.gradient_accumulation_steps == 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
