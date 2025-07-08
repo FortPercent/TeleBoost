@@ -119,7 +119,7 @@ TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 5
+    --train-iters 100000
     --weight-decay 1e-3
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -156,11 +156,11 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 100
-    --eval-interval 10000 
+    --save-interval 200
+    --eval-interval 100000 
     --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
-    --eval-iters 10000
+    --eval-iters 100000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
 
