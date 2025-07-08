@@ -53,7 +53,7 @@ class HunyuanVideoDatasetBuilder(object):
 
 
     def build(self) -> List[Optional[TopLevelDataset]]:
-        from vast.datasets.transforms import build_transform
+        from teletron.datasets.transform import build_transform
         train_ds_config = self.config.train_ds_config
         # train_ds = ClipDataset(train_ds_config.dataset.data_path_list)
         train_ds = self.dataset
