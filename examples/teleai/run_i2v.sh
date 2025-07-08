@@ -9,13 +9,9 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # TODO, change to your own path
-export PYTHONPATH=
+# export PYTHONPATH=
 # export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
 
@@ -25,27 +21,28 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=2
-TP=1
-MBS=1
-N_LAYERS=25
+CP=1
+TP=1 # not support
 
 # Multi-node config 
 # N_MOE=2
+# N_LAYERS=25
 # N_GPU_FOR_TRAIN=64
 # N_GPU_FOR_DATA=16
 
 # Single-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=6
-N_GPU_FOR_DATA=2
+N_LAYERS=2
+N_GPU_FOR_TRAIN=1
+N_GPU_FOR_DATA=1
 
 ####################################### 
 
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
-MASTER_PORT='11322'
+MASTER_PORT='11323'
 NODE_RANK=${RANK:-'0'}
 
+MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
 NNODES=$((($N_GPU-1)/8+1))
 WORLD_SIZE=$N_GPU_FOR_TRAIN
@@ -121,7 +118,7 @@ TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 10000
+    --train-iters 5
     --weight-decay 1e-3
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -160,8 +157,8 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
-    --load $CHECKPOINT_PATH_LOAD 
-    --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
+    # --load $CHECKPOINT_PATH_LOAD 
+    # --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )

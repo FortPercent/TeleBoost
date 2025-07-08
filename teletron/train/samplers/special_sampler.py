@@ -3,7 +3,7 @@ import math
 import numpy as np
 import torch
 
-from vast.datasets import ConcatDataset
+from teletron.datasets.dataset import ConcatDataset
 
 
 class SpecialDatasetSampler(torch.utils.data.Sampler):

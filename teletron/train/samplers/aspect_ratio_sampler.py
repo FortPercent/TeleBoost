@@ -3,7 +3,7 @@ import math
 import numpy as np
 import torch
 
-from vast.datasets import ConcatDataset, Dataset
+from teletron.datasets.dataset import ConcatDataset, Dataset
 
 
 class AspectRatioSampler(torch.utils.data.Sampler):
