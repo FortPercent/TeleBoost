@@ -1,4 +1,4 @@
-from vast.train.registry import Registry, build_module
+from teletron.datasets.registry import Registry, build_module
 from .prompt_transform import (
     PromptToClipEmbedding,
     PromptToTransformerEmbedding,
