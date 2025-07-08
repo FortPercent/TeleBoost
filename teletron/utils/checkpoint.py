@@ -358,3 +358,16 @@ def fix_query_key_value_ordering(model, checkpoint_version):
                 param.data.copy_(fixed_param)
         print_rank_0(" succesfully fixed query-key-values ordering for"
                      " checkpoint version {}".format(checkpoint_version))
+
+
+def get_model_path(model_name_or_path):
+    model_name_or_path = os.path.expandvars(model_name_or_path)
+    if model_name_or_path is None or os.path.exists(model_name_or_path):
+        return model_name_or_path
+    if os.path.isabs(model_name_or_path):
+        raise ValueError(f"{model_name_or_path} does not exist")
+    model_dir = get_model_dir()
+    model_path = os.path.join(model_dir, model_name_or_path)
+    if os.path.exists(model_path):
+        return model_path
+    return get_huggingface_model_path(model_name_or_path)

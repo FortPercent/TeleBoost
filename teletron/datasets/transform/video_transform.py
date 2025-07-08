@@ -6,7 +6,7 @@ import scipy
 import numpy as np
 import torch
 import os
-from vast.datasets import video_utils
+from teletron.utils import video_utils
 import torch.nn.functional as F
 from einops import rearrange
 from math import floor, ceil
