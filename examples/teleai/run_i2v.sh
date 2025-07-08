@@ -21,20 +21,25 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=1
+CP=4
 TP=1 # not support
 
 # Multi-node config 
-# N_MOE=2
-# N_LAYERS=25
-# N_GPU_FOR_TRAIN=64
-# N_GPU_FOR_DATA=16
+N_MOE=1
+N_LAYERS=25
+N_GPU_FOR_TRAIN=32
+N_GPU_FOR_DATA=8
 
 # Single-node config 
-N_MOE=1
-N_LAYERS=2
-N_GPU_FOR_TRAIN=1
-N_GPU_FOR_DATA=1
+# N_MOE=1
+# N_LAYERS=1
+# N_GPU_FOR_TRAIN=1
+# N_GPU_FOR_DATA=1
+
+
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
+mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
 
@@ -86,10 +91,6 @@ echo '$NODE_RANK & $NNODES' $NODE_RANK $NNODES
 echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
-
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr1
-mkdir -p $CHECKPOINT_PATH_SAVE
 
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
@@ -157,8 +158,8 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 100
     --eval-interval 10000 
-    # --load $CHECKPOINT_PATH_LOAD 
-    # --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
+    --load $CHECKPOINT_PATH_LOAD 
+    --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
     --eval-iters 10000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
