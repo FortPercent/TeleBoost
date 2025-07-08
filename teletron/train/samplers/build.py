@@ -7,7 +7,7 @@ from .special_sampler import SpecialDatasetSampler
 from .two_dim_sampler import TwoDimSampler
 from .bucket_varible_batch_sampler import BucketVariableBatchSampler
 
-from ..registry import Registry, build_module
+from teletron.datasets.registry import Registry, build_module
 
 SAMPLERS = Registry()
 

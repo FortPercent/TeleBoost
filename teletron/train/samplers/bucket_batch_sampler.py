@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 
-from vast.datasets import ConcatDataset, Dataset
+from teletron.datasets.dataset import ConcatDataset, Dataset
 
 
 class BucketBatchSampler(torch.utils.data.Sampler):
