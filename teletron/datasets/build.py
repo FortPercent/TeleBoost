@@ -12,7 +12,7 @@ from .tensor_dataset import TensorDataset
 import torch
 from megatron.core import mpu
 from vast.train.samplers import build_sampler as build_sampler_vast
-from vast.datasets import DefaultCollator
+from teletron.datasets.collators import DefaultCollator
 from teletron.utils import (
     print_rank_0,
     get_args,

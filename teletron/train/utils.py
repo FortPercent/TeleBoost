@@ -2,7 +2,7 @@ import torch
 from megatron.core import mpu, tensor_parallel
 from megatron.core.transformer import TransformerConfig
 from megatron.core.tensor_parallel import param_is_not_tensor_parallel_duplicate
-from vast.train.configs.config import load_config
+from teletron.train.config import load_config
 from teletron.utils import (get_args,
                             fused_kernel_load,
                             print_rank_0,
