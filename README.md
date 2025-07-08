@@ -19,6 +19,9 @@ cp -r /nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/ /workspace/
 ### 2. 安装依赖
 
 ```bash
+pip install -r requirements.txt
+pip install /nvfile-heatstorage/yxy/code/teleai_data_tool
+pip install /nvfile-heatstorage/yxy/code/Megatron_060
 pip install -e .
 ```
 

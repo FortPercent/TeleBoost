@@ -8,10 +8,10 @@ export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+
 # TODO, change to your own path
 # export PYTHONPATH=
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
 
@@ -39,7 +39,7 @@ N_GPU_FOR_DATA=1
 ####################################### 
 
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
-MASTER_PORT='11323'
+MASTER_PORT='11322'
 NODE_RANK=${RANK:-'0'}
 
 MBS=1
