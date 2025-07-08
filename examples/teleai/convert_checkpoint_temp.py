@@ -33,8 +33,8 @@ def get_megatron_wan_state_dict(args):
         
 @torch.inference_mode()
 def get_vast_wan_state_dict(args):
-    from teletron.models.teleai.models.dit.teleai_dit import ModelManager
-    from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
+    from vast.models.dit.wan_dit import ModelManager
+    from vast.pipelines.wan.wan_video import WanVideoPipeline
 
     dit_path = args.load_path
     dit_path = [os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth") or f.endswith(".bin")]
