@@ -107,10 +107,10 @@ class VastDistBatchLoader(BaseBatchLoader):
         training_step = 1000
         i_moe = comm_pair.consumer // torch.distributed.get_world_size() 
         timestep_range = [int(f * training_step) for f in args.moe_step_factor_list][i_moe:i_moe+2] 
-        print("comm_pair", comm_pair)
-        print("comm_pair.consumer", comm_pair.consumer)
-        print("i_moe", i_moe)
-        print("timestep_range", timestep_range)
+        # print("comm_pair", comm_pair)
+        # print("comm_pair.consumer", comm_pair.consumer)
+        # print("i_moe", i_moe)
+        # print("timestep_range", timestep_range)
 
         if args.distributed_vae:
             if args.consumer_models_num == 1:

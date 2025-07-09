@@ -34,7 +34,6 @@ from teletron.train.utils import (
     forward_step,
     _set_random_seed,
     _initialize_tp_communicators,
-    training_log,
     calc_params_l2_norm,
 )
 from teletron.core.parallel_state import get_transformer_model_group
@@ -42,6 +41,7 @@ from teletron.train.dataloader import DataloaderMixin
 from teletron.models.build import build_model
 from teletron.train.checkpoint import CheckPointMixin, unwrap_model
 from teletron.train.lr_scheduler import SchedulerMixin
+from teletron.train.telelogger import TeleLoggerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import producer_process
@@ -59,7 +59,7 @@ def cyclic_iter(iter):
         for x in iter:
             yield x
 
-class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
+class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin):
     def __init__(
         self,
         args,
@@ -559,12 +559,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
                     decoupled_learning_rate = param_group['lr']
                 else:
                     learning_rate = param_group['lr']
-            report_memory_flag = training_log(loss_dict, total_loss_dict,
-                                            learning_rate,
-                                            decoupled_learning_rate,
-                                            iteration, loss_scale,
-                                            report_memory_flag, skipped_iter,
-                                            grad_norm, params_norm, num_zeros_in_grad)
+
+            report_memory_flag = self.log_training_infos(
+                loss_dict, total_loss_dict,
+                learning_rate,
+                decoupled_learning_rate,
+                iteration, loss_scale,
+                report_memory_flag, skipped_iter,
+                grad_norm, params_norm, num_zeros_in_grad
+            )
 
             # breakpoint()
             # Autoresume

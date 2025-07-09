@@ -36,7 +36,7 @@ N_GPU_FOR_DATA=8
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-
+TENSORBOARD_LOGS_PATH=./logs
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
 mkdir -p $CHECKPOINT_PATH_SAVE
@@ -92,7 +92,6 @@ echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
 
-TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
 
