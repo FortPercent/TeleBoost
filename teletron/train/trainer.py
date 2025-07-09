@@ -35,6 +35,7 @@ from teletron.train.utils import (
     _set_random_seed,
     _initialize_tp_communicators,
     calc_params_l2_norm,
+    get_grad_norm
 )
 from teletron.core.parallel_state import get_transformer_model_group
 from teletron.train.dataloader import DataloaderMixin
@@ -530,6 +531,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                         optimizer,
                         opt_param_scheduler,
                         config)
+            
+            if grad_norm is None:
+                grad_norm = get_grad_norm(optimizer)
+                
             if os.environ.get("MEMORY_SNAPSHOT"):
                 time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
                 save_dir = os.environ.get("PROF_SAVE_PATH", ".")  # 默认当前目录

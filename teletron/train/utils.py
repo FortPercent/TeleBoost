@@ -208,6 +208,23 @@ def report_theoretical_memory(args, num_microbatches=None, verbose=False):
         f"total={total_memory:.2f} MB\n"
     )
 
+def get_grad_norm(optimizer):
+    parameters = optimizer.get_parameters()
+    grads_for_norm = optimizer.get_main_grads_for_grad_norm()
+
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    if isinstance(grads_for_norm, torch.Tensor):
+        grads_for_norm = [grads_for_norm]
+
+    total_norm = 0.0
+    for param in parameters:
+        if param.grad is not None:
+            assert param.grad.type() == 'torch.cuda.FloatTensor'
+            param_norm = param.grad.data.norm(2)  # L2 范数
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** 0.5
+    return total_norm
 
 def param_is_not_shared(param):
     return not hasattr(param, 'shared') or not param.shared
