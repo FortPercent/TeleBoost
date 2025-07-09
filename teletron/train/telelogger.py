@@ -8,6 +8,7 @@ from teletron.utils import (
 )
 from datetime import datetime
 from teletron.train.utils import report_memory, report_theoretical_memory
+from teletron.utils.config import get_timers, get_tensorboard_writer, get_wandb_writer
 
 NUM_BYTES_IN_MEGABYTE = 1024 * 1024
 
@@ -30,9 +31,10 @@ class TeleLoggerMixin:
     ):
         """Log training information such as losses, timing, ...."""
         args = get_args()
-        # timers = get_timers()
-        # writer = get_tensorboard_writer()
-        # wandb_writer = get_wandb_writer()
+        timers = get_timers()
+
+        writer = get_tensorboard_writer()
+        wandb_writer = get_wandb_writer()
         # one_logger = get_one_logger()
 
         # Advanced, skipped, and Nan iterations.
@@ -66,31 +68,31 @@ class TeleLoggerMixin:
         # breakpoint()
 
         # Logging.
-        # timers_to_log = [
-            # 'forward-backward',
-            # 'forward-compute',
-            # 'backward-compute',
-            # 'batch-generator',
-            # 'forward-recv',
-            # 'forward-send',
-            # 'backward-recv',
-            # 'backward-send',
-            # 'forward-send-forward-recv',
-            # 'forward-send-backward-recv',
-            # 'backward-send-forward-recv',
-            # 'backward-send-backward-recv',
-            # 'forward-backward-send-forward-backward-recv',
-            # 'layernorm-grads-all-reduce',
-            # 'embedding-grads-all-reduce',
-            # 'all-grads-sync',
-            # 'params-all-gather',
-            # 'optimizer-copy-to-main-grad',
-            # 'optimizer-unscale-and-check-inf',
-            # 'optimizer-clip-main-grad',
-            # 'optimizer-count-zeros',
-            # 'optimizer-inner-step',
-            # 'optimizer-copy-main-to-model-params',
-            # 'optimizer']
+        timers_to_log = [
+            'forward-backward',
+            'forward-compute',
+            'backward-compute',
+            'batch-generator',
+            'forward-recv',
+            'forward-send',
+            'backward-recv',
+            'backward-send',
+            'forward-send-forward-recv',
+            'forward-send-backward-recv',
+            'backward-send-forward-recv',
+            'backward-send-backward-recv',
+            'forward-backward-send-forward-backward-recv',
+            'layernorm-grads-all-reduce',
+            'embedding-grads-all-reduce',
+            'all-grads-sync',
+            'params-all-gather',
+            'optimizer-copy-to-main-grad',
+            'optimizer-unscale-and-check-inf',
+            'optimizer-clip-main-grad',
+            'optimizer-count-zeros',
+            'optimizer-inner-step',
+            'optimizer-copy-main-to-model-params',
+            'optimizer']
 
         # Calculate batch size.
         batch_size = args.micro_batch_size * args.data_parallel_size * \
@@ -102,86 +104,86 @@ class TeleLoggerMixin:
         #     current_app_tag = f'{job_name}_{batch_size}_{args.world_size}'
         #     one_logger.log_app_tag(current_app_tag)
 
-        # total_iterations = total_loss_dict[advanced_iters_key] + \
-        #                    total_loss_dict[skipped_iters_key]
+        total_iterations = total_loss_dict[advanced_iters_key] + \
+                           total_loss_dict[skipped_iters_key]
 
         # Tensorboard values.
         # Timer requires all the ranks to call.
-        # if args.log_timers_to_tensorboard and \
-        #    (iteration % args.tensorboard_log_interval == 0):
-        #     timers.write(timers_to_log, writer, iteration,
-        #                  normalizer=total_iterations)
-        # if writer and (iteration % args.tensorboard_log_interval == 0):
-            # if wandb_writer:
-            #     wandb_writer.log({'samples vs steps': args.consumed_train_samples},
-            #                      iteration)
-            # if args.log_learning_rate_to_tensorboard:
-            #     writer.add_scalar('learning-rate', learning_rate, iteration)
-            #     if args.decoupled_lr is not None:
-            #         writer.add_scalar('decoupled-learning-rate', decoupled_learning_rate, iteration)
-            #     writer.add_scalar('learning-rate vs samples', learning_rate,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'learning-rate': learning_rate}, iteration)
-            # if args.log_batch_size_to_tensorboard:
-            #     writer.add_scalar('batch-size', batch_size, iteration)
-            #     writer.add_scalar('batch-size vs samples', batch_size,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'batch-size': batch_size}, iteration)
-            # for key in loss_dict:
-            #     writer.add_scalar(key , loss_dict[key], iteration)
-            #     writer.add_scalar(key + ' vs samples', loss_dict[key],
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({key: loss_dict[key]}, iteration)
-            # if args.log_loss_scale_to_tensorboard:
-            #     writer.add_scalar('loss-scale', loss_scale, iteration)
-            #     writer.add_scalar('loss-scale vs samples', loss_scale,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'loss-scale': loss_scale}, iteration)
-            # if args.log_world_size_to_tensorboard:
-            #     writer.add_scalar('world-size', args.world_size, iteration)
-            #     writer.add_scalar('world-size vs samples', args.world_size,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'world-size': args.world_size}, iteration)
-            # if grad_norm is not None:
-            #     writer.add_scalar('grad-norm', grad_norm, iteration)
-            #     writer.add_scalar('grad-norm vs samples', grad_norm,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'grad-norm': grad_norm}, iteration)
-            # if num_zeros_in_grad is not None:
-            #     writer.add_scalar('num-zeros', num_zeros_in_grad, iteration)
-            #     writer.add_scalar('num-zeros vs samples', num_zeros_in_grad,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'num-zeros': num_zeros_in_grad}, iteration)
-            # if params_norm is not None:
-            #     writer.add_scalar('params-norm', params_norm, iteration)
-            #     writer.add_scalar('params-norm vs samples', params_norm,
-            #                       args.consumed_train_samples)
-            #     if wandb_writer:
-            #         wandb_writer.log({'params-norm': params_norm}, iteration)
-            # if args.log_memory_to_tensorboard:
-            #     mem_stats = torch.cuda.memory_stats()
-            #     writer.add_scalar(
-            #         "mem-reserved-bytes",
-            #         mem_stats["reserved_bytes.all.current"],
-            #         iteration,
-            #     )
-            #     writer.add_scalar(
-            #         "mem-allocated-bytes",
-            #         mem_stats["allocated_bytes.all.current"],
-            #         iteration,
-            #     )
-            #     writer.add_scalar(
-            #         "mem-allocated-count",
-            #         mem_stats["allocation.all.current"],
-            #         iteration,
-                # )
+        if args.log_timers_to_tensorboard and \
+           (iteration % args.tensorboard_log_interval == 0):
+            timers.write(timers_to_log, writer, iteration,
+                         normalizer=total_iterations)
+        if writer and (iteration % args.tensorboard_log_interval == 0):
+            if wandb_writer:
+                wandb_writer.log({'samples vs steps': args.consumed_train_samples},
+                                 iteration)
+            if args.log_learning_rate_to_tensorboard:
+                writer.add_scalar('learning-rate', learning_rate, iteration)
+                if args.decoupled_lr is not None:
+                    writer.add_scalar('decoupled-learning-rate', decoupled_learning_rate, iteration)
+                writer.add_scalar('learning-rate vs samples', learning_rate,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'learning-rate': learning_rate}, iteration)
+            if args.log_batch_size_to_tensorboard:
+                writer.add_scalar('batch-size', batch_size, iteration)
+                writer.add_scalar('batch-size vs samples', batch_size,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'batch-size': batch_size}, iteration)
+            for key in loss_dict:
+                writer.add_scalar(key , loss_dict[key], iteration)
+                writer.add_scalar(key + ' vs samples', loss_dict[key],
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({key: loss_dict[key]}, iteration)
+            if args.log_loss_scale_to_tensorboard:
+                writer.add_scalar('loss-scale', loss_scale, iteration)
+                writer.add_scalar('loss-scale vs samples', loss_scale,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'loss-scale': loss_scale}, iteration)
+            if args.log_world_size_to_tensorboard:
+                writer.add_scalar('world-size', args.world_size, iteration)
+                writer.add_scalar('world-size vs samples', args.world_size,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'world-size': args.world_size}, iteration)
+            if grad_norm is not None:
+                writer.add_scalar('grad-norm', grad_norm, iteration)
+                writer.add_scalar('grad-norm vs samples', grad_norm,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'grad-norm': grad_norm}, iteration)
+            if num_zeros_in_grad is not None:
+                writer.add_scalar('num-zeros', num_zeros_in_grad, iteration)
+                writer.add_scalar('num-zeros vs samples', num_zeros_in_grad,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'num-zeros': num_zeros_in_grad}, iteration)
+            if params_norm is not None:
+                writer.add_scalar('params-norm', params_norm, iteration)
+                writer.add_scalar('params-norm vs samples', params_norm,
+                                  args.consumed_train_samples)
+                if wandb_writer:
+                    wandb_writer.log({'params-norm': params_norm}, iteration)
+            if args.log_memory_to_tensorboard:
+                mem_stats = torch.cuda.memory_stats()
+                writer.add_scalar(
+                    "mem-reserved-bytes",
+                    mem_stats["reserved_bytes.all.current"],
+                    iteration,
+                )
+                writer.add_scalar(
+                    "mem-allocated-bytes",
+                    mem_stats["allocated_bytes.all.current"],
+                    iteration,
+                )
+                writer.add_scalar(
+                    "mem-allocated-count",
+                    mem_stats["allocation.all.current"],
+                    iteration,
+                )
         # if args.num_experts is not None:
         #     moe_loss_scale = 1 / get_num_microbatches()
         #     track_moe_metrics(moe_loss_scale, iteration, writer, None, total_loss_dict, args.moe_per_layer_logging)
@@ -218,7 +220,7 @@ class TeleLoggerMixin:
                     avg = total_loss_dict[key].item() / \
                         float(max(1, total_loss_dict[advanced_iters_key]))
                     if avg > 0.0:
-                        log_string += ' {}: {:.6E} |'.format(key, avg)
+                        log_string += ' {}: {:.4f} |'.format(key, avg)
                     total_loss_dict[key] = torch.tensor([0.0], dtype=torch.float, device='cuda')
             log_string += ' loss scale: {:.1f} |'.format(loss_scale)
             if grad_norm is not None:
