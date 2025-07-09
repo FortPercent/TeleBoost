@@ -11,8 +11,8 @@ from .variable_mix_dataset import VariableMixDataset
 from .tensor_dataset import TensorDataset
 import torch
 from megatron.core import mpu
-from vast.train.samplers import build_sampler as build_sampler_vast
-from vast.datasets import DefaultCollator
+from teletron.train.samplers import build_sampler as build_sampler_vast
+from teletron.datasets.collators import DefaultCollator
 from teletron.utils import (
     print_rank_0,
     get_args,
@@ -90,7 +90,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         assert global_config.sampler.type == "BucketVariableBatchSampler"
         assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
         assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
-        print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
+        print_rank_0("Warning: The `args.micro_batch_size` and `seed` from dataset config will NOT BE USED when use BucketDataset.")
 
         dataset = build_dataset(global_config.dataset)
         if dp_rank is None or dp_size is None:

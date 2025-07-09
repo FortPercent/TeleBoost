@@ -4,7 +4,7 @@ import gc
 import pickle
 from collections.abc import Mapping
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
-from vast.datasets.transforms.build import build_transform
+from teletron.datasets.transform.build import build_transform
 import numpy as np
 from torch.utils.data import Dataset
 from teleai_data_tool.logger import logger
