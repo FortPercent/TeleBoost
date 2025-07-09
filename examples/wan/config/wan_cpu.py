@@ -1,7 +1,5 @@
 import os
 
-from vast.datasets.config.t2v_200w import get_data_list
-
 # 数据w h t
 dst_size = (720, 480)
 dst_fps = 15

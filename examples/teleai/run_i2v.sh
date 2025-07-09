@@ -8,14 +8,10 @@ export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+
 # TODO, change to your own path
-export PYTHONPATH=
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Megatron_060
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/Teletron
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/vast
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/TensorWatch
+# export PYTHONPATH=
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
 
@@ -25,20 +21,25 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=2
-TP=1
-MBS=1
-N_LAYERS=25
+CP=4
+TP=1 # not support
 
 # Multi-node config 
-# N_MOE=2
-# N_GPU_FOR_TRAIN=64
-# N_GPU_FOR_DATA=16
+N_MOE=1
+N_LAYERS=25
+N_GPU_FOR_TRAIN=32
+N_GPU_FOR_DATA=8
 
 # Single-node config 
-N_MOE=1
-N_GPU_FOR_TRAIN=6
-N_GPU_FOR_DATA=2
+# N_MOE=1
+# N_LAYERS=1
+# N_GPU_FOR_TRAIN=1
+# N_GPU_FOR_DATA=1
+
+
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
+mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
 
@@ -46,6 +47,7 @@ MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
 MASTER_PORT='11322'
 NODE_RANK=${RANK:-'0'}
 
+MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
 NNODES=$((($N_GPU-1)/8+1))
 WORLD_SIZE=$N_GPU_FOR_TRAIN
@@ -90,10 +92,6 @@ echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
 
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr1
-mkdir -p $CHECKPOINT_PATH_SAVE
-
 TENSORBOARD_LOGS_PATH=./logs
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
@@ -121,7 +119,7 @@ TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 10000
+    --train-iters 100000
     --weight-decay 1e-3
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -158,11 +156,11 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 100
-    --eval-interval 10000 
+    --save-interval 200
+    --eval-interval 100000 
     --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
-    --eval-iters 10000
+    --eval-iters 100000
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
 
