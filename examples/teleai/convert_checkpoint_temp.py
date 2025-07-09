@@ -144,7 +144,6 @@ def save_to_trans_tensor(dst_dict, args):
         log.info(f"Saved {model_names[i]} tensor to {model_path}")
 
 def update_all_params(src_dict, dst_dict):
-    import ipdb; ipdb.set_trace()
     for key,value in src_dict[0].items():
         if key.startswith('transformer.'):
             dst_dict[0][key[12:]] = value
