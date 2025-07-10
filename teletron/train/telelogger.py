@@ -250,3 +250,12 @@ class TeleLoggerMixin:
             # timers.log(timers_to_log, normalizer=args.log_interval)
 
         return report_memory_flag
+
+    def log_validation_infos(self, loss_dict, iteration):
+        args = get_args()
+        writer = get_tensorboard_writer()
+        if writer:
+            for key in loss_dict:
+                writer.add_scalar(f"validation: {key}" , loss_dict[key], iteration)
+                writer.add_scalar(f"validation: {key}" + ' vs samples', loss_dict[key],
+                                  args.consumed_train_samples)
