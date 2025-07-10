@@ -268,13 +268,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             train_ds, valid_ds, test_ds = build_train_valid_test_datasets()
             train_itrt, valid_itrt, test_itrt \
                 = self.build_train_valid_test_data_iterators(
-                    train_valid_test_dataset_provider, train_ds_prev=train_ds)
+                    train_valid_test_dataset_provider, 
+                    train_ds_prev=train_ds,
+                    valid_ds_prev=valid_ds)
         return train_itrt, valid_itrt, test_itrt
 
 
 
     def build_train_valid_test_data_iterators(
-        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, return_ds=False
+        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, valid_ds_prev=None, return_ds=False
     ):
         """Build pretraining data iterators."""
 
@@ -284,13 +286,13 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         print("Building loaders.")
         
         if return_ds is True:
-            train_dataloader, valid_dataloader, test_dataloader,train_ds = \
+            train_dataloader, valid_dataloader, test_dataloader, train_ds, valid_ds = \
                 self.build_train_valid_test_data_loaders(
-                    is_tp_first,dp_rank,dp_size, train_ds_prev, return_ds=return_ds)
+                    is_tp_first,dp_rank,dp_size, train_ds_prev, valid_ds_prev, return_ds=return_ds)
         else:
             train_dataloader, valid_dataloader, test_dataloader = \
                 self.build_train_valid_test_data_loaders(
-                    is_tp_first,dp_rank,dp_size, train_ds_prev)
+                    is_tp_first,dp_rank,dp_size, train_ds_prev, valid_ds_prev)
 
         # Build iterators.
         print("Building iterators.")
@@ -326,7 +328,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             test_data_iterator = None
 
         if return_ds is True:
-            return train_data_iterator, valid_data_iterator, test_data_iterator, train_ds
+            return train_data_iterator, valid_data_iterator, test_data_iterator, train_ds, valid_ds
         else:
             return train_data_iterator, valid_data_iterator, test_data_iterator
 
@@ -777,6 +779,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         print_rank_last('-' * length)
         print_rank_last(string)
         print_rank_last('-' * length)
+
+        self.log_validation_infos(total_loss_dict, iteration)
 
     def evaluate(
         self,

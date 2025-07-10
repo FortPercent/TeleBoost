@@ -117,6 +117,11 @@ config = dict(
             ),
         ],
     ),
+    eval=dict(
+        data_path_list=[
+            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+        ],
+    ),
     models=dict(
         text_encoder_path="/workspace/dense_models/models_t5_umt5-xxl-enc-bf16.pth",
         vae_path="/workspace/dense_models/Wan2.1_VAE.pth",

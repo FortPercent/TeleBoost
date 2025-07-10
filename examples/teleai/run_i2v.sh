@@ -158,10 +158,10 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1 # for terminal infos
     --save-interval 200
-    --eval-interval 100000 
+    --eval-interval 100
     --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
-    --eval-iters 100000
+    --eval-iters 20 # sample 20 video to eval
 )
 
 

@@ -62,7 +62,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         global_config = set_config()
         if args.task_type == "teleai_i2v":
             train_ds_config = global_config
-            eval_ds_config = None
+            eval_ds_config = global_config.get("eval", None)
         else:
             train_ds_config = global_config.dataloaders.train
             eval_ds_config = global_config.dataloaders.get("eval", None)
@@ -71,8 +71,17 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
             eval_ds_config=eval_ds_config
         )
         dataset = build_dataset(train_ds_config.dataset)
+
+        eval_data_list = eval_ds_config.get("data_path_list", None) 
+        if eval_data_list is not None and len(eval_data_list) > 0:
+            train_ds_config.dataset.data_path_list = eval_data_list
+            dataset_eval = build_dataset(train_ds_config.dataset)
+        else:
+            dataset_eval = None
+            
         train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
             dataset,
+            dataset_eval,
             train_valid_test_num_samples,
             lambda: True,
             ds_config,
