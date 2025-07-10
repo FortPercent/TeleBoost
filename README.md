@@ -76,8 +76,8 @@ bash examples/teleai/convert_ckpt_temp.sh
 
 > ⚠️ 注意：
 >
-> - 权重目录中需包含一个 `latest_checkpointed_iteration.txt` 文件，用于指示当前读取的权重文件夹。
-> - 转换后的权重会按 `folder-name` 存储，目前启动脚本里读取方法未 `node$RANK`,可根据需要自行配置。
+> - 权重folder-name名字必须为'release'或者'iter-0000100'格式，否则读取会报错
+> - 权重目录中需包含一个 `latest_checkpointed_iteration.txt` 文件，用于指示当前读取的权重文件夹。(release or 100)
 
 ---
 
