@@ -126,7 +126,6 @@ class Bucket:
         self.grad_data *= self.gradient_scaling_factor
         # Use async_op only when overlap_grad_reduce is True.
         if self.use_distributed_optimizer:
-            print(f" start chunked grad sync,  grad norm: {self.grad_data.norm()}")
             num_reduces = self.grad_data.numel() // self.grad_reduce_buffer_size
             numel_reduced = 0
             
