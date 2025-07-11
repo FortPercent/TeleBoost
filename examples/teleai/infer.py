@@ -129,15 +129,14 @@ def inference_worker(
         return
     
     pipe = load_pipeline(device, moe_config)
+    save_dir = Path(__file__).parent / "results" / save_dir
+    save_dir.mkdir(parents=True, exist_ok=True)
     for test_name, config in infer_task:
         try:
-            save_dir = Path(__file__).parent / "results" / save_dir
-            save_dir.mkdir(parents=True, exist_ok=True)
+            cur_save_name = generate_video_filename(test_name, config)
+            cur_save_dir = os.path.join(save_dir,cur_save_name)
 
-            save_name = generate_video_filename(test_name, config)
-            save_dir = save_dir / save_name
-
-            if os.path.exists(save_dir):
+            if os.path.exists(cur_save_dir):
                 continue
            
             # 准备参考图像
@@ -157,8 +156,8 @@ def inference_worker(
                 sigma_shift=config.flow_shift,
                 verbose=False,
             )
-            export_to_video(output, str(save_dir), fps=config.save_fps)
-            print(f"[Rank {rank}] 保存成功: {save_dir}")
+            export_to_video(output, str(cur_save_dir), fps=config.save_fps)
+            print(f"[Rank {rank}] 保存成功: {cur_save_dir}")
 
         except Exception:
             print(f"[Rank {rank}] 处理任务 {test_name} 时出错: {traceback.format_exc()}")
