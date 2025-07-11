@@ -13,17 +13,6 @@
 # limitations under the License.
 
 def exe_adaptation():
-    import megatron.core.distributed
-    from teletron.core.distributed.distributed_data_parallel import DistributedDataParallel
-    from teletron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-    # import sys
-    # original_module_name = 'megatron.core.distributed.param_and_grad_buffer'
-    # my_fake_module = type(sys)(original_module_name)
-    # my_fake_module._ParamAndGradBuffer = ParamAndGradBuffer
-    # sys.modules[original_module_name] = my_fake_module
-    megatron.core.distributed.DistributedDataParallel = DistributedDataParallel
-    # megatron.core.distributed.param_and_grad_buffer._ParamAndGradBuffer.finish_grad_sync = ParamAndGradBuffer.finish_grad_sync
-    megatron.core.distributed.param_and_grad_buffer.ParamAndGradBuffer = ParamAndGradBuffer
 
     import megatron.core
     from teletron.core.parallel_state import initialize_model_parallel_decorators
@@ -44,14 +33,5 @@ def exe_adaptation():
     megatron.core.parallel_state.get_tensor_context_parallel_src_rank = get_tensor_context_parallel_src_rank
     megatron.core.mpu = megatron.core.parallel_state
 
-    # import megatron.training
-    # from teletron.core.training import (setup_model_and_optimizer_decorators,
-    #                                     generate_state_dict,
-    #                                     load_checkpoint)
-    # megatron.training.training.setup_model_and_optimizer = setup_model_and_optimizer_decorators(
-    #     megatron.training.training.setup_model_and_optimizer
-    # )
-    # megatron.training.checkpointing.generate_state_dict = generate_state_dict
-    # megatron.training.checkpointing.load_checkpoint = load_checkpoint
 
 exe_adaptation()
