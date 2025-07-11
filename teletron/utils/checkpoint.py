@@ -47,7 +47,9 @@ def get_checkpoint_name(checkpoints_path, iteration, release=False,
                         pipeline_parallel=None,
                         tensor_rank=None, pipeline_rank=None,
                         expert_parallel=None, expert_rank=None,
-                        return_base_dir=False):
+                        return_base_dir=False,
+                        use_zero2=False,
+                        ):
     """Determine the directory name for this rank's checkpoint."""
     if release:
         directory = 'release'
@@ -82,6 +84,15 @@ def get_checkpoint_name(checkpoints_path, iteration, release=False,
     if expert_parallel:
         common_path = common_path + f'_{expert_rank:03d}'
 
+    if use_zero2:
+        optimizer_checkpoint_names = []
+        dp_size = mpu.get_data_parallel_world_size()
+        cp_size = mpu.get_context_parallel_world_size()
+        for dp in range(dp_size):
+            for cp in range(cp_size):
+                optimizer_checkpoint_names.append(os.path.join(common_path, f"zero2_optim_dp{dp}_cp{cp}.pt"))
+        return optimizer_checkpoint_names
+
     return os.path.join(common_path, "model_optim_rng.pt")
 
 
@@ -99,6 +110,89 @@ def get_checkpoint_tracker_filename(checkpoints_path):
     """Tracker file rescords the latest chckpoint during
     training to restart from."""
     return os.path.join(checkpoints_path, 'latest_checkpointed_iteration.txt')
+
+def get_zero2_optimizer_checkpoint_name(model_checkpoint_name, dp_rank, cp_rank):
+    return os.path.join(os.path.dirname(model_checkpoint_name),
+                        f"zero2_optim_dp{dp_rank}_cp{cp_rank}.pt")
+
+def zero2_optimizer_save(optimizer, optim_checkpoint_name):
+    state_dict = optimizer.state_dict()
+    torch.save(state_dict, optim_checkpoint_name)
+
+def load_zero2_optimizer(optimizer_state_dict_names, state_dict):
+    optimizer_state_list = []
+    for path in optimizer_state_dict_names:
+        optim_dict = torch.load(path, map_location='cpu', weights_only=False)
+        optimizer_state_list.append(optim_dict)
+    state_dict['optimizer'] = optimizer_state_list
+
+def _load_zero2_checkpoint(load_dir, checkpoint_step = None):
+    """ Load the base state_dict from the given directory
+
+    If rank0 is true, just loads rank 0 checkpoint, ignoring arguments.
+    """
+    #import ipdb; ipdb.set_trace()
+    # Read the tracker file and set the iteration.
+    tracker_filename = get_checkpoint_tracker_filename(load_dir)
+
+    # If no tracker file, return nothing
+    if not os.path.isfile(tracker_filename):
+        print_rank_0('WARNING: could not find the metadata file {} '.format(
+            tracker_filename))
+        print_rank_0('    will not load any checkpoints and will start from '
+                        'random')
+        return None, "", False
+
+    # Otherwise, read the tracker file and either set the iteration or
+    # mark it as a release checkpoint.
+    if checkpoint_step is not None:
+        iteration = checkpoint_step
+        release = False
+    else:
+        iteration, release = read_metadata(tracker_filename)
+
+    # Checkpoint.
+    checkpoint_name = get_checkpoint_name(load_dir, iteration, release,
+                                            return_base_dir=True)
+    is_dist_ckpt = dist_checkpointing.check_is_distributed_checkpoint(checkpoint_name)
+
+    assert is_dist_ckpt == False, ("Zero2 optimizer not support dist ckpt format!")
+    
+    model_checkpoint_name = get_checkpoint_name(load_dir, iteration, release, return_base_dir=False)
+    optimizer_state_dict_names = get_checkpoint_name(load_dir, iteration, release, return_base_dir=False, use_zero2=True)
+    print(f"model_checkpoint_name:{model_checkpoint_name} optimizer_state_dict_names:{optimizer_state_dict_names}")
+    dist_infix = "distributed " if is_dist_ckpt else ""
+    if release:
+        print_rank_0(f' loading release {dist_infix}checkpoint from {load_dir}')
+    else:
+        print_rank_0(f' loading {dist_infix}checkpoint from {load_dir} at iteration {iteration}')
+    # Load the checkpoint.
+    try:
+        #import ipdb; ipdb.set_trace()
+        state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
+        load_zero2_optimizer(optimizer_state_dict_names, state_dict)
+        for name, key in state_dict.items():
+            print(f"name :{name}")
+        #import ipdb; ipdb.set_trace()
+    except ModuleNotFoundError:
+        # from megatron.legacy.fp16_deprecated import loss_scaler
+        # For backward compatibility.
+        sys.modules['fp16.loss_scaler'] = sys.modules[
+            'megatron.legacy.fp16_deprecated.loss_scaler']
+        sys.modules['megatron.fp16.loss_scaler'] = sys.modules[
+            'megatron.legacy.fp16_deprecated.loss_scaler']
+        sys.modules['megatron.model'] = sys.modules['megatron.legacy.model']
+        #import ipdb; ipdb.set_trace()
+        state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
+        sys.modules.pop('fp16.loss_scaler', None)
+        sys.modules.pop('megatron.fp16.loss_scaler', None)
+        sys.modules.pop('megatron.model', None)
+    except BaseException as e:
+        print_rank_0('could not load the checkpoint')
+        print_rank_0(e)
+        sys.exit()
+
+    return state_dict, checkpoint_name, release
 
 def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
                           exit_on_missing_checkpoint=False, checkpoint_step = None):
