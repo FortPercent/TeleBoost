@@ -19,6 +19,9 @@ from teletron.utils.checkpoint import (
     ensure_directory_exists,
     checkpoint_exists,
     get_distributed_optimizer_checkpoint_name,
+    get_zero2_optimizer_checkpoint_name,
+    zero2_optimizer_save,
+    _load_zero2_checkpoint,
 )
 
 ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
@@ -69,6 +72,15 @@ class CheckPointMixin:
                 get_distributed_optimizer_checkpoint_name(checkpoint_name)
             ensure_directory_exists(optim_checkpoint_name)
             optimizer.save_parameter_state(optim_checkpoint_name)
+
+        # Save Deepspeed Zero2 shared optimizer's parameter state.
+        if args.use_zero2 and not args.no_save_optim and optimizer is not None and not args.use_dist_ckpt:
+            dp_rank = mpu.get_data_parallel_rank()
+            cp_rank = mpu.get_context_parallel_rank()
+            optim_checkpoint_name = \
+                get_zero2_optimizer_checkpoint_name(checkpoint_name, dp_rank, cp_rank)
+            ensure_directory_exists(optim_checkpoint_name)
+            zero2_optimizer_save(optimizer, optim_checkpoint_name)
 
         # Collect args, model, RNG.
         if not torch.distributed.is_initialized() \
@@ -164,7 +176,10 @@ class CheckPointMixin:
                                                                         rng_state, args.use_dist_ckpt, optim_sd_kwargs=optim_sd_kwargs)
                 load_kwargs['exit_on_missing_checkpoint'] = args.exit_on_missing_checkpoint
 
-        state_dict, checkpoint_name, release = _load_base_checkpoint(load_dir, rank0=False, **load_kwargs)
+        if args.use_zero2:
+            state_dict, checkpoint_name, release = _load_zero2_checkpoint(load_dir, **load_kwargs)
+        else:
+            state_dict, checkpoint_name, release = _load_base_checkpoint(load_dir, rank0=False, **load_kwargs)
 
         # Checkpoint not loaded.
         if state_dict is None:
@@ -257,7 +272,10 @@ class CheckPointMixin:
             try:
                 # Load state dict.
                 if optimizer is not None:
-                    optimizer.load_state_dict(state_dict['optimizer'])
+                    if args.use_zero2:
+                        optimizer.load_state_dict(state_dict['optimizer'], load_from_fp32_weights=True)
+                    else:
+                        optimizer.load_state_dict(state_dict['optimizer'])
 
                 # Load distributed optimizer's custom parameter state.
                 # For distributed checkpoint it's already loaded in load_state_dict above
@@ -365,7 +383,8 @@ class CheckPointMixin:
         # Optimizer stuff.
         if not args.no_save_optim:
             if optimizer is not None:
-                state_dict['optimizer'] = (optimizer.sharded_state_dict(state_dict, **(optim_sd_kwargs or {}))
+                if not args.use_zero2:
+                    state_dict['optimizer'] = (optimizer.sharded_state_dict(state_dict, **(optim_sd_kwargs or {}))
                                         if use_dist_ckpt else
                                         optimizer.state_dict())
             if opt_param_scheduler is not None:
