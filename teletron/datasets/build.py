@@ -11,8 +11,8 @@ from .variable_mix_dataset import VariableMixDataset
 from .tensor_dataset import TensorDataset
 import torch
 from megatron.core import mpu
-from vast.train.samplers import build_sampler as build_sampler_vast
-from vast.datasets import DefaultCollator
+from teletron.train.samplers import build_sampler as build_sampler_vast
+from teletron.datasets.collators import DefaultCollator
 from teletron.utils import (
     print_rank_0,
     get_args,
@@ -62,7 +62,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         global_config = set_config()
         if args.task_type == "teleai_i2v":
             train_ds_config = global_config
-            eval_ds_config = None
+            eval_ds_config = global_config.get("eval", None)
         else:
             train_ds_config = global_config.dataloaders.train
             eval_ds_config = global_config.dataloaders.get("eval", None)
@@ -71,8 +71,17 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
             eval_ds_config=eval_ds_config
         )
         dataset = build_dataset(train_ds_config.dataset)
+
+        eval_data_list = eval_ds_config.get("data_path_list", None) 
+        if eval_data_list is not None and len(eval_data_list) > 0:
+            train_ds_config.dataset.data_path_list = eval_data_list
+            dataset_eval = build_dataset(train_ds_config.dataset)
+        else:
+            dataset_eval = None
+            
         train_ds, valid_ds, test_ds = HunyuanVideoDatasetBuilder(
             dataset,
+            dataset_eval,
             train_valid_test_num_samples,
             lambda: True,
             ds_config,
@@ -90,7 +99,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         assert global_config.sampler.type == "BucketVariableBatchSampler"
         assert args.dataloader_type == 'external', "BucketDataset use cumstomed dataloader"
         assert args.task_type == "wan_i2v_bucket", "BucketDataset is only supported for t2i_wanvae task"
-        print_rank_0("Warning: The `args.micro_batch_size` and `seed` from vast dataset config will NOT BE USED when use BucketDataset.")
+        print_rank_0("Warning: The `args.micro_batch_size` and `seed` from dataset config will NOT BE USED when use BucketDataset.")
 
         dataset = build_dataset(global_config.dataset)
         if dp_rank is None or dp_size is None:

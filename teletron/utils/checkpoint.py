@@ -106,7 +106,6 @@ def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
 
     If rank0 is true, just loads rank 0 checkpoint, ignoring arguments.
     """
-    #import ipdb; ipdb.set_trace()
     # Read the tracker file and set the iteration.
     tracker_filename = get_checkpoint_tracker_filename(load_dir)
 
@@ -165,9 +164,7 @@ def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
         state_dict = dist_checkpointing.load(sharded_state_dict, checkpoint_name)
         return state_dict, checkpoint_name, release
     try:
-        #import ipdb; ipdb.set_trace()
         state_dict = torch.load(checkpoint_name, map_location='cpu', weights_only=False)
-        #import ipdb; ipdb.set_trace()
     except ModuleNotFoundError:
         # from megatron.legacy.fp16_deprecated import loss_scaler
         # For backward compatibility.
@@ -178,7 +175,6 @@ def _load_base_checkpoint(load_dir, rank0=False, sharded_state_dict=None,
         sys.modules['megatron.fp16.loss_scaler'] = sys.modules[
             'megatron.legacy.fp16_deprecated.loss_scaler']
         sys.modules['megatron.model'] = sys.modules['megatron.legacy.model']
-        #import ipdb; ipdb.set_trace()
         state_dict = torch.load(checkpoint_name, map_location='cpu', weights_only=False)
         sys.modules.pop('fp16.loss_scaler', None)
         sys.modules.pop('megatron.fp16.loss_scaler', None)
@@ -358,3 +354,16 @@ def fix_query_key_value_ordering(model, checkpoint_version):
                 param.data.copy_(fixed_param)
         print_rank_0(" succesfully fixed query-key-values ordering for"
                      " checkpoint version {}".format(checkpoint_version))
+
+
+def get_model_path(model_name_or_path):
+    model_name_or_path = os.path.expandvars(model_name_or_path)
+    if model_name_or_path is None or os.path.exists(model_name_or_path):
+        return model_name_or_path
+    if os.path.isabs(model_name_or_path):
+        raise ValueError(f"{model_name_or_path} does not exist")
+    model_dir = get_model_dir()
+    model_path = os.path.join(model_dir, model_name_or_path)
+    if os.path.exists(model_path):
+        return model_path
+    return get_huggingface_model_path(model_name_or_path)
