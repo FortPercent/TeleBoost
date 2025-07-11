@@ -16,7 +16,7 @@ python  examples/teleai/convert_checkpoint_temp.py  \
     --save ${TARGET_CKPT_PATH} \
     --target-params-dtype bf16 \
     --num-layers 25 \
-    --folder-name node_3 \
+    --folder-name release \
     --target-tensor-model-parallel-size ${TP} \
     --target-pipeline-model-parallel-size ${PP} \
 

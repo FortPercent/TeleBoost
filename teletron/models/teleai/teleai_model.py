@@ -326,7 +326,6 @@ class TeleaiModel(torch.nn.Module):
         self.has_image_pos_emb = teleai_config.has_image_pos_emb
 
         # config
-        #import ipdb; ipdb.set_trace()
         self.dim = teleai_config.hidden_size
         self.num_heads = teleai_config.num_attention_heads
         if isinstance(config, dict):

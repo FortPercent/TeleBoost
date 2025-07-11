@@ -19,3 +19,4 @@ debug/
 .venv
 checkpoint/*
 results/*
+examples/teleai/results

@@ -34,14 +34,15 @@ from teletron.train.utils import (
     forward_step,
     _set_random_seed,
     _initialize_tp_communicators,
-    training_log,
     calc_params_l2_norm,
+    get_grad_norm
 )
 from teletron.core.parallel_state import get_transformer_model_group
 from teletron.train.dataloader import DataloaderMixin
 from teletron.models.build import build_model
 from teletron.train.checkpoint import CheckPointMixin, unwrap_model
 from teletron.train.lr_scheduler import SchedulerMixin
+from teletron.train.telelogger import TeleLoggerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import producer_process
@@ -59,7 +60,7 @@ def cyclic_iter(iter):
         for x in iter:
             yield x
 
-class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
+class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin):
     def __init__(
         self,
         args,
@@ -267,13 +268,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
             train_ds, valid_ds, test_ds = build_train_valid_test_datasets()
             train_itrt, valid_itrt, test_itrt \
                 = self.build_train_valid_test_data_iterators(
-                    train_valid_test_dataset_provider, train_ds_prev=train_ds)
+                    train_valid_test_dataset_provider, 
+                    train_ds_prev=train_ds,
+                    valid_ds_prev=valid_ds)
         return train_itrt, valid_itrt, test_itrt
 
 
 
     def build_train_valid_test_data_iterators(
-        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, return_ds=False
+        self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, valid_ds_prev=None, return_ds=False
     ):
         """Build pretraining data iterators."""
 
@@ -283,13 +286,13 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         print("Building loaders.")
         
         if return_ds is True:
-            train_dataloader, valid_dataloader, test_dataloader,train_ds = \
+            train_dataloader, valid_dataloader, test_dataloader, train_ds, valid_ds = \
                 self.build_train_valid_test_data_loaders(
-                    is_tp_first,dp_rank,dp_size, train_ds_prev, return_ds=return_ds)
+                    is_tp_first,dp_rank,dp_size, train_ds_prev, valid_ds_prev, return_ds=return_ds)
         else:
             train_dataloader, valid_dataloader, test_dataloader = \
                 self.build_train_valid_test_data_loaders(
-                    is_tp_first,dp_rank,dp_size, train_ds_prev)
+                    is_tp_first,dp_rank,dp_size, train_ds_prev, valid_ds_prev)
 
         # Build iterators.
         print("Building iterators.")
@@ -325,7 +328,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
             test_data_iterator = None
 
         if return_ds is True:
-            return train_data_iterator, valid_data_iterator, test_data_iterator, train_ds
+            return train_data_iterator, valid_data_iterator, test_data_iterator, train_ds, valid_ds
         else:
             return train_data_iterator, valid_data_iterator, test_data_iterator
 
@@ -530,6 +533,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
                         optimizer,
                         opt_param_scheduler,
                         config)
+            
+            if grad_norm is None:
+                grad_norm = get_grad_norm(optimizer)
+                
             if os.environ.get("MEMORY_SNAPSHOT"):
                 time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
                 save_dir = os.environ.get("PROF_SAVE_PATH", ".")  # 默认当前目录
@@ -559,12 +566,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
                     decoupled_learning_rate = param_group['lr']
                 else:
                     learning_rate = param_group['lr']
-            report_memory_flag = training_log(loss_dict, total_loss_dict,
-                                            learning_rate,
-                                            decoupled_learning_rate,
-                                            iteration, loss_scale,
-                                            report_memory_flag, skipped_iter,
-                                            grad_norm, params_norm, num_zeros_in_grad)
+
+            report_memory_flag = self.log_training_infos(
+                loss_dict, total_loss_dict,
+                learning_rate,
+                decoupled_learning_rate,
+                iteration, loss_scale,
+                report_memory_flag, skipped_iter,
+                grad_norm, params_norm, num_zeros_in_grad
+            )
 
             # breakpoint()
             # Autoresume
@@ -769,6 +779,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin):
         print_rank_last('-' * length)
         print_rank_last(string)
         print_rank_last('-' * length)
+
+        self.log_validation_infos(total_loss_dict, iteration)
 
     def evaluate(
         self,

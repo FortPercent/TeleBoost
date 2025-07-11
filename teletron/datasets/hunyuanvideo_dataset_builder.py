@@ -42,18 +42,20 @@ class HunyuanVideoDatasetBuilder(object):
     def __init__(
         self,
         dataset,
+        dataset_eval,
         sizes: List[int],
         is_built_on_rank: Callable,
         config: BlendedMegatronDatasetConfig,
     ):
         self.dataset = dataset
+        self.dataset_eval = dataset_eval
         self.sizes = sizes
         self.is_built_on_rank = is_built_on_rank
         self.config = config
 
 
     def build(self) -> List[Optional[TopLevelDataset]]:
-        from vast.datasets.transforms import build_transform
+        from teletron.datasets.transform import build_transform
         train_ds_config = self.config.train_ds_config
         # train_ds = ClipDataset(train_ds_config.dataset.data_path_list)
         train_ds = self.dataset
@@ -64,17 +66,18 @@ class HunyuanVideoDatasetBuilder(object):
         if transform_cfg is not None:
             transform = build_transform(train_ds_config.transform)
             train_ds.set_transform(transform)
-        # eval_ds_config = self.config.eval_ds_config
-        # eval_ds = ConcatDataset(eval_ds_config.dataset.data_path_list)
-        # filter_cfg = eval_ds_config.get("filter", None)
-        # if filter_cfg is not None:
-        #     eval_ds.filter(**filter_cfg)
-        # transform_cfg = eval_ds_config.get("transform", None)
-        # if transform_cfg is not None:
-        #     transform = build_transform(eval_ds_config.transform)
-        #     eval_ds.set_transform(transform)
 
-        return train_ds, None, None
+        eval_ds_config = self.config.eval_ds_config
+        # eval_ds = ConcatDataset(eval_ds_config.dataset.data_path_list)
+        eval_ds = self.dataset_eval
+        filter_cfg = eval_ds_config.get("filter", None)
+        if filter_cfg is not None:
+            eval_ds.filter(**filter_cfg)
+        transform_cfg = eval_ds_config.get("transform", None)
+        if transform_cfg is not None:
+            transform = build_transform(eval_ds_config.transform)
+            eval_ds.set_transform(transform)
+        return train_ds, eval_ds, None
         
 
     def _build_blended_dataset_splits(self) -> List[Optional[TopLevelDataset]]:
