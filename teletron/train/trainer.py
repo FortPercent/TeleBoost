@@ -546,7 +546,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                         opt_param_scheduler,
                         config)
             
-            if grad_norm is None:
+            if grad_norm is None and not args.use_zero2:
                 grad_norm = get_grad_norm(optimizer)
                 
             if os.environ.get("MEMORY_SNAPSHOT"):
