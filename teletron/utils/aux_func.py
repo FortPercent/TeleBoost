@@ -717,6 +717,8 @@ def validate_args(args, defaults={}):
     if args.use_dist_ckpt and not args.use_mcore_models:
         raise RuntimeError('--use-dist-ckpt only support Megatron Core, please add --use-mcore-models.')
 
+    if args.use_zero2:
+        assert args.use_dist_ckpt == False, ("When using DeepspeedZero2, dist ckpt format is not supported, please set --use-dist-ckpt False")
     # Print arguments.
     _print_args("arguments", args)
 
