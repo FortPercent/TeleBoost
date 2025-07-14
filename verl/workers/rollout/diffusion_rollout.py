@@ -67,7 +67,9 @@ class DiffusionRollout(BaseRollout):
             assert x == y, f"{msg or 'Assertion failed'}: {x} != {y}"
 
         context=prompts.batch['context']
+        context_orig_lengths = prompts.batch['context_orig_lengths']
         caption=prompts.non_tensor_batch['caption']
+
         B = len(caption)
         
         # B = caption.shape[0]
@@ -101,6 +103,10 @@ class DiffusionRollout(BaseRollout):
         for index, batch_idx in enumerate(batch_indices):
             batch_captions = [caption[i] for i in batch_idx]
             batch_contexts = [context[i].to(get_device_id()) for i in batch_idx]
+            batch_context_orig_lengths = [context_orig_lengths[i] for i in batch_idx]
+
+            for i in range(len(batch_contexts)):
+                batch_contexts[i] = batch_contexts[i][:batch_context_orig_lengths[i]]
             
             if not self.config.init_same_noise:
                 latent_shape = (
@@ -174,6 +180,7 @@ class DiffusionRollout(BaseRollout):
         next_latents=all_latents[:, 1:]
         batch = TensorDict(
             {
+                "context_orig_lengths":context_orig_lengths,
                 "contexts": context,
                 "latents": latents,
                 "next_latents": next_latents,

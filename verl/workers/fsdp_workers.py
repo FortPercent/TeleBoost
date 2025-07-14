@@ -300,7 +300,6 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
 
             fused_kernel_options = self.config.model.get("fused_kernel_options", None)
             fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
-
             apply_monkey_patch(
                 model=actor_module,
                 use_remove_padding=use_remove_padding,
