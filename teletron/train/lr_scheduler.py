@@ -347,8 +347,8 @@ class SchedulerMixin:
                         model: List[MegatronModule], 
                         no_weight_decay_cond: Optional[Callable] = None, 
                         scale_lr_cond: Optional[Callable] = None, 
-                        lr_mult: float = 1.0,
-                        dp_process_group=None,):
+                        lr_mult: float = 1.0,):
+        args = get_args()
         # Collect param groups.
         param_groups = _get_param_groups(
             model,
@@ -390,7 +390,7 @@ class SchedulerMixin:
                 static_loss_scale=1.0,
                 dynamic_loss_scale=False,
                 dynamic_loss_args=None,
-                clip_grad=0.0,
+                clip_grad=args.clip_grad,
                 contiguous_gradients=True,
                 reduce_bucket_size=500000000,
                 use_multi_rank_bucket_allreduce=True,

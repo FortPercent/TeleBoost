@@ -418,7 +418,6 @@ def deepspeed_forward_backward(
     forward_only,
     zero_optimizer,
 ):
-    print(" use_zero2 deepspeed_forward_backward")
     if isinstance(model, list):
         model = model[0]
     config = get_model_config(model)
