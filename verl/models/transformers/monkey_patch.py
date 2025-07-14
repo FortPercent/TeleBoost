@@ -138,13 +138,14 @@ def patch_vlm_for_ulysses_input_slicing(model_class: type):
     model_class.forward = wrapped_forward
     print(f"Monkey patch {model_class.__name__}.forward for Ulysses SP input slicing.")
 
-def patch_diffusion_for_ulysses_input_slicing(model_class: type):
+def patch_diffusion_for_ulysses_input_slicing(model: type):
     """
     Applies a monkey patch to the `blocks.forward` method of a given diffusion model class
     to enable Ulysses sequence parallelism input slicing.
     """
 
     def _create_ulysses_wrapped_block_forward(original_forward):
+        print("begin to adaot")
         def ulysses_wrapped_block_forward(self, *args, **kwargs):
             x = kwargs.get("x")
             
@@ -170,12 +171,14 @@ def patch_diffusion_for_ulysses_input_slicing(model_class: type):
         # 所以我们要 monkey patch 的是 block 的 forward，而不是 model_class.blocks.forward
         # 因此我们需要先实例化模型再做 patch，或者 patch ModuleList 中每个 block 的 forward
         print(model_class)
-        original_forward = model_class.WanAttentionBlock.forward
-        model_class.blocks[0].forward = _create_ulysses_wrapped_block_forward(original_forward)
+        print("-="*10)
+        original_forward = model.blocks[0].forward
+        model.blocks[0].forward = _create_ulysses_wrapped_block_forward(original_forward)
 
-        print(f"Monkey patched {model_class.__name__}.blocks.forward for Ulysses SP input slicing.")
+
+        print(f"Monkey patched {model}.blocks.forward for Ulysses SP input slicing.")
     except Exception as e:
-        print(f"Failed to patch {model_class.__name__}: {e}")
+        print(f"Failed to patch {model}: {e}")
 
 def patch_forward_with_backends(
     model: PreTrainedModel,
@@ -236,7 +239,6 @@ def apply_monkey_patch(
     """
 
     """Replace _flash_attention_forward to _ulysses_flash_attention_forward"""
-    module = sys.modules[model.__module__]
     try:
         num_attention_heads = model.config.num_heads
     except AttributeError:
@@ -263,14 +265,14 @@ def apply_monkey_patch(
     if model.config.model_type == "t2v":
         # from wan.modules.model import WanModel
         if ulysses_sp_size > 1:
-            patch_diffusion_for_ulysses_input_slicing(module)
+            patch_diffusion_for_ulysses_input_slicing(model)
 
             from wan.modules.model import WanSelfAttention,WanI2VCrossAttention
             from .wan import ulysses_self_flash_attn_forward
 
-            WanSelfAttention.forward = ulysses_self_flash_attn_forward
+            module.WanSelfAttention.forward = ulysses_self_flash_attn_forward
             # WanI2VCrossAttention.forward = ulysses_cross_flash_attn_forward
-
+        return
     # TODO: VLM models only, unify monkey patch to LLM models.
     if model.config.model_type == "qwen2_5_vl":
         from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (

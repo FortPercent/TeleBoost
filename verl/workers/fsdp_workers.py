@@ -291,6 +291,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 torch_dtype=torch_dtype,
                 trust_remote_code=trust_remote_code
             )
+            print(dir(actor_module))
+            print("*"*100)
 
             # Apply Liger kernel to the model if use_liger is set to True
             if use_liger:
