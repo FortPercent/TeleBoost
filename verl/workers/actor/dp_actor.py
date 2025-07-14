@@ -142,7 +142,7 @@ class DataParallelPPOActor(BasePPOActor):
                 if self.use_fused_kernels:
                     extra_args["temperature"] = temperature
                     extra_args["return_dict"] = True
-
+            
                 output = self.actor_module(
                     input_ids=input_ids_rmpad,
                     attention_mask=None,

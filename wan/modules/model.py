@@ -49,7 +49,8 @@ def rope_apply(x, grid_sizes, freqs):
     # loop over samples
     output = []
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
-        seq_len = f * h * w
+        # seq_len = f * h * w
+        seq_len=x.size(1)
 
         # precompute multipliers
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
@@ -59,7 +60,7 @@ def rope_apply(x, grid_sizes, freqs):
             freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
             freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
         ],
-                            dim=-1).reshape(seq_len, 1, -1)
+            dim=-1).reshape(seq_len, 1, -1)
 
         # apply rotary embedding
         x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
@@ -145,6 +146,8 @@ class WanSelfAttention(nn.Module):
             return q, k, v
 
         q, k, v = qkv_fn(x)
+        #TODO gather
+        print("*"*10,q.shape)
 
         x = flash_attention(
             q=rope_apply(q, grid_sizes, freqs),
@@ -152,7 +155,7 @@ class WanSelfAttention(nn.Module):
             v=v,
             k_lens=seq_lens,
             window_size=self.window_size)
-
+        #TODO gather
         # output
         x = x.flatten(2)
         x = self.o(x)
@@ -534,8 +537,10 @@ class WanModel(ModelMixin, ConfigMixin):
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
+
         x = [u.flatten(2).transpose(1, 2) for u in x]
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
+
         assert seq_lens.max() <= seq_len
         x = torch.cat([
             torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
@@ -571,9 +576,21 @@ class WanModel(ModelMixin, ConfigMixin):
             freqs=self.freqs,
             context=context,
             context_lens=context_lens)
-
+        
+        from verl.utils.ulysses import (
+            gather_heads_scatter_seq,
+            gather_seq_scatter_heads,
+            get_ulysses_sequence_parallel_group,
+            get_ulysses_sequence_parallel_world_size,
+            slice_input_tensor,
+        )
+        current_ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
+        total_seq_len = x.shape
+        pad_size = (current_ulysses_sp_size - total_seq_len[1] % current_ulysses_sp_size) % current_ulysses_sp_size
+        x = torch.nn.functional.pad(x, (0, 0, 0, pad_size), value=0)
+        x_sliced = slice_input_tensor(x, dim=1, padding=False)
         for block in self.blocks:
-            x = block(x, **kwargs)
+            x = block(x=x, **kwargs)
 
         # head
         x = self.head(x, e)

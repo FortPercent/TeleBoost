@@ -20,6 +20,7 @@ import os
 import re
 from collections import defaultdict
 from typing import List, Optional, Union
+import torch.nn.functional as F
 
 import datasets
 import numpy as np
@@ -33,6 +34,36 @@ from verl.utils.model import compute_position_id_with_mask
 
 logger = logging.getLogger(__name__)
 
+def wan_preprocessed_collate_function(data_list: list[dict]) -> dict:
+    tensors = defaultdict(list)
+    non_tensors = defaultdict(list)
+    orig_lengths = defaultdict(list)
+    for data in data_list:
+        for key, val in data.items():
+            if isinstance(val, torch.Tensor):
+                tensors[key].append(val)
+                orig_lengths[key].append(val.shape[0])  # 记录原始长度
+            else:
+                non_tensors[key].append(val)
+    # 第二步：对 Tensor pad 成相同长度
+    for key, val_list in tensors.items():
+        max_len = max(v.shape[0] for v in val_list)
+        padded_list = []
+        for v in val_list:
+            pad_len = max_len - v.shape[0]
+            v_padded = F.pad(v, (0, 0, 0, pad_len), value=0.0)  # pad: [left, right, top, bottom]
+            padded_list.append(v_padded)
+        tensors[key] = torch.stack(padded_list, dim=0)  # [B, max_len, D]
+    # 把原始长度也作为 tensor 存进去，key 加个前缀或后缀避免冲突
+
+    for key, val_list in orig_lengths.items():
+        tensors[f"{key}_orig_lengths"] = torch.tensor(val_list, dtype=torch.int)
+
+        # 可选：non_tensors 可以变成 numpy array（不影响主逻辑）
+    for key, val in non_tensors.items():
+        non_tensors[key] = np.array(val, dtype=object)
+
+    return {**tensors, **non_tensors}
 
 def collate_fn(data_list: list[dict]) -> dict:
     """

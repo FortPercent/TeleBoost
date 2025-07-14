@@ -111,10 +111,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 
                 # pop those keys for generation TODO!!!
                 if self.config.trainer.type=="diffusion":
-                    # print("new_batch keys:", new_batch.batch_keys.keys())
                     # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
                     gen_batch = new_batch.pop(
-                        batch_keys=["context"],
+                        batch_keys=["context","context_orig_lengths"],
                         non_tensor_batch_keys=["caption"],
                     )
                     gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)

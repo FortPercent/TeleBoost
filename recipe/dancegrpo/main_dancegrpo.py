@@ -124,12 +124,15 @@ class TaskRunner:
         
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
+        from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
+
         trainer = RayDanceGRPOTrainer(
             config=config,
             tokenizer=tokenizer,
             processor=processor,
             role_worker_mapping=role_worker_mapping,
             resource_pool_manager=resource_pool_manager,
+            collate_fn=wan_preprocessed_collate_function,
             ray_worker_group_cls=ray_worker_group_cls,
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
