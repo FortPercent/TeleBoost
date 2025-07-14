@@ -11,6 +11,7 @@ from verl import DataProto
 from verl.utils.device import get_device_name
 from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
 from verl.workers.actor import DataParallelPPOActor
+from verl.utils.ulysses import gather_outpus_and_unpad
 
 from verl.utils.debug import GPUMemoryLogger
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
@@ -34,8 +35,11 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             torch.randperm(len(timesteps[0])) 
             for _ in range(data.batch.batch_size[0])
         ]).to(get_device_id())
-
+        
         # 对关键 tensor 字段进行 step-level 打乱
+        for key in ["context_orig_lengths"]:
+            data.batch[key] =  data.batch[key][perms]
+            
         for key in ["timesteps", "latents", "next_latents", "log_probs"]:
             data.batch[key] =  data.batch[key][
                 torch.arange(data.batch.batch_size[0]).to(get_device_id())[:, None],
@@ -47,7 +51,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         
         # num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
 
-        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages"]
+        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages","context_orig_lengths"]
         non_tensor_select_keys = ["caption"]
 
         # Split to make minibatch iterator for updating the actor
@@ -77,7 +81,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
 
             self.actor_optimizer.zero_grad()
-            context=[data.batch["contexts"].squeeze(0)]
+            target_length = data.batch["contexts"][0].shape[0]
+            for i in range(len(data)):
+                data.batch["contexts"][i] = data.batch["contexts"][i][:target_length]
+            # print(data.batch["contexts"][0].shape)
+            # context=[data.batch["contexts"].squeeze(0)]
+            context=data.batch["contexts"]
             for step_idx in range(train_timesteps):
                 clip_range = self.config.clip_range
                 adv_clip_max = self.config.adv_clip_max
@@ -153,7 +162,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         
         # 使用适当的数据类型进行autocast
         autocast_dtype = torch.float16
-        # print("[DEBUG],157",context[0].shape)
         with torch.autocast("cuda", dtype=autocast_dtype):
             pred = transformer(
                 x=[latents],

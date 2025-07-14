@@ -22,7 +22,7 @@ loss_agg_mode="token-mean"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
-train_prompt_bsz=1
+train_prompt_bsz=2
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=12
 train_prompt_mini_bsz=1
@@ -46,12 +46,12 @@ top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
 val_top_p=0.7
 
 # Performance Related Parameter
-sp_size=1
+sp_size=2
 use_dynamic_bsz=False
 actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
 infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
 offload=True
-gen_tp=4
+gen_tp=1
 
 HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     data.train_files="${TRAIN_FILE}" \
