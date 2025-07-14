@@ -47,6 +47,7 @@ class DataloaderMixin:
                 valid_ds, 0, dp_rank, dp_size
             )
         else:
+            args.consumed_valid_samples = args.consumed_valid_samples % len(valid_ds)
             valid_dataloader = self.build_pretraining_data_loader(
                 valid_ds, args.consumed_valid_samples, dp_rank, dp_size
             )
