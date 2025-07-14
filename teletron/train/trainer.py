@@ -4,6 +4,7 @@ import dataclasses
 import time
 import sys
 import gc
+import os
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.transformer.module import Float16Module
 from megatron.core.enums import ModelType
@@ -13,6 +14,8 @@ from teletron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import (
     OptimizerConfig,
 )
+import deepspeed
+
 from teletron.utils import (
     print_rank_0,
     print_datetime,
@@ -32,6 +35,7 @@ from teletron.train.utils import (
     set_jit_fusion_options,
     core_transformer_config_from_args,
     forward_step,
+    deepspeed_forward_backward,
     _set_random_seed,
     _initialize_tp_communicators,
     calc_params_l2_norm,
@@ -114,7 +118,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         # timers = get_timers()
         assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
         # timers = get_timers()
-        model = self.get_model(model_type)
+        if args.use_zero2:
+            model = self.get_model(model_type, wrap_with_ddp=False)
+        else:
+            model = self.get_model(model_type)
         unwrapped_model = unwrap_model(model)
         kwargs = {}
         for f in dataclasses.fields(OptimizerConfig):
@@ -122,7 +129,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 kwargs[f.name] = getattr(args, f.name)
         config = OptimizerConfig(**kwargs)
         config.timers = None
-        optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
+        if args.use_zero2:
+            deepspeed.init_distributed()
+            optimizer = self.get_optimizer_for_zero2(config, model, no_wd_decay_cond,
+                                        scale_lr_cond, lr_mult)
+        else:
+            optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
                                         scale_lr_cond, lr_mult)
 
         opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
@@ -466,7 +478,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         num_floating_point_operations_so_far = args.num_floating_point_operations_so_far
 
         # Setup some training config params
-        config.grad_scale_func = self.optimizer.scale_loss
+        # config.grad_scale_func = self.optimizer.scale_loss
         if isinstance(model[0], DDP) and args.overlap_grad_reduce:
             assert config.no_sync_func is None, \
                 ('When overlap_grad_reduce is True, config.no_sync_func must be None; '
@@ -523,7 +535,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             update_num_microbatches(args.consumed_train_samples, consistency_check=True)
 
             args.curr_iteration = iteration
-            import os
+            
             if os.environ.get("MEMORY_SNAPSHOT"):
                 torch.cuda.memory._record_memory_history(max_entries=80000)
             loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
@@ -551,7 +563,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             num_floating_point_operations_so_far += num_floating_point_operations(args, batch_size)
 
             # Logging.
-            loss_scale = optimizer.get_loss_scale().item()
+            if args.use_zero2:
+                loss_scale = optimizer._get_loss_scale()
+            else:
+                loss_scale = optimizer.get_loss_scale().item()
             params_norm = None
             if args.log_params_norm:
                 params_norm = calc_params_l2_norm(model)
@@ -682,28 +697,33 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         """Single training step."""
         args = get_args()
 
-        # Set grad to zero.
-        for model_chunk in model:
-            model_chunk.zero_grad_buffer()
+        if not args.use_zero2:
+            for model_chunk in model:
+                model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
 
-        # import os, debugpy
-        # dist.barrier()
-        # if int(os.environ.get("RANK","0")) == 0:
-        #     debugpy.breakpoint()
-        # dist.barrier()
-        # Forward pass.
-        forward_backward_func = get_forward_backward_func()
-
-        losses_reduced = forward_backward_func(
-            forward_step_func=forward_step_func,
-            data_iterator=data_iterator,
-            model=model,
-            num_microbatches=get_num_microbatches(),
-            seq_length=args.seq_length,
-            micro_batch_size=args.micro_batch_size,
-            decoder_seq_length=args.decoder_seq_length,
-            forward_only=False)
+        if args.use_zero2:
+            losses_reduced = deepspeed_forward_backward(
+                forward_step_func=forward_step_func,
+                data_iterator=data_iterator,
+                model=model,
+                num_microbatches=get_num_microbatches(),
+                seq_length=args.seq_length,
+                micro_batch_size=args.micro_batch_size,
+                decoder_seq_length=args.decoder_seq_length,
+                forward_only=False,
+                zero_optimizer=optimizer)
+        else:
+            forward_backward_func = get_forward_backward_func()
+            losses_reduced = forward_backward_func(
+                forward_step_func=forward_step_func,
+                data_iterator=data_iterator,
+                model=model,
+                num_microbatches=get_num_microbatches(),
+                seq_length=args.seq_length,
+                micro_batch_size=args.micro_batch_size,
+                decoder_seq_length=args.decoder_seq_length,
+                forward_only=False)
 
         # breakpoint()
         # Empty unused memory.
@@ -716,7 +736,13 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
 
         # Update parameters.
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        if args.use_zero2:
+            optimizer.step()
+            update_successful = True
+            grad_norm = None
+            num_zeros_in_grad = None
+        else:
+            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
 
         # Vision momentum.
         if getattr(args, 'vision_pretraining', False) and args.vision_pretraining_type == "dino":

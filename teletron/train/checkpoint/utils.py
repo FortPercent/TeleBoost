@@ -3,8 +3,7 @@ import sys
 import torch
 import random 
 import numpy as np 
-from .aux_func import print_rank_0
-from .config import get_args
+from teletron.utils import print_rank_0, get_args
 from megatron.core import mpu, tensor_parallel, dist_checkpointing
 from megatron.core.dist_checkpointing.mapping import ShardedObject
 
@@ -47,7 +46,9 @@ def get_checkpoint_name(checkpoints_path, iteration, release=False,
                         pipeline_parallel=None,
                         tensor_rank=None, pipeline_rank=None,
                         expert_parallel=None, expert_rank=None,
-                        return_base_dir=False):
+                        return_base_dir=False,
+                        use_zero2=False,
+                        ):
     """Determine the directory name for this rank's checkpoint."""
     if release:
         directory = 'release'
@@ -81,6 +82,15 @@ def get_checkpoint_name(checkpoints_path, iteration, release=False,
 
     if expert_parallel:
         common_path = common_path + f'_{expert_rank:03d}'
+
+    if use_zero2:
+        optimizer_checkpoint_names = []
+        dp_size = mpu.get_data_parallel_world_size()
+        cp_size = mpu.get_context_parallel_world_size()
+        for dp in range(dp_size):
+            for cp in range(cp_size):
+                optimizer_checkpoint_names.append(os.path.join(common_path, f"zero2_optim_dp{dp}_cp{cp}.pt"))
+        return optimizer_checkpoint_names
 
     return os.path.join(common_path, "model_optim_rng.pt")
 
