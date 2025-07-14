@@ -1,4 +1,4 @@
-
+import os
 import torch
 import torch.distributed as dist
 import collections
@@ -6,7 +6,8 @@ import time
 from typing import Callable, Any, Dict
 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
-from teletron.utils import (get_args)
+from teletron.utils import get_args
+from teletron.train.checkpoint import ensure_directory_exists
 from teletron.models.encoder_registry import get_encoder
 
 from teletron.models.encoder_registry import (BaseEncoder)
@@ -113,9 +114,27 @@ def producer_process(
     send_size_reqs = []  # (req, consumer_rank, item_idx, size_tensor)
     send_data_reqs = []  # (req, consumer_rank, item_idx, data_tensor)
 
+    if args.producer_profile:
+        prof_save_path = os.path.join(args.profile_path, f"producer/rank_{dist.get_rank()}.json")
+        ensure_directory_exists(prof_save_path)
+        def trace_handler(p):
+            p.export_chrome_trace(prof_save_path)
+
+        prof = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            with_stack=True,
+            on_trace_ready=trace_handler,
+            record_shapes=True
+        )
+    index = 0
+
     try:
         while any(items_initiated_send[cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in comm_pairs):
-
+            if args.producer_profile and index == args.profile_step_start:
+                prof.start()
+            if args.producer_profile and index == args.profile_step_end:
+                prof.stop()
+            index += 1
             # --- 阶段 A: 处理已完成的发送请求 ---
             send_size_reqs = [r for r in send_size_reqs if not r[0].is_completed()]
             send_data_reqs = [r for r in send_data_reqs if not r[0].is_completed()]
