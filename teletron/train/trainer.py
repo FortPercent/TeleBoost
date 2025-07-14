@@ -9,7 +9,7 @@ from megatron.core.transformer.module import Float16Module
 from megatron.core.enums import ModelType
 from megatron.core.distributed import finalize_model_grads
 from megatron.core import mpu, tensor_parallel
-from megatron.core.distributed import DistributedDataParallel as DDP
+from teletron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import (
     OptimizerConfig,
 )
