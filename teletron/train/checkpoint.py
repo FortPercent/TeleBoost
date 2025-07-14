@@ -442,7 +442,7 @@ class CheckPointMixin:
         
         model_checkpoint_name = get_checkpoint_name(load_dir, iteration, release, return_base_dir=False)
         optimizer_state_dict_names = get_checkpoint_name(load_dir, iteration, release, return_base_dir=False, use_zero2=True)
-        print(f"model_checkpoint_name:{model_checkpoint_name} optimizer_state_dict_names:{optimizer_state_dict_names}")
+
         dist_infix = "distributed " if is_dist_ckpt else ""
         if release:
             print_rank_0(f' loading release {dist_infix}checkpoint from {load_dir}')
@@ -453,8 +453,6 @@ class CheckPointMixin:
             #import ipdb; ipdb.set_trace()
             state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
             self.load_zero2_optimizer(optimizer_state_dict_names, state_dict)
-            for name, key in state_dict.items():
-                print(f"name :{name}")
             #import ipdb; ipdb.set_trace()
         except ModuleNotFoundError:
             # from megatron.legacy.fp16_deprecated import loss_scaler
@@ -466,6 +464,7 @@ class CheckPointMixin:
             sys.modules['megatron.model'] = sys.modules['megatron.legacy.model']
             #import ipdb; ipdb.set_trace()
             state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
+            self.load_zero2_optimizer(optimizer_state_dict_names, state_dict)
             sys.modules.pop('fp16.loss_scaler', None)
             sys.modules.pop('megatron.fp16.loss_scaler', None)
             sys.modules.pop('megatron.model', None)
