@@ -2,7 +2,7 @@ from teletron.utils.prompt import clean_prompt
 import random
 import logging
 from teleai_data_tool.schema.clip import Clip, ImageWithCaption
-from teletron.utils.checkpoint import get_model_path
+from teletron.train.checkpoint import get_model_path
 from .text_encoder import PromptEncoder
 from .clip_transform import CLIPTextTransform
 
