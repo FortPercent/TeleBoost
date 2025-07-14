@@ -702,12 +702,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
 
-        # import os, debugpy
-        # dist.barrier()
-        # if int(os.environ.get("RANK","0")) == 0:
-        #     debugpy.breakpoint()
-        # dist.barrier()
-        # Forward pass.
         if args.use_zero2:
             losses_reduced = deepspeed_forward_backward(
                 forward_step_func=forward_step_func,

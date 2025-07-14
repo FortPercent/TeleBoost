@@ -1,17 +1,17 @@
 import os
+import sys
+import random
 import torch
+import numpy as np
 from megatron.core.transformer.module import Float16Module
 from megatron.core.distributed import DistributedDataParallel as DDP
+from megatron.core import mpu, tensor_parallel, dist_checkpointing
 from teletron.utils import (
     print_rank_0,
     get_args,
     update_num_microbatches,
 )
-import sys
-import random
-import numpy as np
-from megatron.core import mpu, tensor_parallel, dist_checkpointing
-from teletron.utils.checkpoint import (
+from .utils import (
     _load_base_checkpoint,
     read_metadata,
     get_checkpoint_name,
@@ -21,6 +21,7 @@ from teletron.utils.checkpoint import (
     checkpoint_exists,
     get_distributed_optimizer_checkpoint_name,
 )
+
 
 ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, Float16Module)
 
@@ -72,7 +73,7 @@ class CheckPointMixin:
             optimizer.save_parameter_state(optim_checkpoint_name)
 
         # Save Deepspeed Zero2 shared optimizer's parameter state.
-        if args.use_zero2 and not args.no_save_optim and optimizer is not None and not args.use_dist_ckpt:
+        if args.use_zero2 and not args.no_save_optim and optimizer is not None:
             dp_rank = mpu.get_data_parallel_rank()
             cp_rank = mpu.get_context_parallel_rank()
             optim_checkpoint_name = \
@@ -450,10 +451,8 @@ class CheckPointMixin:
             print_rank_0(f' loading {dist_infix}checkpoint from {load_dir} at iteration {iteration}')
         # Load the checkpoint.
         try:
-            #import ipdb; ipdb.set_trace()
             state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
             self.load_zero2_optimizer(optimizer_state_dict_names, state_dict)
-            #import ipdb; ipdb.set_trace()
         except ModuleNotFoundError:
             # from megatron.legacy.fp16_deprecated import loss_scaler
             # For backward compatibility.
@@ -462,7 +461,6 @@ class CheckPointMixin:
             sys.modules['megatron.fp16.loss_scaler'] = sys.modules[
                 'megatron.legacy.fp16_deprecated.loss_scaler']
             sys.modules['megatron.model'] = sys.modules['megatron.legacy.model']
-            #import ipdb; ipdb.set_trace()
             state_dict = torch.load(model_checkpoint_name, map_location='cpu', weights_only=False)
             self.load_zero2_optimizer(optimizer_state_dict_names, state_dict)
             sys.modules.pop('fp16.loss_scaler', None)

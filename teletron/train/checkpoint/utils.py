@@ -3,8 +3,7 @@ import sys
 import torch
 import random 
 import numpy as np 
-from .aux_func import print_rank_0
-from .config import get_args
+from teletron.utils import print_rank_0, get_args
 from megatron.core import mpu, tensor_parallel, dist_checkpointing
 from megatron.core.dist_checkpointing.mapping import ShardedObject
 
