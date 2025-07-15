@@ -120,7 +120,7 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
-    --data-parallel-random-init
+    # --data-parallel-random-init
     # --distribute-saved-activations
 )
 

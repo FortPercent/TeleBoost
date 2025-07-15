@@ -363,7 +363,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             from teletron.core.parallel_state import get_transformer_model_group
             isDiTRank = get_transformer_model_group()
             if isDiTRank is not None:
-                _set_random_seed(args.seed, args.data_parallel_random_init)
+                _set_random_seed(args.seed, True)
         args = get_args()
 
         if args.lazy_mpu_init:
