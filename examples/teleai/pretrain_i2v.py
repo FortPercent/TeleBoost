@@ -33,6 +33,7 @@ def forward_step(data_iterator, model):
     timestep_range = [0, flow_scheduler.num_train_timesteps]
 
     timestep_id = torch.randint(timestep_range[0], timestep_range[1], (1,))
+    
     timestep = flow_scheduler.timesteps[timestep_id].to(
         dtype=torch.bfloat16, device=torch.cuda.current_device()
     )
