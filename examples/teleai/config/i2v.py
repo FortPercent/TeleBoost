@@ -1,7 +1,7 @@
 import os
 import math
 
-dst_size = (1280, 720)
+dst_size = (832, 480)
 dst_fps = 16
 dst_num_frames = 81
 

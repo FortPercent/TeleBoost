@@ -38,9 +38,9 @@ def get_vast_wan_state_dict(args):
 
     dit_path = args.load_path
     dit_path = [os.path.join(dit_path, f) for f in os.listdir(dit_path) if f.endswith(".pth") or f.endswith(".bin")]
-    vae_path = "/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth"
-    image_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
-    text_encoder_path = "/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth"
+    vae_path = "/nvfile-heatstorage/myk/vast/dense_models/Wan2.1_VAE.pth"
+    image_encoder_path = "/nvfile-heatstorage/myk/vast/dense_models/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    text_encoder_path = "/nvfile-heatstorage/myk/vast/dense_models/models_t5_umt5-xxl-enc-bf16.pth"
 
     log.info(f"dit path: {dit_path}")
     log.info(f"vae_path: {vae_path}")
@@ -50,8 +50,8 @@ def get_vast_wan_state_dict(args):
     model_manager = ModelManager(torch_dtype=torch.bfloat16, device="cpu")
     model_manager.load_models([
         text_encoder_path, vae_path, image_encoder_path, 
-        *dit_path
     ])
+    model_manager.load_model(*dit_path)
 
     pipe = WanVideoPipeline.from_model_manager(model_manager)
 

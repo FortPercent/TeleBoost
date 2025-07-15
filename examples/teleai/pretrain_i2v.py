@@ -24,14 +24,14 @@ def extra_args(parser):
     return parser
 
 def forward_step(data_iterator, model):
-    flow_scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)
+    flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
     prompt_emb = {}
     batch = next(data_iterator)
     latents = batch["latents"]
-    noise = torch.randn_like(latents) if "noise" not in batch else batch["noise"]
-    timestep_range = [0, flow_scheduler.num_train_timesteps] if "timestep_range" not in batch else batch["timestep_range"]
-    #("timestep_range", timestep_range)
+    noise = torch.randn_like(latents) 
+    timestep_range = [0, flow_scheduler.num_train_timesteps]
+
     timestep_id = torch.randint(timestep_range[0], timestep_range[1], (1,))
     timestep = flow_scheduler.timesteps[timestep_id].to(
         dtype=torch.bfloat16, device=torch.cuda.current_device()
@@ -47,13 +47,10 @@ def forward_step(data_iterator, model):
     training_target = flow_scheduler.training_target(latents, noise, timestep)
     image_emb = {}
     image_emb["y"] = batch["image_emb_y"]
-    #print('y shape', image_emb['y'].shape)
+    
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
-    #print('x shape', latents.shape)
-    image_emb["clip_feature"] = batch["clip_feature"]
 
-    #print("batch[clip_feature].shape", batch["clip_feature"].shape)
-    #print("noisy_latents.shape", noisy_latents.shape)
+    image_emb["clip_feature"] = batch["clip_feature"]
 
     output_tensor_list = model(x=noisy_latents, 
                                timestep=timestep, 
@@ -66,8 +63,17 @@ def forward_step(data_iterator, model):
     )
     loss_wo_w = loss
     loss = loss * flow_scheduler.training_weight(timestep)
+
+    first_frame_pred = output_tensor_list[:, :, :1, :, :]
+    first_frame_target = training_target[:, :, :1, :, :]
+    assert first_frame_pred.shape[1] == 16
+    first_frame_loss = torch.nn.functional.mse_loss(
+        first_frame_pred.float(), first_frame_target.float()
+    )
+    loss += first_frame_loss
+
     # print("loss", loss)
-    return [loss, loss_wo_w], loss_func
+    return [loss, loss_wo_w, first_frame_loss], loss_func
 
 
 

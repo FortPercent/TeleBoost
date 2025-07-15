@@ -27,16 +27,16 @@ T5_CONTEXT_TOKEN_NUMBER = 512
 from .converter import TeleaiModelStateDictConverter
 
 class TeleaiParams:
-    hidden_size: int = 5120
+    hidden_size: int = 1536
     in_channels: int = 36
     out_channels: int = 16
     text_dim: int = 4096
     freq_dim: int = 256
-    ffn_dim: int = 13824
+    ffn_dim: int = 8960
     eps: float = 1e-6
     patch_size: Tuple[int, int, int] = (1, 2, 2)
-    num_attention_heads: int = 40
-    num_layers: int = 25
+    num_attention_heads: int = 12
+    num_layers: int = 30
     has_image_input: bool = True
     has_image_pos_emb: bool = False
 
