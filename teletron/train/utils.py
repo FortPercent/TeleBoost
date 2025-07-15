@@ -388,7 +388,12 @@ def loss_func(output_tensor):
     loss_wo_w = output_tensor[1].mean()
     averaged_loss_wo_w  = average_losses_across_data_parallel_group([loss_wo_w])
     loss_wo_w = loss_wo_w.unsqueeze(0)
-    return loss, {"loss": averaged_loss[0], "loss_wo_w": averaged_loss_wo_w[0]}
+
+    loss_f1 = output_tensor[2].mean()
+    averaged_loss_f1  = average_losses_across_data_parallel_group([loss_f1])
+    loss_f1 = loss_f1.unsqueeze(0)
+
+    return loss, {"loss": averaged_loss[0], "loss_wo_w": averaged_loss_wo_w[0], "loss_f1": averaged_loss_f1[0]}
 
 def forward_step(data_iterator, model):
     """Forward training step.
