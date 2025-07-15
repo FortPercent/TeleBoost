@@ -20,3 +20,4 @@ debug/
 checkpoint/*
 results/*
 examples/teleai/results
+logs*
