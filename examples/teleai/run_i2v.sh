@@ -27,8 +27,8 @@ TP=1 # not support
 # Multi-node config 
 N_MOE=1
 N_LAYERS=30
-N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=8
+N_GPU_FOR_TRAIN=24
+N_GPU_FOR_DATA=16
 
 # Single-node config 
 # N_MOE=1
@@ -36,9 +36,9 @@ N_GPU_FOR_DATA=8
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-TENSORBOARD_LOGS_PATH=./logs
+TENSORBOARD_LOGS_PATH=./logs_bf16
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/1.3B_I2V
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16
 mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
@@ -66,22 +66,8 @@ if [ $N_MOE -eq 1 ]; then
         --moe-step-factor-list 0.0 
         --moe-step-factor-list 1.0 
     )
-elif [ $N_MOE -eq 2 ]; then
-    MOE_ARGS=(
-        --moe-step-factor-list 0.0 
-        --moe-step-factor-list 0.833 
-        --moe-step-factor-list 1.0
-    )
-elif [ $N_MOE -eq 4 ]; then
-    MOE_ARGS=(
-        --moe-step-factor-list 0.0 
-        --moe-step-factor-list 0.625 
-        --moe-step-factor-list 0.833
-        --moe-step-factor-list 0.937 
-        --moe-step-factor-list 1.0
-    )
 else
-    echo "N_MOE must be 1, 2 or 4"
+    echo "N_MOE must be 1"
     exit 1
 fi
 
@@ -107,6 +93,7 @@ DISTRIBUTED_ARGS=(
 GPT_MODEL_ARGS=(
     --num-layers $N_LAYERS
     --hidden-size 1536
+    --ffn-hidden-size 8960
     --num-attention-heads 12
     --seq-length 512          
     --max-position-embeddings 4096
@@ -118,13 +105,13 @@ TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 100000
+    --train-iters 200000
     --weight-decay 1e-4
     --init-method-std 0.006 
     --clip-grad 0.0
     --bf16
     --lr 1e-5
-    --lr-decay-style cosine
+    --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full 
     --recompute-method block 
@@ -133,6 +120,7 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
+    --data-parallel-random-init
     # --distribute-saved-activations
 )
 
