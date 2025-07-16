@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
-from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTYte_DIMS
+from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTY_DIMS
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
     features = [packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))]
@@ -217,7 +217,12 @@ def create_batch_loader(args, data_iterator):
             return VastDistBatchLoader(data_iterator)
         else:
             raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")
-    
+    elif 'wan' in model_name_lower:
+        if is_distributed_vae:
+            print("Info: Creating VastDistBatchLoader.")
+            return VastDistBatchLoader(data_iterator)
+        else:
+            raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")        
     elif 'hunyuan' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating HunyuanDistBatchLoader.")

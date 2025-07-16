@@ -1,24 +1,26 @@
 import torch
-from teletron.train import Trainer, parse_args
 import torch.distributed as dist
-from teletron.models.teleai.schedulers.flow_match import FlowMatchScheduler
 from megatron.core import mpu
-from teletron.train.utils import get_batch, loss_func
 
+from teletron.models.flow_match import FlowMatchScheduler
+from teletron.train import Trainer, parse_args
+from teletron.train.utils import average_losses_across_data_parallel_group
 
+def loss_func(output_tensor):
+    """Loss function."""
+    loss = output_tensor[0].mean()
+    averaged_loss = average_losses_across_data_parallel_group([loss])
+    loss = loss.unsqueeze(0)
+    return loss, {"loss": averaged_loss[0]}
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
     # follow this format to add
     # group.add_argument("--test_valid", type=str, default="")
+    group.add_argument("--moe-step-factor-list", type=float, action='append')
     group = parser.add_argument_group(title='encoder args')
-    group.add_argument("--encoder_model_path", type=str, nargs = '+',default=
-                       ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
-                        '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
-                        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pt']
-                       )
-    group.add_argument("--encoder_tokenizer_path", type=str, default=
-                       "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
+    group.add_argument("--encoder-model-path", type=str, default=None)
+    group.add_argument("--encoder-tokenizer-path", type=str, default=None)
     return parser
 
 def forward_step(data_iterator, model):
