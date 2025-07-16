@@ -10,7 +10,8 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_img_clip_feature,
     get_img_emb_y,
     get_latents,
-    get_noise
+    get_noise,
+    get_fake_latents
 )
 from teletron.utils import get_args
 from functools import partial
@@ -27,6 +28,7 @@ WORK_FN = {
     'img_emb_y': get_img_emb_y,
     'latents': get_latents,
     'noise': get_noise,
+    'fake_latents': get_fake_latents,
 }
 
 PROPERTY_DIMS = {
@@ -107,6 +109,8 @@ class TeleaiEncoder(BaseEncoder):
             return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
         elif target == 'noise':
             return partial(work_fn, dtype=torch.bfloat16)
+        elif target == 'fake_latents':
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
         else:
             return work_fn
 

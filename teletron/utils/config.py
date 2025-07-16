@@ -73,6 +73,8 @@ def set_config():
         from config.vast import config
     elif args.task_type == "teleai_i2v":
         from config.i2v import config
+    elif args.task_type == "teleai_sr":
+        from config.sr import config
     else:
         return None
     config_vast = load_config(config)
