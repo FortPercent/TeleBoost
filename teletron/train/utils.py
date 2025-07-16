@@ -971,7 +971,7 @@ def set_config():
         from config.i2v import config
     else:
         return None
-    assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
+    # assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
     config_vast = load_config(config)
     return config_vast
 
@@ -1652,6 +1652,12 @@ def _add_training_args(parser):
     group.add_argument('--no-clone-scatter-output-in-embedding', action='store_false',
                        help='If not set, clone the output of the scatter in embedding layer to GC original tensor.',
                        dest='clone_scatter_output_in_embedding')
+    group.add_argument('--consumer-profile', action='store_true',
+                       help='Enable transformer blocks torch profiling.')
+    group.add_argument('--producer-profile', action='store_true',
+                       help='Enable data producer torch profiling.')
+    group.add_argument('--profile-path', type=str, default=None,
+                       help='Directory to save torch profiling traces.')
     group.add_argument('--profile', action='store_true',
                        help='Enable nsys profiling. When using this option, nsys '
                        'options should be specified in commandline. An example '
