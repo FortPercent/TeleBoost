@@ -26,7 +26,7 @@ def extra_args(parser):
 def forward_step(data_iterator, model):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
-    prompt_emb = {}
+    
     batch = next(data_iterator)
     latents = batch["latents"]
     noise = torch.randn_like(latents) 
@@ -44,20 +44,14 @@ def forward_step(data_iterator, model):
 
     broadcast_timesteps(timestep)
     broadcast_timesteps(noise)
-    prompt_emb["context"] = batch["context"]
-    training_target = flow_scheduler.training_target(latents, noise, timestep)
-    image_emb = {}
-    image_emb["y"] = batch["image_emb_y"]
-    
+
+    training_target = flow_scheduler.training_target(latents, noise, timestep)    
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
-
-    image_emb["clip_feature"] = batch["clip_feature"]
-
     output_tensor_list = model(x=noisy_latents, 
                                timestep=timestep, 
-                               context=prompt_emb["context"],
-                               clip_feature=image_emb["clip_feature"],
-                               y=image_emb["y"])
+                               context=batch['context'],
+                               clip_feature=batch['img_clip_feature'],
+                               y=batch['img_emb_y'])
 
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
