@@ -15,8 +15,6 @@ from teletron.train.utils import (
     _add_validation_args,
     _add_data_args,
     _add_autoresume_args,
-    _add_biencoder_args,
-    _add_vision_args,
     _add_moe_args,
     _add_logging_args,
     _add_inference_args,
@@ -288,8 +286,6 @@ def parse_args(extra_args=None):
     parser = _add_validation_args(parser)
     parser = _add_data_args(parser)
     parser = _add_autoresume_args(parser)
-    parser = _add_biencoder_args(parser)
-    parser = _add_vision_args(parser)
     parser = _add_moe_args(parser)
     parser = _add_logging_args(parser)
     parser = _add_inference_args(parser)
