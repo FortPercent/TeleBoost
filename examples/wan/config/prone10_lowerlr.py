@@ -200,7 +200,13 @@ config = dict(
                 is_equal=True,
             ),
         ),
+        eval=dict(
+            data_path_list=[
+                "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_1.json",
+            ],
+        ),
     ),
+    
     models=dict(
         text_encoder_path="/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
         vae_path="workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",

@@ -1,7 +1,7 @@
 
 import torch
 from typing import Dict, Any, Tuple, List
-from teletron.models.encoder_registry import (register_encoder, BaseEncoder)
+from teletron.core.distributed.base_encoder import BaseEncoder
 from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
 from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
 from teletron.models.teleai.models.dit.teleai_dit import ModelManager
@@ -39,7 +39,6 @@ PROPERTY_DIMS = {
 }
 
 
-@register_encoder("teleai_encoder")
 class TeleaiEncoder(BaseEncoder):
     """Teleai视频模型的具体编码器实现。"""
 
