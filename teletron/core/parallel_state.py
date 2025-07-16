@@ -272,7 +272,7 @@ def initialize_comm_pair( tensor_model_parallel_size, pipeline_model_parallel_si
     
     tensor_and_context_group_size: int = tensor_model_parallel_size * context_parallel_size
     num_tensor_and_context_groups: int = pp_size // tensor_and_context_group_size
-
+    assert num_tensor_and_context_groups % producer_size == 0 and num_tensor_and_context_groups//producer_size >=1
     if get_transformer_model_group() is not None:
         # consumer ranks
         for i in range(num_tensor_and_context_groups):
