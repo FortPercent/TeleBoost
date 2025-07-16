@@ -21,13 +21,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=1
+CP=4
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_LAYERS=30
-N_GPU_FOR_TRAIN=16
+N_LAYERS=25
+N_GPU_FOR_TRAIN=32
 N_GPU_FOR_DATA=8
 
 # Single-node config 
@@ -37,8 +37,8 @@ N_GPU_FOR_DATA=8
 # N_GPU_FOR_DATA=1
 
 TENSORBOARD_LOGS_PATH=./logs
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/1.3B_I2V
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
 mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
@@ -106,8 +106,8 @@ DISTRIBUTED_ARGS=(
 
 GPT_MODEL_ARGS=(
     --num-layers $N_LAYERS
-    --hidden-size 1536
-    --num-attention-heads 12
+    --hidden-size 5120        
+    --num-attention-heads 40
     --seq-length 512          
     --max-position-embeddings 4096
     --tokenizer-type NullTokenizer
@@ -119,7 +119,7 @@ TRAINING_ARGS=(
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
     --train-iters 100000
-    --weight-decay 1e-4
+    --weight-decay 1e-3
     --init-method-std 0.006 
     --clip-grad 0.0
     --bf16
