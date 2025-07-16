@@ -8,15 +8,9 @@ export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# TODO, change to your own path
-# export PYTHONPATH=
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 
 ####################################### 
-# TODO: set config below
-# TODO: Recommended ratio: N_GPU_FOR_TRAIN / N_MOE / CP <= N_GPU_FOR_DATA 
-# TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
-
 # Parallel config 
 CP=1
 TP=1 # not support
@@ -28,13 +22,14 @@ N_GPU_FOR_DATA=16
 
 # Single-node config 
 # N_MOE=1
-# N_LAYERS=1
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-TENSORBOARD_LOGS_PATH=./logs_bf16
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16/node_0
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16
+EXPR_NAME=expr_480p_bf16
+
+TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
@@ -49,32 +44,17 @@ NNODES=$((($N_GPU-1)/8+1))
 WORLD_SIZE=$N_GPU_FOR_TRAIN
 N_VAE=$N_GPU_FOR_DATA
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
-TOTAL_MOE_NODES=$((NNODES - N_VAE / 8))
-NODES_PER_MOE=$((TOTAL_MOE_NODES / N_MOE))
+
 if [ $NNODES -eq 1 ]; then
     N_PROC=$N_GPU
 else
     N_PROC=8
-fi
-if [ $N_MOE -eq 1 ]; then
-    MOE_ARGS=(
-        --moe-step-factor-list 0.0 
-        --moe-step-factor-list 1.0 
-    )
-else
-    echo "N_MOE must be 1"
-    exit 1
 fi
 
 echo '$MASTER_ADDR' $MASTER_ADDR
 echo '$NODE_RANK & $NNODES' $NODE_RANK $NNODES
 echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
-
-
-MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
-DATA_PATH=./checkpoint
-
 
 DISTRIBUTED_ARGS=(
     --nproc_per_node $N_PROC 
@@ -84,19 +64,19 @@ DISTRIBUTED_ARGS=(
     --master_port $MASTER_PORT
 )
 
-GPT_MODEL_ARGS=(
-    --num-layers 30
-    --hidden-size 5120
-    --ffn-hidden-size 13824
-    --num-attention-heads 40
-) # 10B I2V
-
 # GPT_MODEL_ARGS=(
 #     --num-layers 30
-#     --hidden-size 1536
-#     --ffn-hidden-size 8960
-#     --num-attention-heads 12
-# ) # 1.3B I2V
+#     --hidden-size 5120
+#     --ffn-hidden-size 13824
+#     --num-attention-heads 40
+# ) # 10B I2V
+
+GPT_MODEL_ARGS=(
+    --num-layers 30
+    --hidden-size 1536
+    --ffn-hidden-size 8960
+    --num-attention-heads 12
+) # 1.3B I2V
 
 TRAINING_ARGS=(
     --model ParallelTeleaiModel 
@@ -105,7 +85,7 @@ TRAINING_ARGS=(
     --train-iters 200000
     --weight-decay 1e-4
     --init-method-std 0.006 
-    --clip-grad 0.0
+    --clip-grad 1.0
     --bf16
     --lr 1e-5
     --lr-decay-style constant
@@ -128,8 +108,6 @@ MODEL_PARALLEL_ARGS=(
 )
 DATA_ARGS=(
     --dataset-type VastDataset
-    --data-path $DATA_PATH 
-    --merge-file $MERGE_FILE 
     --split 949,50,1
     --dataloader-type single
     --num-workers 1
@@ -147,31 +125,11 @@ EVAL_AND_LOGGING_ARGS=(
     --eval-iters 20 # sample 20 video to eval
 )
 
+TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
+shift
+echo "Launching: $TRAIN_SCRIPT"
 
-# When using lora and resume train from breakpoint, need to provide a base model path
-# as lora only save the adpater weight.
-# Set the LOAD args in EVAL_AND_LOGGING_ARGS to your saved ckpt path.
-# Training from start is no need to provide LORA_BASE_MODEL_PATH and LOAD args.
-# LORA_CFG=(
-#     --lora False 
-#     --lora-rank 8
-#     --lora-alpha 32
-#     --lora-dropout 0.05
-#     --lora-target-modules q,v # usage: q,v,k,o or q
-#     --lora-bias none
-#     --lora-task-type FEATURE_EXTRACTION
-#     --lora-base-model-path # specify one if using lora
-# )
-
-# export NCCL_IB_DISABLE=1
-# export NCCL_SOCKET_IFNAME=eth0
-# export NCCL_IBEXT_DISABLE=1
-# echo $NCCL_SOCKET_IFNAME
-# echo $NCCL_IB_DISABLE
-# echo $NCCL_IBEXT_DISABLE
-# export NCCL_DEBUG=INFO
-
-torchrun ${DISTRIBUTED_ARGS[@]} examples/teleai/pretrain_i2v.py \
+torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \

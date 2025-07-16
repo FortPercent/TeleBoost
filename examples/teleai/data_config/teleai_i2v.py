@@ -5,42 +5,7 @@ dst_size = (832, 480)
 dst_fps = 16
 dst_num_frames = 81
 
-# Temporary code for quick debugging
-debug = False # open
-if debug:
-    GPU_IDS = [0]
-    NUM_WORKERS = 1
-    import logging
-
-    logging.basicConfig(level=logging.DEBUG)
-else:
-    GPU_IDS = [0, 1, 2, 3, 4, 5, 6, 7]
-    NUM_WORKERS = 2
-
-TRAIN_ON_LOW_NOISE = None
-
-if TRAIN_ON_LOW_NOISE is not None:
-    save_name = f"work_dirs/wanvideo_i2v/moe_8b_480p_lownoise={TRAIN_ON_LOW_NOISE}"
-else:
-    save_name = f"work_dirs/wanvideo_i2v/finetune_8b_480p"
-
-config = dict(
-    runners=["projects.wan.adaptors.WanI2VTrainer"],
-    project_dir = os.path.join(
-        os.getcwd(), save_name
-    ),
-    launch=dict(
-        gpu_ids=GPU_IDS,
-        distributed_type="DEEPSPEED",
-        deepspeed_config=dict(
-            deepspeed_config_file=os.path.join(
-                os.getcwd(), "configs/accelerate_configs/zero3_offload.json"
-            ),
-        ),
-        num_machines=os.environ.get("WORLD_SIZE", 1),
-        until_completion=True,
-    ),
-
+data_config = dict(
     dataset=dict(
         type="ClipDataset",
         serialize_data=False,
@@ -161,7 +126,7 @@ config = dict(
             "/nvfile-heatstorage/cjf/share/data/0630/istock4/istock4_55.json",
             "/nvfile-heatstorage/cjf/share/data/0630/istock4/istock4_56.json",
             "/nvfile-heatstorage/cjf/share/data/0630/istock4/istock4_57.json",
-        ] if debug == False else ["/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_10.json"],
+        ],
         filter_cfg=dict(
             dst_size=dst_size,
             dst_num_frames = dst_num_frames,
@@ -207,62 +172,4 @@ config = dict(
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
         ],
     ),
-    models=dict(
-        text_encoder_path="/workspace/dense_models/models_t5_umt5-xxl-enc-bf16.pth",
-        vae_path="/workspace/dense_models/Wan2.1_VAE.pth",
-        image_encoder_path="/workspace/dense_models/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
-        dit_path="/workspace/dense_models/wan8b_480p/raw.pth", 
-        tiled=True, 
-        tile_size=(34, 34),
-        tile_stride=(18, 16), 
-        train_on_low_noise=TRAIN_ON_LOW_NOISE,
-    ),
-    ### 优化器optimizer配置
-    optimizer=dict(
-        type="AdamW",
-        lr=2e-5,
-        weight_decay=1e-3,
-    ),
-    accelerator=dict(
-        mixed_precision='bf16',
-        log_with="tensorboard",
-    ),
-    ### 学习率scheduler配置
-    scheduler=dict(
-        type="CosineScheduler",
-    ),
-    sampler=dict(
-        type="BucketVariableBatchSampler",
-        shuffle=True,
-        bucket_config={
-            f"832x480":{
-                "81": {
-                    "bsz": 3,
-                    "prob": 1.0
-                }
-            }
-        }
-    ),
-    dataloaders=dict(
-        num_workers=NUM_WORKERS,
-    ),
-    ### 训练过程train配置
-    train=dict(
-        max_grad_norm=1,
-        grad_norm_type=2,
-        model_resume=True,
-        checkpoint_save_optimizer=True,
-        max_epochs=10,
-        gradient_accumulation_steps=1,
-        mixed_precision="bf16",  # fp16, bf16
-        checkpoint_interval=200,
-        log_with="tensorboard",
-        log_interval=1,
-        with_ema=False,
-        activation_checkpointing=True,
-        activation_class_names=[
-            "DiTBlock",
-        ],
-    ),
-    test=dict(),
 )
