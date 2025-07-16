@@ -217,7 +217,12 @@ def create_batch_loader(args, data_iterator):
             return VastDistBatchLoader(data_iterator)
         else:
             raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")
-    
+    elif 'wan' in model_name_lower:
+        if is_distributed_vae:
+            print("Info: Creating VastDistBatchLoader.")
+            return VastDistBatchLoader(data_iterator)
+        else:
+            raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")        
     elif 'hunyuan' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating HunyuanDistBatchLoader.")
