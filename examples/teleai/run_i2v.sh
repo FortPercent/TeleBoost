@@ -8,9 +8,12 @@ export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+
 # TODO, change to your own path
 # export PYTHONPATH=
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+# export MEMORY_SNAPSHOT=True
+# export PROF_SAVE_PATH="./log_memory_0607_2"
 
 ####################################### 
 # TODO: set config below
@@ -23,8 +26,9 @@ TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=24
-N_GPU_FOR_DATA=16
+N_LAYERS=30
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=8
 
 # Single-node config 
 # N_MOE=1
@@ -32,9 +36,9 @@ N_GPU_FOR_DATA=16
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-TENSORBOARD_LOGS_PATH=./logs_bf16
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16/node_0
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16
+TENSORBOARD_LOGS_PATH=./logs
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/1.3B_I2V
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p
 mkdir -p $CHECKPOINT_PATH_SAVE
 
 ####################################### 
@@ -51,6 +55,7 @@ N_VAE=$N_GPU_FOR_DATA
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 TOTAL_MOE_NODES=$((NNODES - N_VAE / 8))
 NODES_PER_MOE=$((TOTAL_MOE_NODES / N_MOE))
+I_MOE=$((NODE_RANK / NODES_PER_MOE))
 if [ $NNODES -eq 1 ]; then
     N_PROC=$N_GPU
 else
@@ -61,12 +66,27 @@ if [ $N_MOE -eq 1 ]; then
         --moe-step-factor-list 0.0 
         --moe-step-factor-list 1.0 
     )
+elif [ $N_MOE -eq 2 ]; then
+    MOE_ARGS=(
+        --moe-step-factor-list 0.0 
+        --moe-step-factor-list 0.833 
+        --moe-step-factor-list 1.0
+    )
+elif [ $N_MOE -eq 4 ]; then
+    MOE_ARGS=(
+        --moe-step-factor-list 0.0 
+        --moe-step-factor-list 0.625 
+        --moe-step-factor-list 0.833
+        --moe-step-factor-list 0.937 
+        --moe-step-factor-list 1.0
+    )
 else
-    echo "N_MOE must be 1"
+    echo "N_MOE must be 1, 2 or 4"
     exit 1
 fi
 
 echo '$MASTER_ADDR' $MASTER_ADDR
+echo '$I_MOE & $N_MOE' $I_MOE $N_MOE
 echo '$NODE_RANK & $NNODES' $NODE_RANK $NNODES
 echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
@@ -85,30 +105,26 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 30
-    --hidden-size 5120
-    --ffn-hidden-size 13824
-    --num-attention-heads 40
-) # 10B I2V
-
-# GPT_MODEL_ARGS=(
-#     --num-layers 30
-#     --hidden-size 1536
-#     --ffn-hidden-size 8960
-#     --num-attention-heads 12
-# ) # 1.3B I2V
+    --num-layers $N_LAYERS
+    --hidden-size 1536
+    --num-attention-heads 12
+    --seq-length 512          
+    --max-position-embeddings 4096
+    --tokenizer-type NullTokenizer
+    --vocab-size 0
+)
 
 TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 200000
+    --train-iters 100000
     --weight-decay 1e-4
     --init-method-std 0.006 
     --clip-grad 0.0
     --bf16
     --lr 1e-5
-    --lr-decay-style constant
+    --lr-decay-style cosine
     --lr-warmup-fraction 0
     --recompute-granularity full 
     --recompute-method block 
@@ -117,6 +133,7 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
+    # --distribute-saved-activations
 )
 
 MODEL_PARALLEL_ARGS=(
@@ -140,10 +157,10 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-log-interval 1
     --tensorboard-queue-size 10
     --log-interval 1 # for terminal infos
-    --save-interval 500
-    --eval-interval 500
+    --save-interval 200
+    --eval-interval 100
     --load $CHECKPOINT_PATH_LOAD 
-    --save $CHECKPOINT_PATH_SAVE
+    --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
     --eval-iters 20 # sample 20 video to eval
 )
 

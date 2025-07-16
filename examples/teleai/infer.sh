@@ -12,6 +12,7 @@
 
 python examples/teleai/infer.py \
  --models \
-    /nvfile-heatstorage/myk/Teletron/checkpoint/expr_480p_bf16/node_0/iter_0000400/mp_rank_00/model_optim_rng.pt \
-  --timestep 1000 0 \
-  --save i2v_step400 
+  /nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr1/node_0/iter_0001000/mp_rank_00/model_optim_rng.pt \
+  /nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr1/node_1/iter_0001000/mp_rank_00/model_optim_rng.pt \
+  --timestep 1000 500 0 \
+  --save moe_2_step1000 
