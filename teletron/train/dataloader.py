@@ -59,7 +59,7 @@ class DataloaderMixin:
         
         if args.temp_accelerate:
             do_train = args.train_iters > 0
-            do_valid = False
+            do_valid = args.eval_iters > 0
             do_test = False
         else:
             do_train = train_dataloader is not None and args.train_iters > 0
