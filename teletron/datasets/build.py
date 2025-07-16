@@ -71,8 +71,10 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
             eval_ds_config=eval_ds_config
         )
         dataset = build_dataset(train_ds_config.dataset)
-
-        eval_data_list = eval_ds_config.get("data_path_list", None) 
+        if eval_ds_config is not None:
+            eval_data_list = eval_ds_config.get("data_path_list", None) 
+        else:
+            eval_data_list = None
         if eval_data_list is not None and len(eval_data_list) > 0:
             train_ds_config.dataset.data_path_list = eval_data_list
             dataset_eval = build_dataset(train_ds_config.dataset)

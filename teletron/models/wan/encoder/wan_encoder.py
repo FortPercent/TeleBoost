@@ -1,15 +1,26 @@
+# Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 
+import os
 import torch
 from typing import Dict, Any, Tuple, List
+
 from teletron.core.distributed.base_encoder import BaseEncoder
-from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
-from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
-from teletron.models.teleai.models.dit.teleai_dit import ModelManager
-from teletron.models.teleai.teleai_encoder_utils import get_encoder_features
+from .wan_prompter import WanPrompter
+from .model_manager import ModelManager
+from .wan_encoder_utils import get_encoder_features
+from teletron.models.wan.pipelines.wan_video import WanVideoPipeline
 from teletron.utils import get_args
 
-class TeleaiEncoder(BaseEncoder):
-    """Teleai视频模型的具体编码器实现。"""
+def get_encoder_model_paths(path):
+    filenames = [
+        "models_t5_umt5-xxl-enc-bf16.pth",
+        "Wan2.1_VAE.pth",
+        "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"
+    ]
+    return [os.path.join(path, f) for f in filenames]
+
+class WanVideoEncoder(BaseEncoder):
+    """WAN视频模型的具体编码器实现。"""
     
     _OUTPUT_MOE_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise']
     _OUTPUT_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents']
@@ -20,15 +31,14 @@ class TeleaiEncoder(BaseEncoder):
         args = get_args()
         is_moe = (args.consumer_models_num > 1)
         if is_moe is True:
-            return TeleaiEncoder._OUTPUT_MOE_SCHEMA
-        return TeleaiEncoder._OUTPUT_SCHEMA
+            return WanVideoEncoder._OUTPUT_MOE_SCHEMA
+        return WanVideoEncoder._OUTPUT_SCHEMA
 
     def __init__(self, device: torch.device, **kwargs: Any):
         super().__init__(device)
         args = get_args()
-        kwargs['model_paths'] = args.encoder_model_path
+        kwargs['model_paths'] = get_encoder_model_paths(args.encoder_model_path)
         kwargs['tokenizer_path'] = args.encoder_tokenizer_path
-
         kwargs['tiler_kwargs'] = {
             "tiled": True, 
             "tile_size":  (34, 34), 
@@ -39,7 +49,7 @@ class TeleaiEncoder(BaseEncoder):
         self.tiler_kwargs = kwargs.get("tiler_kwargs", {})
 
         if not self.model_paths or not self.tokenizer_path:
-            raise ValueError("TeleaiEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
+            raise ValueError("WanVideoEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
 
         # 将模型组件初始化为None，它们将在setup()中被加载
         self.text_encoder = None
@@ -48,33 +58,33 @@ class TeleaiEncoder(BaseEncoder):
         self.prompter = None
 
     def setup(self) -> None:
-        """加载所有必需的teleai模型组件到指定设备。"""
-        print(f"在设备 {self.device} 上设置 TeleaiEncoder...")
+        """加载所有必需的WAN模型组件到指定设备。"""
+        print(f"在设备 {self.device} 上设置 WanVideoEncoder...")
         
         model_manager = ModelManager(torch_dtype=torch.float32, device="cpu")
         model_manager.load_models(self.model_paths)
         
-        pipe = TeleaiVideoPipeline.from_model_manager(model_manager)
+        pipe = WanVideoPipeline.from_model_manager(model_manager)
         
-        self.text_encoder = pipe.text_encoder.to(device=self.device, dtype=torch.bfloat16)
+        self.text_encoder = pipe.text_encoder.to(device=self.device)
         self.image_encoder = pipe.image_encoder.to(device=self.device)
-        self.vae = pipe.vae.to(device=self.device, dtype=torch.float32)
+        self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
         del pipe # 释放不再需要的内存
 
-        self.prompter = TeleaiPrompter()
+        self.prompter = WanPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
-        print("TeleaiEncoder 设置完成。")
+        print("WanVideoEncoder 设置完成。")
 
 
     def encode(self, raw_batch: Dict[str, Any]) -> Tuple[List[torch.Tensor], torch.Tensor]:
         """
-        使用teleai模型对数据批次进行编码。
+        使用WAN模型对数据批次进行编码。
         """
         batch = dict(raw_batch)
 
         prompt_emb, image_emb, latents = get_encoder_features(
-            batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder, dtype=torch.float32
+            batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder
         )
         
         

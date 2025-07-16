@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
-from teletron.models.teleai.teleai_encoder import TeleaiEncoder
+from teletron.models.encoder_registry import get_encoder, get_encoder_name
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
     features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))])
@@ -107,10 +107,8 @@ class VastDistBatchLoader(BaseBatchLoader):
         training_step = 1000
         i_moe = comm_pair.consumer // torch.distributed.get_world_size() 
         timestep_range = [int(f * training_step) for f in args.moe_step_factor_list][i_moe:i_moe+2] 
-        # print("comm_pair", comm_pair)
-        # print("comm_pair.consumer", comm_pair.consumer)
-        # print("i_moe", i_moe)
-        # print("timestep_range", timestep_range)
+        
+        encoder = get_encoder(name=get_encoder_name(args.model), device=torch.cuda.current_device())
 
         if args.distributed_vae:
             if args.consumer_models_num == 1:
@@ -136,7 +134,7 @@ class VastDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, encoder.get_output_schema())
             else:
                 # 计算大小
                 transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
@@ -161,7 +159,7 @@ class VastDistBatchLoader(BaseBatchLoader):
                 # 异步接收并等待
                 req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
                 req.wait()
-                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, encoder.get_output_schema())
                 noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
 
             # 解包并重塑 Tensors
@@ -268,7 +266,12 @@ def create_batch_loader(args, data_iterator):
             return VastDistBatchLoader(data_iterator)
         else:
             raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")
-    
+    elif 'wan' in model_name_lower:
+        if is_distributed_vae:
+            print("Info: Creating VastDistBatchLoader.")
+            return VastDistBatchLoader(data_iterator)
+        else:
+            raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")        
     elif 'hunyuan' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating HunyuanDistBatchLoader.")
