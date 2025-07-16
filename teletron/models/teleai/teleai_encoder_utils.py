@@ -440,6 +440,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
         raise NotImplementedError("ref_images is not supported yet")
     return y
 
+@torch.no_grad
 def get_latents(batch, vae, dtype=torch.bfloat16):
     latents = encode_video(vae,
             rearrange(batch["images"], "b t c h w -> b c t h w").to(
@@ -452,6 +453,7 @@ def get_latents(batch, vae, dtype=torch.bfloat16):
     latents = latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
     return latents
 
+@torch.no_grad
 def get_noise(batch, dtype=torch.bfloat16):
     if 'latents' in batch:
         return torch.randn_like(batch['latents']).to(dtype=dtype, device=torch.cuda.current_device())
@@ -459,3 +461,35 @@ def get_noise(batch, dtype=torch.bfloat16):
         bsz, num_frames, _, height, width = batch["images"].shape
         return torch.randn(bsz, 16, (num_frames + 3) // 4, height // 8, width // 8).to(dtype=dtype, device=torch.cuda.current_device())
 
+@torch.no_grad
+def get_fake_latents(batch, vae, dtype=torch.bfloat16):
+    latents = batch["latents"]
+    bsz, num_frames, video_channels, height, width = batch["images"].shape
+    
+    low_res_video = torch.nn.functional.interpolate(
+        rearrange(batch["images"], "b t c h w -> (b t) c h w"),
+        size=(height // 2, width // 2),
+        mode='bilinear'
+    ).reshape(bsz, num_frames, video_channels, height // 2, width // 2)
+    
+    low_res_latent = encode_video(vae,
+        rearrange(low_res_video, "b t c h w -> b c t h w").to(
+            dtype=dtype, device=torch.cuda.current_device()
+        ),
+        tiled=True,
+        tile_size=(34, 34), 
+        tile_stride=(18, 16),
+    ) # b c t h w
+    
+    bsz, latent_channels, latent_frames, latent_height, latent_width = latents.shape
+    fake_latents = torch.nn.functional.interpolate(
+        rearrange(low_res_latent, "b c t h w -> (b t) c h w"),
+        size=(latents.shape[-2], latents.shape[-1]),
+        mode='nearest'
+    ).reshape(bsz, latent_frames, latent_channels, latent_height, latent_width)[0] # t, c, h, w
+    fake_latents = fake_latents.permute(1, 0, 2, 3) # c, t, h, w
+    assert fake_latents.shape == latents.shape
+    
+    fake_latents = fake_latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
+
+    return fake_latents
