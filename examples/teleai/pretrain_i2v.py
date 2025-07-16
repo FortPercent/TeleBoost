@@ -2,7 +2,7 @@ import torch
 from teletron.train import Trainer, parse_args
 import torch.distributed as dist
 from megatron.core import mpu
-from teletron.models.teleai.schedulers.flow_match import FlowMatchScheduler
+from teletron.models.flow_match import FlowMatchScheduler
 from teletron.train.utils import get_batch, loss_func
 
 

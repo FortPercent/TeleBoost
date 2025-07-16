@@ -11,14 +11,14 @@ from .variable_mix_dataset import VariableMixDataset
 from .tensor_dataset import TensorDataset
 import torch
 from megatron.core import mpu
-from teletron.train.samplers import build_sampler as build_sampler_vast
+from .samplers import build_sampler 
 from teletron.datasets.collators import DefaultCollator
 from teletron.utils import (
     print_rank_0,
     get_args,
+    set_config,
 )
 from teletron.train.utils import (
-    set_config,
     get_train_valid_test_num_samples,
 )
 from teletron.datasets.hunyuanvideo_dataset_builder import (
@@ -105,7 +105,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
 
         dataset = build_dataset(global_config.dataset)
         if dp_rank is None or dp_size is None:
-            sampler = build_sampler_vast(
+            sampler = build_sampler(
                 global_config.sampler,
                 dataset=dataset, 
                 rank=mpu.get_data_parallel_rank(),
@@ -113,7 +113,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
                 seed=args.seed
             )
         else:
-            sampler = build_sampler_vast(
+            sampler = build_sampler(
                 global_config.sampler,
                 dataset=dataset, 
                 rank=dp_rank,
