@@ -12,8 +12,8 @@ import os
 import traceback
 
 DEFAULT_CONFIG = {
-    "height": 480,
-    "width": 832,
+    "height": 720,
+    "width": 1280,
     "num_frames": 81,
     "cfg_scale": 5.0,
     "num_inference_step": 50,
@@ -89,7 +89,7 @@ def load_pipeline(
             "/nvfile-heatstorage/myk/vast/dense_models/models_t5_umt5-xxl-enc-bf16.pth",
             "/nvfile-heatstorage/myk/vast/dense_models/Wan2.1_VAE.pth",
         ],
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float32,
     )
 
     model_list = []
@@ -206,6 +206,9 @@ if __name__ == "__main__":
     
     # TODO: support variable num layers
     args = parser.parse_args()
+    if len(args.models) < 2 or len(args.timesteps) < 2:
+        print("TeleAI model requires at least 2 model components")
+        exit()
     moe_config = {
         "model1": {"dit_path": args.models[0], "timestep_range": (args.timesteps[1], args.timesteps[0])}
     }
@@ -225,3 +228,5 @@ if __name__ == "__main__":
         moe_config=moe_config,
         save_dir=args.save
     )
+    # except Exception as e:
+    #     print(f"主程序运行出错: {str(e)}")

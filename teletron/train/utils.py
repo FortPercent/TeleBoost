@@ -947,7 +947,7 @@ def set_config():
     else:
         return None
     # assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
-    config_vast = load_config(config)
+    config_vast = load_config(data_config)
     return config_vast
 
 
