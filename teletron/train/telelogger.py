@@ -8,7 +8,7 @@ from teletron.utils import (
 )
 from datetime import datetime
 from teletron.train.utils import report_memory, report_theoretical_memory
-from teletron.utils.config import get_timers, get_tensorboard_writer, get_wandb_writer
+from teletron.utils.global_vars import get_timers, get_tensorboard_writer, get_wandb_writer
 
 NUM_BYTES_IN_MEGABYTE = 1024 * 1024
 
