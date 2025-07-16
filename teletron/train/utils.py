@@ -395,6 +395,14 @@ def loss_func(output_tensor):
 
     return loss, {"loss": averaged_loss[0], "loss_wo_w": averaged_loss_wo_w[0], "loss_f1": averaged_loss_f1[0]}
 
+def sr_loss_func(output_tensor):
+    """Loss function."""
+    loss = output_tensor[0].mean()
+    averaged_loss = average_losses_across_data_parallel_group([loss])
+    loss = loss.unsqueeze(0)
+
+    return loss, {"loss": averaged_loss[0]}
+
 def forward_step(data_iterator, model):
     """Forward training step.
 
@@ -936,45 +944,6 @@ def get_batch_on_this_tp_cp_rank_vast_origin(data_iterator):
         }
 
     return batch
-
-
-def set_config():
-    args = get_args()
-    if args.task_type == "t2v":
-        print("loading t2v config")
-        from config.hunyuanvideo_t2v import config
-    elif args.task_type == "i2v":
-        print("loading i2v config")
-        from config.hunyuanvideo_i2vhy import config 
-    elif args.task_type == "i2v_multimask":
-        print("loading i2v_multimask config")
-        from config.hunyuanvideo_i2v_multimask import config
-    elif args.task_type == "i2vhy_token_replace":
-        print("loading i2vhy_token_replace config")
-        from config.hunyuanvideo_i2vhy_token_replace import config
-    elif args.task_type == "t2i_wanvae": 
-        print("loading t2i_wanvae config")
-        from config.hunyuanvideo_t2i_wanvae import config
-    elif args.task_type == "wan_flf":
-        from config.wan_flf import config
-    elif args.task_type == "wan_i2v_prone":
-        from config.prone10_lowerlr import config
-    elif args.task_type == "wan_i2v_bucket":
-        from config.wan_i2v_bucket import config
-    elif args.task_type == "wan_multimask":
-        from config.wan_i2v_multimask import config
-    elif args.task_type == "wan_self_forcing":
-        from config.wan_self_forcing import config
-    elif args.task_type == "vast":
-        from config.vast import config
-    elif args.task_type == "teleai_i2v":
-        from config.i2v import config
-    else:
-        return None
-    # assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
-    config_vast = load_config(config)
-    return config_vast
-
 
 def core_transformer_config_from_args(args, config_class=None):
 
