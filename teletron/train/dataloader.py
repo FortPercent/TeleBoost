@@ -56,9 +56,15 @@ class DataloaderMixin:
         )
 
         # Flags to know if we need to do training/validation/testing.
-        do_train = train_dataloader is not None and args.train_iters > 0
-        do_valid = valid_dataloader is not None and args.eval_iters > 0
-        do_test = test_dataloader is not None and args.eval_iters > 0
+        
+        if args.temp_accelerate:
+            do_train = args.train_iters > 0
+            do_valid = False
+            do_test = False
+        else:
+            do_train = train_dataloader is not None and args.train_iters > 0
+            do_valid = valid_dataloader is not None and args.eval_iters > 0
+            do_test = test_dataloader is not None and args.eval_iters > 0
         flags = torch.tensor(
             [int(do_train), int(do_valid), int(do_test)],
             dtype=torch.long, device='cuda')
