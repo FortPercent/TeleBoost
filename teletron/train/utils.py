@@ -940,39 +940,14 @@ def get_batch_on_this_tp_cp_rank_vast_origin(data_iterator):
 
 def set_config():
     args = get_args()
-    if args.task_type == "t2v":
-        print("loading t2v config")
-        from config.hunyuanvideo_t2v import config
-    elif args.task_type == "i2v":
-        print("loading i2v config")
-        from config.hunyuanvideo_i2vhy import config 
-    elif args.task_type == "i2v_multimask":
-        print("loading i2v_multimask config")
-        from config.hunyuanvideo_i2v_multimask import config
-    elif args.task_type == "i2vhy_token_replace":
-        print("loading i2vhy_token_replace config")
-        from config.hunyuanvideo_i2vhy_token_replace import config
-    elif args.task_type == "t2i_wanvae": 
-        print("loading t2i_wanvae config")
-        from config.hunyuanvideo_t2i_wanvae import config
-    elif args.task_type == "wan_flf":
-        from config.wan_flf import config
-    elif args.task_type == "wan_i2v_prone":
-        from config.prone10_lowerlr import config
-    elif args.task_type == "wan_i2v_bucket":
-        from config.wan_i2v_bucket import config
-    elif args.task_type == "wan_multimask":
-        from config.wan_i2v_multimask import config
-    elif args.task_type == "wan_self_forcing":
-        from config.wan_self_forcing import config
-    elif args.task_type == "vast":
-        from config.vast import config
-    elif args.task_type == "teleai_i2v":
-        from config.i2v import config
+    if args.task_type == "teleai_i2v":
+        from data_config.teleai_i2v import data_config
+    elif args.task_type == "teleai_sr":
+        from data_config.tleai_sr import data_config
     else:
         return None
-    assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
-    config_vast = load_config(config)
+    assert args.task_type in ["teleai_i2v", "teleai_sr"], "not support this task type {args.task_type}"
+    config_vast = load_config(data_config)
     return config_vast
 
 
@@ -2145,135 +2120,6 @@ def _add_autoresume_args(parser):
     group.add_argument('--adlr-autoresume-interval', type=int, default=1000,
                        help='Intervals over which check for autoresume'
                        'termination signal')
-
-    return parser
-
-
-def _add_biencoder_args(parser):
-    group = parser.add_argument_group(title='biencoder')
-
-    # network size
-    group.add_argument('--ict-head-size', type=int, default=None,
-                       help='Size of block embeddings to be used in ICT and '
-                        'REALM (paper default: 128)')
-    group.add_argument('--biencoder-projection-dim', type=int, default=0,
-                       help='Size of projection head used in biencoder (paper'
-                        ' default: 128)')
-    group.add_argument('--biencoder-shared-query-context-model', action='store_true',
-                        help='Whether to share the parameters of the query '
-                        'and context models or not')
-
-    # checkpointing
-    group.add_argument('--ict-load', type=str, default=None,
-                       help='Directory containing an ICTBertModel checkpoint')
-    group.add_argument('--bert-load', type=str, default=None,
-                       help='Directory containing an BertModel checkpoint '
-                       '(needed to start ICT and REALM)')
-
-    # data
-    group.add_argument('--titles-data-path', type=str, default=None,
-                       help='Path to titles dataset used for ICT')
-    group.add_argument('--query-in-block-prob', type=float, default=0.1,
-                       help='Probability of keeping query in block for '
-                       'ICT dataset')
-    group.add_argument('--use-one-sent-docs', action='store_true',
-                       help='Whether to use one sentence documents in ICT')
-    group.add_argument('--evidence-data-path', type=str, default=None,
-                       help='Path to Wikipedia Evidence frm DPR paper')
-
-    # training
-    group.add_argument('--retriever-report-topk-accuracies', nargs='+', type=int,
-                        default=[], help="Which top-k accuracies to report "
-                        "(e.g. '1 5 20')")
-    group.add_argument('--retriever-score-scaling', action='store_true',
-                       help='Whether to scale retriever scores by inverse '
-                        'square root of hidden size')
-
-    # faiss index
-    group.add_argument('--block-data-path', type=str, default=None,
-                       help='Where to save/load BlockData to/from')
-    group.add_argument('--embedding-path', type=str, default=None,
-                       help='Where to save/load Open-Retrieval Embedding'
-                        ' data to/from')
-
-    # indexer
-    group.add_argument('--indexer-batch-size', type=int, default=128,
-                       help='How large of batches to use when doing indexing '
-                       'jobs')
-    group.add_argument('--indexer-log-interval', type=int, default=1000,
-                       help='After how many batches should the indexer '
-                       'report progress')
-    return parser
-
-
-def _add_vision_args(parser):
-    group = parser.add_argument_group(title="vision")
-
-    # general vision arguements
-    group.add_argument('--num-classes', type=int, default=1000,
-                       help='num of classes in vision classificaiton task')
-    group.add_argument('--img-h', type=int, default=224,
-                       help='Image height for vision classification task')
-    group.add_argument('--img-w', type=int, default=224,
-                       help='Image height for vision classification task')
-    group.add_argument('--num-channels', type=int, default=3,
-                       help='Number of channels in input image data')
-    group.add_argument('--patch-dim', type=int, default=16,
-                       help='patch dimension')
-    group.add_argument('--classes-fraction', type=float, default=1.0,
-                       help='training with fraction of classes.')
-    group.add_argument('--data-per-class-fraction', type=float, default=1.0,
-                       help='training with fraction of data per class.')
-    group.add_argument('--no-data-sharding', action='store_false',
-                       help='Disable data sharding.',
-                       dest='data_sharding')
-    group.add_argument('--head-lr-mult', type=float, default=1.0,
-                       help='learning rate multiplier for head during finetuning')
-
-    # pretraining type and backbone selection`
-    group.add_argument('--vision-pretraining', action='store_true',
-                       help='flag to indicate vision pretraining')
-    group.add_argument('--vision-pretraining-type', type=str, default='classify',
-                       choices=['classify', 'inpaint', 'dino'],
-                       help='pretraining objectives')
-    group.add_argument('--vision-backbone-type', type=str, default='vit',
-                       choices=['vit', 'mit', 'swin'],
-                       help='backbone types types')
-    group.add_argument('--swin-backbone-type', type=str, default='tiny',
-                       choices=['tiny', 'base', 'h3'],
-                       help='pretraining objectives')
-    # inpainting arguments
-    group.add_argument('--mask-type', type=str, default='random',
-                       choices=['random', 'row'],
-                       help='mask types')
-    group.add_argument('--mask-factor', type=float, default=1.0,
-                       help='mask size scaling parameter')
-
-    # dino arguments
-    group.add_argument('--iter-per-epoch', type=int, default=1250,
-                       help='iterations per epoch')
-    group.add_argument('--dino-local-img-size', type=int, default=96,
-                       help='Image size for vision classification task')
-    group.add_argument('--dino-local-crops-number', type=int, default=10,
-                       help='Number of local crops')
-    group.add_argument('--dino-head-hidden-size', type=int, default=2048,
-                       help='Hidden dimension size in dino head')
-    group.add_argument('--dino-bottleneck-size', type=int, default=256,
-                       help='Bottle neck dimension in dino head ')
-    group.add_argument('--dino-freeze-last-layer', type=float, default=1,
-                       help='Freezing last layer weights')
-    group.add_argument('--dino-norm-last-layer', action='store_true',
-                       help='Disable Norm in last layer.')
-    group.add_argument('--dino-warmup-teacher-temp', type=float, default=0.04,
-                       help='warump teacher temperature')
-    group.add_argument('--dino-teacher-temp', type=float, default=0.07,
-                       help='teacher temperature')
-    group.add_argument('--dino-warmup-teacher-temp-epochs', type=int, default=30,
-                       help='warmup teacher temperaure epochs')
-
-    # regularization arguments
-    group.add_argument('--qk-layernorm', action='store_true',
-                       help='Whether to layer normalize the q and k attention embeddings.')
 
     return parser
 
