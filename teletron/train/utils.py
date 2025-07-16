@@ -2,7 +2,6 @@ import torch
 from megatron.core import mpu, tensor_parallel
 from megatron.core.transformer import TransformerConfig
 from megatron.core.tensor_parallel import param_is_not_tensor_parallel_duplicate
-from teletron.train.config import load_config
 from teletron.utils import (get_args,
                             fused_kernel_load,
                             print_rank_0,
@@ -11,8 +10,8 @@ from teletron.utils import (get_args,
                             update_num_microbatches,
                             get_attr_wrapped_model,
                             get_model_config,
+                            get_current_global_batch_size
                             )
-from teletron.utils.config import get_current_global_batch_size
 import time
 import contextlib
 from datetime import timedelta
@@ -34,6 +33,7 @@ except ImportError:
     amp_C = None
 NUM_BYTES_IN_MEGABYTE = 1024 * 1024
 _TRANSFORMER_MODEL_GROUP = None
+
 
 
 def report_memory(name):
@@ -940,14 +940,39 @@ def get_batch_on_this_tp_cp_rank_vast_origin(data_iterator):
 
 def set_config():
     args = get_args()
-    if args.task_type == "teleai_i2v":
-        from data_config.teleai_i2v import data_config
-    elif args.task_type == "teleai_sr":
-        from data_config.tleai_sr import data_config
+    if args.task_type == "t2v":
+        print("loading t2v config")
+        from config.hunyuanvideo_t2v import config
+    elif args.task_type == "i2v":
+        print("loading i2v config")
+        from config.hunyuanvideo_i2vhy import config 
+    elif args.task_type == "i2v_multimask":
+        print("loading i2v_multimask config")
+        from config.hunyuanvideo_i2v_multimask import config
+    elif args.task_type == "i2vhy_token_replace":
+        print("loading i2vhy_token_replace config")
+        from config.hunyuanvideo_i2vhy_token_replace import config
+    elif args.task_type == "t2i_wanvae": 
+        print("loading t2i_wanvae config")
+        from config.hunyuanvideo_t2i_wanvae import config
+    elif args.task_type == "wan_flf":
+        from config.wan_flf import config
+    elif args.task_type == "wan_i2v_prone":
+        from config.prone10_lowerlr import config
+    elif args.task_type == "wan_i2v_bucket":
+        from config.wan_i2v_bucket import config
+    elif args.task_type == "wan_multimask":
+        from config.wan_i2v_multimask import config
+    elif args.task_type == "wan_self_forcing":
+        from config.wan_self_forcing import config
+    elif args.task_type == "vast":
+        from config.vast import config
+    elif args.task_type == "teleai_i2v":
+        from config.i2v import config
     else:
         return None
     # assert args.task_type == "teleai_i2v", "not support this task type {args.task_type}"
-    config_vast = load_config(data_config)
+    config_vast = load_config(config)
     return config_vast
 
 
