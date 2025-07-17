@@ -91,13 +91,14 @@ class BaseBatchLoader(ABC):
 class VastDistBatchLoader(BaseBatchLoader):
 
     def _prepare_batch_on_rank_zero(self):
-        if self.data_iterator is None:
-            return None
+        # if self.data_iterator is None:
+        #     return None
         
         # 1. 从数据迭代器获取原始数据（如果需要的话）
         # data = next(self.data_iterator)
         
         # 2. 从 producer rank 接收 Tensors
+        # breakpoint()
         comm_pair = get_comm_pair()
         args = get_args()
         tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
