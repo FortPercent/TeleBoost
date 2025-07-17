@@ -183,7 +183,7 @@ class CheckPointMixin:
         # Checkpoint not loaded.
         if state_dict is None:
             # Iteration and num_floating_point_operations_so_far default to 0.
-            return 0, 0
+            return 0, 0, optimizer, opt_param_scheduler
 
         # Set checkpoint version.
         # set_checkpoint_version(state_dict.get('checkpoint_version', 0))
@@ -293,7 +293,11 @@ class CheckPointMixin:
                     if 'lr_scheduler' in state_dict: # backward compatbility
                         opt_param_scheduler.load_state_dict(state_dict['lr_scheduler'])
                     else:
-                        opt_param_scheduler.load_state_dict(state_dict['opt_param_scheduler'])
+                        scheduler_dict = state_dict['opt_param_scheduler']
+                        # num_steps = num_steps / ori_rank * new_rank
+                        num_steps = scheduler_dict['num_steps'] / state_dict['args'].dit_world_size * args.dit_world_size
+                        scheduler_dict['num_steps'] = num_steps
+                        opt_param_scheduler.load_state_dict(scheduler_dict)
             except KeyError:
                 print_rank_0('Unable to load optimizer from checkpoint {}. '
                             'Specify --no-load-optim or --finetune to prevent '
@@ -352,7 +356,7 @@ class CheckPointMixin:
                     f'p {mpu.get_pipeline_model_parallel_rank()} ] '
                     f'at iteration {iteration}')
 
-        return iteration, num_floating_point_operations_so_far
+        return iteration, num_floating_point_operations_so_far, optimizer, opt_param_scheduler
 
     @staticmethod
     def generate_state_dict(args, model, optimizer, opt_param_scheduler,
