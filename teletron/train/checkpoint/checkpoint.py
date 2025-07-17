@@ -290,10 +290,18 @@ class CheckPointMixin:
 
                 # Load scheduler.
                 if opt_param_scheduler is not None:
+                    opt_param_scheduler_dict = {
+                        "wd_incr_steps": opt_param_scheduler.wd_incr_steps,
+                        "lr_decay_steps": opt_param_scheduler.lr_decay_steps,
+                        "lr_warmup_steps": opt_param_scheduler.lr_warmup_steps,
+                    }
                     if 'lr_scheduler' in state_dict: # backward compatbility
                         opt_param_scheduler.load_state_dict(state_dict['lr_scheduler'])
                     else:
                         opt_param_scheduler.load_state_dict(state_dict['opt_param_scheduler'])
+                    # update lr scheduler decay step as current iter*n_nodes
+                    opt_param_scheduler.load_state_dict(opt_param_scheduler_dict)
+
             except KeyError:
                 print_rank_0('Unable to load optimizer from checkpoint {}. '
                             'Specify --no-load-optim or --finetune to prevent '
@@ -352,7 +360,7 @@ class CheckPointMixin:
                     f'p {mpu.get_pipeline_model_parallel_rank()} ] '
                     f'at iteration {iteration}')
 
-        return iteration, num_floating_point_operations_so_far
+        return iteration, num_floating_point_operations_so_far, optimizer, opt_param_scheduler
 
     @staticmethod
     def generate_state_dict(args, model, optimizer, opt_param_scheduler,
