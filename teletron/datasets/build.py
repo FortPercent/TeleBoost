@@ -82,12 +82,10 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
                 local_data_paths = all_data_paths[start_index:end_index]
                 global_config.dataset.data_path_list = local_data_paths
                 print(f"rank:{global_rank}: {local_data_paths}")
-        if args.task_type == "teleai_i2v":
-            train_ds_config = global_config
-            eval_ds_config = global_config.get("eval", None)
-        else:
-            train_ds_config = global_config.dataloaders.train
-            eval_ds_config = global_config.dataloaders.get("eval", None)
+        
+        train_ds_config = global_config
+        eval_ds_config = global_config.get("eval", None)
+       
         ds_config = HunyuanVideoDatasetConfig(
             train_ds_config=train_ds_config,
             eval_ds_config=eval_ds_config
