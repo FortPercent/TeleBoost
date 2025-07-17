@@ -81,6 +81,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
                     end_index = start_index + samples_per_rank
                 local_data_paths = all_data_paths[start_index:end_index]
                 global_config.dataset.data_path_list = local_data_paths
+                print(f"rank:{global_rank}: {local_data_paths}")
         if args.task_type == "teleai_i2v":
             train_ds_config = global_config
             eval_ds_config = global_config.get("eval", None)
