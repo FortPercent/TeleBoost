@@ -93,6 +93,9 @@ def producer_process(
     train_ds0 = train_ds
     valid_ds0 = valid_ds
     for idx, mcp in merged_comm_pairs.items():
+        if args.temp_accelerate:
+            mcp.dp_rank=0
+            mcp.dp_size=1
         data_iterators[idx], _, _,  train_ds0, valid_ds0 = build_train_valid_test_data_iterators(
             is_tp_first=True, 
             dp_rank=mcp.dp_rank, 
