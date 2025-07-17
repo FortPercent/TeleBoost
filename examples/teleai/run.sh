@@ -12,25 +12,43 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 
 ####################################### 
 # Parallel config 
-CP=4
+CP=1
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=32
-N_GPU_FOR_DATA=8
+N_GPU_FOR_TRAIN=24
+N_GPU_FOR_DATA=24
 
 # Single-node config 
 # N_MOE=1
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-EXPR_NAME=sr_720p
+# EXPR_NAME=sr_720p
+EXPR_NAME=expr_480p_bf16
+
+# MODEL_ARGS=(
+#     --num-layers 30
+#     --hidden-size 5120
+#     --ffn-hidden-size 13824
+#     --num-attention-heads 40
+# ) # 10B I2V
+
+MODEL_ARGS=(
+    --num-layers 30
+    --hidden-size 1536
+    --ffn-hidden-size 8960
+    --num-attention-heads 12
+) # 1.3B I2V
+
+TASK=teleai_i2v
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 mkdir -p $CHECKPOINT_PATH_SAVE
+
 
 ####################################### 
 
@@ -64,21 +82,6 @@ DISTRIBUTED_ARGS=(
     --master_port $MASTER_PORT
 )
 
-GPT_MODEL_ARGS=(
-    --num-layers 30
-    --hidden-size 5120
-    --ffn-hidden-size 13824
-    --num-attention-heads 40
-) # 10B I2V
-
-# GPT_MODEL_ARGS=(
-#     --num-layers 30
-#     --hidden-size 1536
-#     --ffn-hidden-size 8960
-#     --num-attention-heads 12
-# ) # 1.3B I2V
-
-TASK=teleai_sr
 
 TRAINING_ARGS=(
     --model ParallelTeleaiModel 
@@ -89,7 +92,7 @@ TRAINING_ARGS=(
     --init-method-std 0.006 
     --clip-grad 1.0
     --bf16
-    --lr 1e-5
+    --lr 2e-6
     --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full 
@@ -99,6 +102,7 @@ TRAINING_ARGS=(
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
+    --override-opt_param-scheduler
 )
 
 MODEL_PARALLEL_ARGS=(
@@ -132,7 +136,7 @@ shift
 echo "Launching: $TRAIN_SCRIPT"
 
 torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
-    ${GPT_MODEL_ARGS[@]} \
+    ${MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${MOE_ARGS[@]} \
