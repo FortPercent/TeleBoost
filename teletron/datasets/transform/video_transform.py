@@ -21,6 +21,7 @@ class MaskGenerator:
             "transition",
             "continuation",
             "random",
+            "f1fn2v"
         ]
         assert all(
             mask_name in valid_mask_names for mask_name in mask_ratios.keys()
@@ -72,6 +73,10 @@ class MaskGenerator:
         elif mask_name == "random":
             selected_indices = random.sample(range(num_frames), num_select)
             mask[selected_indices] = 0
+        elif mask_name == "f1fn2v":
+            selected_indices = random.sample(range(num_frames), num_select)
+            mask[selected_indices] = 0
+            mask[0] = 0
         return mask
 
 class MaskProcesser:
@@ -90,12 +95,16 @@ class MaskProcesser:
         mask = rearrange(mask, 't c h w -> (t c) 1 h w')
         mask = F.interpolate(mask, size=(new_H, new_W), mode='bilinear')
         mask = rearrange(mask, '(t c) 1 h w -> t c h w', t=T)
-        if T % 2 == 1:
-            new_T = T // self.ae_stride_t + 1
-            mask_first_frame = mask[0:1].repeat(self.ae_stride_t, 1, 1, 1).contiguous() 
-            mask = torch.cat([mask_first_frame, mask[1:]], dim=0)
-        else:
-            new_T = T // self.ae_stride_t
+        # align with wan vae
+        new_T = (T + 3) // self.ae_stride_t
+        mask_first_frame = mask[0:1].repeat(self.ae_stride_t, 1, 1, 1).contiguous() 
+        mask = torch.cat([mask_first_frame, mask[1:]], dim=0)
+        # if T % 2 == 1:
+        #     new_T = T // self.ae_stride_t + 1
+        #     mask_first_frame = mask[0:1].repeat(self.ae_stride_t, 1, 1, 1).contiguous() 
+        #     mask = torch.cat([mask_first_frame, mask[1:]], dim=0)
+        # else:
+        #     new_T = T // self.ae_stride_t
         mask = mask.view(new_T, self.ae_stride_t, new_H, new_W).contiguous()
         return mask
 
@@ -125,6 +134,20 @@ class GenerateRefImagesWithMask:
         data_dict["ref_mask"] = self.mask_processer((mask < 0.5).float())
         data_dict["ref_images"] = ref_images
         return data_dict
+    
+class GenerateRefImagesWithTimeMask:
+    def __init__(self, mask_cfg=dict(), min_clear_ratio=0.0, max_clear_ratio=1.0):
+        self.mask_generator = MaskGenerator(mask_cfg, min_clear_ratio, max_clear_ratio)
+
+    def __call__(self, data_dict):
+        ref_images = copy.deepcopy(data_dict["images"])
+        num_frames = ref_images.shape[0]
+        mask = self.mask_generator.get_mask(num_frames)
+        ref_images = ref_images * (mask < 0.5)
+        data_dict["ref_images"] = ref_images
+        data_dict["time_mask"] = mask
+        return data_dict
+
 
 class GenerateFirstRefImage:
     def __call__(self, data_dict):

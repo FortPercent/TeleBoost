@@ -11,7 +11,8 @@ from .video_transform import (
     GenerateFirstRefImage,
     GenerateRefImagesWithMask, 
     GenerateRawFirstRefImage,
-    GenerateRawFirstLastRefImage
+    GenerateRawFirstLastRefImage,
+    GenerateRefImagesWithTimeMask,
 )
 from .formatting import PackInputs
 
@@ -27,6 +28,7 @@ TRANSFORMS.register_module(GenerateFirstRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithMask)
 TRANSFORMS.register_module(GenerateRawFirstRefImage)
 TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
+TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
 
 
 def build_transform(params_or_type, *args, **kwargs):

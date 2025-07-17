@@ -43,42 +43,22 @@ def save_file(file_path, data, **kwargs):
 
 def set_config():
     from teletron.utils import get_args
+    import importlib
+    import traceback
+    
     args = get_args()
-    if args.task_type == "t2v":
-        print("loading t2v config")
-        from config.hunyuanvideo_t2v import config
-    elif args.task_type == "i2v":
-        print("loading i2v config")
-        from config.hunyuanvideo_i2vhy import config 
-    elif args.task_type == "i2v_multimask":
-        print("loading i2v_multimask config")
-        from config.hunyuanvideo_i2v_multimask import config
-    elif args.task_type == "i2vhy_token_replace":
-        print("loading i2vhy_token_replace config")
-        from config.hunyuanvideo_i2vhy_token_replace import config
-    elif args.task_type == "t2i_wanvae": 
-        print("loading t2i_wanvae config")
-        from config.hunyuanvideo_t2i_wanvae import config
-    elif args.task_type == "wan_flf":
-        from config.wan_flf import config
-    elif args.task_type == "wan_i2v_prone":
-        from config.prone10_lowerlr import config
-    elif args.task_type == "wan_i2v_bucket":
-        from config.wan_i2v_bucket import config
-    elif args.task_type == "wan_multimask":
-        from config.wan_i2v_multimask import config
-    elif args.task_type == "wan_self_forcing":
-        from config.wan_self_forcing import config
-    elif args.task_type == "vast":
-        from config.vast import config
-    elif args.task_type == "teleai_i2v":
-        from config.i2v import config
-    elif args.task_type == "teleai_sr":
-        from config.sr import config
-    else:
-        return None
-    config_vast = load_config(config)
-    return config_vast
+    try:
+        *module_parts, var_name = args.config_path.split('.')
+        module_path = '.'.join(module_parts)
+        
+        # 动态导入模块
+        module = importlib.import_module(module_path)
+        config = getattr(module, var_name)
+    except Exception as e:
+        raise ValueError(f"Failed on load config: {traceback.format_exc()}")
+
+    config = load_config(config)
+    return config
 
 
 

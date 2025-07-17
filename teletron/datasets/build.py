@@ -61,7 +61,6 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         test_ds = None
     elif args.dataset_type == "VastDataset": 
         global_config = set_config()
-        
         transformer_group = get_transformer_model_group()
         if args.temp_accelerate:
             if transformer_group is not None:

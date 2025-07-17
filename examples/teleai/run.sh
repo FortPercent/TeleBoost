@@ -10,7 +10,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 
-####################################### 
+####################################### IMPORTANT ARGS #######################################
 # Parallel config 
 CP=1
 TP=1 # not support
@@ -26,7 +26,7 @@ N_GPU_FOR_DATA=24
 # N_GPU_FOR_DATA=1
 
 # EXPR_NAME=sr_720p
-EXPR_NAME=expr_480p_bf16
+EXPR_NAME=f1fn2v_1.3B
 
 # MODEL_ARGS=(
 #     --num-layers 30
@@ -42,15 +42,16 @@ MODEL_ARGS=(
     --num-attention-heads 12
 ) # 1.3B I2V
 
-TASK=teleai_i2v
+TASK=teleai_multimask
+
+CONFIG_PATH=config.${TASK}.config
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
+####################################### IMPORTANT ARGS END #######################################
+
 mkdir -p $CHECKPOINT_PATH_SAVE
-
-
-####################################### 
 
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
 MASTER_PORT='11322'
@@ -92,7 +93,7 @@ TRAINING_ARGS=(
     --init-method-std 0.006 
     --clip-grad 1.0
     --bf16
-    --lr 2e-6
+    --lr 1e-5
     --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full 
@@ -118,6 +119,7 @@ DATA_ARGS=(
     --split 949,50,1
     --dataloader-type single
     --num-workers 1
+    --config-path ${CONFIG_PATH}
 )
 
 EVAL_AND_LOGGING_ARGS=(
