@@ -5,23 +5,48 @@ from teletron.core.distributed.base_encoder import BaseEncoder
 from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
 from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
 from teletron.models.teleai.models.dit.teleai_dit import ModelManager
-from teletron.models.teleai.teleai_encoder_utils import get_encoder_features
+from teletron.models.teleai.teleai_encoder_utils import (
+    get_context,
+    get_img_clip_feature,
+    get_img_emb_y,
+    get_latents,
+    get_noise
+)
 from teletron.utils import get_args
+from functools import partial
+
+ENCODER_SCHEMA = {
+    'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
+    'moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
+    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents']
+}
+
+WORK_FN = {
+    'context': get_context,
+    'img_clip_feature': get_img_clip_feature,
+    'img_emb_y': get_img_emb_y,
+    'latents': get_latents,
+    'noise': get_noise,
+}
+
+PROPERTY_DIMS = {
+    'context': 3,
+    'img_clip_feature': 3,
+    'img_emb_y': 5,
+    'latents': 5,
+    'nosie': 5,
+    'fake_latents': 5,
+}
+
 
 class TeleaiEncoder(BaseEncoder):
     """Teleai视频模型的具体编码器实现。"""
-    
-    _OUTPUT_MOE_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise']
-    _OUTPUT_SCHEMA = ['context', 'img_clip_feature', 'img_emb_y', 'latents']
 
     @staticmethod
     def get_output_schema() -> List[str]:
         """返回此编码器输出张量的固定名称和顺序。"""
         args = get_args()
-        is_moe = (args.consumer_models_num > 1)
-        if is_moe is True:
-            return TeleaiEncoder._OUTPUT_MOE_SCHEMA
-        return TeleaiEncoder._OUTPUT_SCHEMA
+        return ENCODER_SCHEMA[args.task_type]
 
     def __init__(self, device: torch.device, **kwargs: Any):
         super().__init__(device)
@@ -46,6 +71,7 @@ class TeleaiEncoder(BaseEncoder):
         self.image_encoder = None
         self.vae = None
         self.prompter = None
+        self.work_fn = WORK_FN
 
     def setup(self) -> None:
         """加载所有必需的teleai模型组件到指定设备。"""
@@ -58,35 +84,46 @@ class TeleaiEncoder(BaseEncoder):
         
         self.text_encoder = pipe.text_encoder.to(device=self.device, dtype=torch.bfloat16)
         self.image_encoder = pipe.image_encoder.to(device=self.device)
-        self.vae = pipe.vae.to(device=self.device, dtype=torch.float32)
+        self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
         del pipe # 释放不再需要的内存
 
         self.prompter = TeleaiPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
+
+        for key, val in self.work_fn.items():
+            self.work_fn[key] = self.prepare_work_fn(key, val)
+
         print("TeleaiEncoder 设置完成。")
 
+    def prepare_work_fn(self, target, work_fn):
+        if target == 'context':
+            return partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
+        elif target == 'img_clip_feature':
+            return partial(work_fn, image_encoder=self.image_encoder, dtype=torch.bfloat16)
+        elif target == 'img_emb_y':
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+        elif target == 'latents':
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+        elif target == 'noise':
+            return partial(work_fn, dtype=torch.bfloat16)
+        else:
+            return work_fn
 
     def encode(self, raw_batch: Dict[str, Any]) -> Tuple[List[torch.Tensor], torch.Tensor]:
         """
         使用teleai模型对数据批次进行编码。
         """
         batch = dict(raw_batch)
-
-        prompt_emb, image_emb, latents = get_encoder_features(
-            batch, self.prompter, self.vae, self.tiler_kwargs, self.image_encoder, dtype=torch.float32
-        )
         
-        
-        context = prompt_emb['context']
-        img_clip_feature = image_emb["clip_feature"]
-        img_emb_y = image_emb["y"]
+        # produce data
+        for data_to_produce in TeleaiEncoder.get_output_schema():
+            batch[data_to_produce] = self.work_fn[data_to_produce](batch=batch)
 
-        if self.moe is True:
-            noise = torch.randn_like(latents, device=self.device)
-            tensors_to_send = [context, img_clip_feature, img_emb_y, latents, noise]
-        else:
-            tensors_to_send = [context, img_clip_feature, img_emb_y, latents]
+        # pack tensors
+        tensors_to_send = []
+        for data_to_produce in TeleaiEncoder.get_output_schema():
+            tensors_to_send.append(batch[data_to_produce])
 
         size_info_tensor = self._get_tensors_size(tensors_to_send, device=self.device)
 
