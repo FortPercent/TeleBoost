@@ -145,7 +145,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
         if args.load is not None or args.pretrained_checkpoint is not None:
             # timers('load-checkpoint', log_level=0).start(barrier=True)
-            args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
+            args.iteration, args.num_floating_point_operations_so_far, optimizer, opt_param_scheduler = self.load_checkpoint(
                 model, optimizer, opt_param_scheduler, strict=True)
             # timers('load-checkpoint').stop(barrier=True)
             # timers.log(['load-checkpoint'])
