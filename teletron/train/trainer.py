@@ -732,7 +732,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 num_microbatches=get_num_microbatches(),
                 seq_length=args.seq_length,
                 micro_batch_size=args.micro_batch_size,
-                decoder_seq_length=args.decoder_seq_length,
                 forward_only=False,
                 zero_optimizer=optimizer)
         else:
@@ -744,7 +743,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 num_microbatches=get_num_microbatches(),
                 seq_length=args.seq_length,
                 micro_batch_size=args.micro_batch_size,
-                decoder_seq_length=args.decoder_seq_length,
                 forward_only=False)
 
         # breakpoint()

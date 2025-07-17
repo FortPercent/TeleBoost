@@ -570,36 +570,10 @@ def validate_args(args, defaults={}):
         else:
             args.ffn_hidden_size = 4 * args.hidden_size
 
-    if args.kv_channels is None:
-        assert args.hidden_size % args.num_attention_heads == 0
-        args.kv_channels = args.hidden_size // args.num_attention_heads
-
-    if args.seq_length is not None:
-        assert args.encoder_seq_length is None
-        args.encoder_seq_length = args.seq_length
-    else:
-        assert args.encoder_seq_length is not None
-        args.seq_length = args.encoder_seq_length
-
-    if args.seq_length is not None:
-        assert args.max_position_embeddings >= args.seq_length
-    if args.decoder_seq_length is not None:
-        assert args.max_position_embeddings >= args.decoder_seq_length
     if args.lr is not None:
         assert args.min_lr <= args.lr
     if args.save is not None:
         assert args.save_interval is not None
-    # Mixed precision checks.
-    if args.fp16_lm_cross_entropy:
-        assert args.fp16, 'lm cross entropy in fp16 only support in fp16 mode.'
-    if args.fp32_residual_connection:
-        assert args.fp16 or args.bf16, \
-            'residual connection in fp32 only supported when using fp16 or bf16.'
-
-    if args.moe_grouped_gemm:
-        assert args.bf16, 'Currently GroupedGEMM for MoE only supports bf16 dtype.'
-        dc = torch.cuda.get_device_capability()
-        assert dc[0] >= 8, "Unsupported compute capability for GroupedGEMM kernels."
 
     if args.weight_decay_incr_style == 'constant':
         assert args.start_weight_decay is None

@@ -102,7 +102,7 @@ class ClipDataset(BaseDataset):
                 too_small += 1
                 continue
 
-            if clip.filter_state is not None:
+            if (clip.filter_state is not None) and ('UltraVideo/clips_short' not in clip.file_path):
                 # aesthetic
                 if (
                     clip.filter_state.aesthetic is None

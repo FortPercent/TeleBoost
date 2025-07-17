@@ -72,13 +72,21 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
                 world_size = int(os.environ.get("WORLD_SIZE", 1))
                 all_data_paths = global_config.dataset.data_path_list
                 num_samples = len(all_data_paths)
-                samples_per_rank = num_samples // args.distributed_vae_world_size
-                start_index = (global_rank - args.dit_world_size) * samples_per_rank
+
+                base_samples = num_samples // args.distributed_vae_world_size
+                remainder = num_samples % args.distributed_vae_world_size
+
+                samples_per_rank = base_samples + (1 if (global_rank - args.dit_world_size) < remainder else 0)
+                start_index = (global_rank - args.dit_world_size) * base_samples + min((global_rank - args.dit_world_size), remainder)
+                end_index = start_index + samples_per_rank
                 if global_rank == world_size - 1:
                     end_index = num_samples
                 else:
                     end_index = start_index + samples_per_rank
                 local_data_paths = all_data_paths[start_index:end_index]
+                if (global_rank - args.dit_world_size) > remainder:
+                    local_data_paths.append(all_data_paths[(global_rank - args.dit_world_size) - remainder])
+
                 global_config.dataset.data_path_list = local_data_paths
                 print(f"rank:{global_rank}: {local_data_paths}")
         
