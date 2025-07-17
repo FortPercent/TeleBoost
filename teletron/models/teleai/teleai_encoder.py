@@ -18,8 +18,9 @@ from functools import partial
 
 ENCODER_SCHEMA = {
     'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
-    'moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
-    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents']
+    # 'teleai_moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
+    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
+    'teleai_multimask': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
 }
 
 WORK_FN = {

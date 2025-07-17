@@ -1558,6 +1558,7 @@ def _add_regularization_args(parser):
 def _add_training_args(parser):
     group = parser.add_argument_group(title='training')
 
+    group.add_argument('--config-path', type=str, default='config.teleai_i2v.config')
     group.add_argument('--micro-batch-size', type=int, default=None,
                        help='Batch size per model instance (local batch size). '
                        'Global batch size is local batch size times data '
@@ -2057,57 +2058,8 @@ def _add_data_args(parser):
     group.add_argument('--mock-data', action='store_true',
                        help='Skip data loading and validation and opt for artificial '
                        'generation of mock data when an implementation is available.')
-
-    group.add_argument('--vocab-size', type=int, default=None,
-                       help='Size of vocab before EOD or padding.')
-    group.add_argument('--vocab-file', type=str, default=None,
-                       help='Path to the vocab file.')
-    group.add_argument('--merge-file', type=str, default=None,
-                       help='Path to the BPE merge file.')
-    group.add_argument('--vocab-extra-ids', type=int, default=0,
-                       help='Number of additional vocabulary tokens. '
-                            'They are used for span masking in the T5 model')
-    group.add_argument('--seq-length', type=int, default=None,
-                       help='Maximum sequence length to process.')
-    group.add_argument('--encoder-seq-length', type=int, default=None,
-                       help='Maximum encoder sequence length to process.'
-                       'This should be exclusive of --seq-length')
-    group.add_argument('--decoder-seq-length', type=int, default=None,
-                       help="Maximum decoder sequence length to process.")
-    group.add_argument('--retriever-seq-length', type=int, default=256,
-                       help='Maximum sequence length for the biencoder model '
-                       'for retriever')
-    group.add_argument('--sample-rate', type=float, default=1.0,
-                       help='sample rate for training data. Supposed to be 0 '
-                            ' < sample_rate < 1')
-    group.add_argument('--mask-prob', type=float, default=0.15,
-                       help='Probability of replacing a token with mask.')
-    group.add_argument('--short-seq-prob', type=float, default=0.1,
-                       help='Probability of producing a short sequence.')
     group.add_argument('--num-workers', type=int, default=2,
                        help="Dataloader number of workers.")
-    group.add_argument('--tokenizer-type', type=str,
-                       default=None,
-                       choices=['BertWordPieceLowerCase',
-                                'BertWordPieceCase',
-                                'GPT2BPETokenizer',
-                                'SentencePieceTokenizer',
-                                'GPTSentencePieceTokenizer',
-                                'Llama2Tokenizer',
-                                'NullTokenizer'],
-                       help='What type of tokenizer to use.')
-    group.add_argument('--tokenizer-model', type=str, default=None,
-                       help='Sentencepiece tokenizer model.')
-    group.add_argument('--reset-position-ids', action='store_true',
-                       help='Reset posistion ids after end-of-document token.')
-    group.add_argument('--reset-attention-mask', action='store_true',
-                       help='Reset self attention maske after '
-                       'end-of-document token.')
-    group.add_argument('--eod-mask-loss', action='store_true',
-                       help='Mask loss for the end of document tokens.')
-    group.add_argument('--no-create-attention-mask-in-dataloader', action='store_false',
-                       help='If set, do not create attention_masks in dataloader.',
-                       dest='create_attention_mask_in_dataloader')
 
     return parser
 

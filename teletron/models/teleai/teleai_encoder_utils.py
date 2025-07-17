@@ -181,7 +181,7 @@ def encode_video(vae, input_video, tiled=True, tile_size=(34, 34), tile_stride=(
     latents = vae.encode(
         input_video,
         device=torch.cuda.current_device(),
-        tiled=False,
+        tiled=tiled,
         tile_size=tile_size,
         tile_stride=tile_stride,
     )
@@ -404,8 +404,17 @@ def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
 @torch.no_grad
 def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
     _, num_frames, _, height, width = batch["images"].shape
-    if 'raw_last_image' in batch:
-        raise NotImplementedError("raw_last_image is not supported yet")
+    if 'ref_images' in batch:
+        ref_images = rearrange(batch["ref_images"], "b t c h w -> b c t h w")
+        y = vae.encode(
+            [ref_images.to(dtype=dtype, device=torch.cuda.current_device())],
+            device=torch.cuda.current_device(),
+            tiled=False,
+            tile_size=(34, 34),
+            tile_stride=(18, 16),
+        )
+        msk = batch['ref_mask'].transpose(1, 2).to(dtype=dtype, device=torch.cuda.current_device())
+        y = torch.concat([msk, y], dim=1)
     elif 'raw_first_image' in batch:
         raw_first_image = batch["raw_first_image"]
         pil_image = to_pil_image(
@@ -436,8 +445,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
         y = torch.concat([msk, y])
         y = y.unsqueeze(0)
         y = y.to(dtype=dtype, device=torch.cuda.current_device())
-    elif  'ref_images' in batch:
-        raise NotImplementedError("ref_images is not supported yet")
+    
     return y
 
 @torch.no_grad
@@ -446,7 +454,7 @@ def get_latents(batch, vae, dtype=torch.bfloat16):
             rearrange(batch["images"], "b t c h w -> b c t h w").to(
                 dtype=dtype, device=torch.cuda.current_device()
             ),
-            tiled=True,
+            tiled=False,
             tile_size=(34, 34), 
             tile_stride=(18, 16),
         )[0]
