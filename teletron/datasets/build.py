@@ -21,6 +21,7 @@ from teletron.utils import (
 from teletron.train.utils import (
     get_train_valid_test_num_samples,
 )
+from teletron.core.parallel_state import get_transformer_model_group
 from teletron.datasets.hunyuanvideo_dataset_builder import (
     HunyuanVideoDatasetBuilder,
     HunyuanVideoDatasetConfig,
@@ -61,9 +62,32 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
     elif args.dataset_type == "VastDataset": 
         global_config = set_config()
         
-        train_ds_config = global_config
-        eval_ds_config = global_config.get("eval", None)
-
+        transformer_group = get_transformer_model_group()
+        if args.temp_accelerate:
+            if transformer_group is not None:
+                return  None, None, None
+            else:
+                import os
+                local_rank = int(os.environ.get("LOCAL_RANK", 0))
+                global_rank = int(os.environ.get("RANK", 0))
+                world_size = int(os.environ.get("WORLD_SIZE", 1))
+                all_data_paths = global_config.dataset.data_path_list
+                num_samples = len(all_data_paths)
+                samples_per_rank = num_samples // args.distributed_vae_world_size
+                start_index = (global_rank - args.dit_world_size) * samples_per_rank
+                if global_rank == world_size - 1:
+                    end_index = num_samples
+                else:
+                    end_index = start_index + samples_per_rank
+                local_data_paths = all_data_paths[start_index:end_index]
+                global_config.dataset.data_path_list = local_data_paths
+                print(f"rank:{global_rank}: {local_data_paths}")
+        if args.task_type == "teleai_i2v":
+            train_ds_config = global_config
+            eval_ds_config = global_config.get("eval", None)
+        else:
+            train_ds_config = global_config.dataloaders.train
+            eval_ds_config = global_config.dataloaders.get("eval", None)
         ds_config = HunyuanVideoDatasetConfig(
             train_ds_config=train_ds_config,
             eval_ds_config=eval_ds_config

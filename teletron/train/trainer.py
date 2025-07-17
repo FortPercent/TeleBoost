@@ -102,10 +102,15 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                 self.get_iterator(len(self.model), dataset_provide_func)
 
         dataiters = (self.train_itrt, self.valid_itrt, self.test_itrt)
-        self.train_itrt, self.valid_itrt, self.test_itrt = [
-        create_batch_loader(args, ds) if ds is not None else None 
-                for ds in dataiters
-            ]
+        
+        if args.temp_accelerate:
+            self.train_itrt = create_batch_loader(args, self.train_itrt)
+            self.valid_itrt = create_batch_loader(args, self.valid_itrt)
+        else:
+            self.train_itrt, self.valid_itrt, self.test_itrt = [
+            create_batch_loader(args, ds) if ds is not None else None 
+                    for ds in dataiters
+                ]
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  

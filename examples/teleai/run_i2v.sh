@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -21,14 +21,14 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=4
+CP=2
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_LAYERS=25
-N_GPU_FOR_TRAIN=32
-N_GPU_FOR_DATA=8
+N_LAYERS=1
+N_GPU_FOR_TRAIN=4
+N_GPU_FOR_DATA=2
 
 # Single-node config 
 # N_MOE=1
@@ -142,6 +142,7 @@ MODEL_PARALLEL_ARGS=(
     --distributed-vae
     --distributed-vae-world-size $N_VAE
     --consumer-models-num $N_MOE
+    --temp-accelerate
 )
 DATA_ARGS=(
     --dataset-type VastDataset
@@ -159,7 +160,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1 # for terminal infos
     --save-interval 200
     --eval-interval 100
-    --load $CHECKPOINT_PATH_LOAD 
+    # --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
     --eval-iters 20 # sample 20 video to eval
 )
