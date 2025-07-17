@@ -46,11 +46,11 @@ def forward_step(data_iterator, model):
     prompt_emb["context"] = batch["context"]
     training_target = flow_scheduler.training_target(latents, noise, timestep)
     image_emb = {}
-    image_emb["y"] = batch["image_emb_y"]
+    image_emb["y"] = batch["img_emb_y"]
     #print('y shape', image_emb['y'].shape)
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
     #print('x shape', latents.shape)
-    image_emb["clip_feature"] = batch["clip_feature"]
+    image_emb["clip_feature"] = batch["img_clip_feature"]
 
     #print("batch[clip_feature].shape", batch["clip_feature"].shape)
     #print("noisy_latents.shape", noisy_latents.shape)
