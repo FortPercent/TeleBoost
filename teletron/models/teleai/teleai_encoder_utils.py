@@ -358,3 +358,104 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtyp
                 .unsqueeze(0)
             )
     return prompt_emb, image_emb, latents
+
+@torch.no_grad
+def get_context(batch, prompter, dtype=torch.bfloat16):
+    prompt_emb = encode_prompt(prompter, batch["dense_prompt"][0])
+    prompt_emb["context"] = prompt_emb["context"].to(
+            dtype=dtype, device=torch.cuda.current_device()
+    )
+    return prompt_emb["context"]
+
+@torch.no_grad
+def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
+    _, num_frames, _, height, width = batch["images"].shape
+    if 'raw_last_image' in batch:
+        raise NotImplementedError("raw_last_image is not supported yet")
+        raw_first_image = batch["raw_first_image"]
+        pil_first_image = to_pil_image(
+            raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        )
+        raw_last_image = batch['raw_last_image']
+        pil_last_image = to_pil_image(
+            raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        )
+        image_emb = encode_first_last_image(
+            vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width, dtype=dtype
+        )
+    elif 'raw_first_image' in batch:
+        raw_first_image = batch["raw_first_image"]
+        pil_image = to_pil_image(
+            raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        )
+        image = preprocess_image(pil_image.resize((width, height))).to(torch.cuda.current_device())
+        clip_context = image_encoder.encode_image([image])
+        clip_context = clip_context.to(dtype=dtype, device=torch.cuda.current_device())
+    elif 'ref_images' in batch:
+        raise NotImplementedError("ref_images is not supported yet")
+        first_image = (batch['ref_images'] + 1) / 2 * 255
+        ref_mask = batch["ref_mask"]
+        ref_images = batch["ref_images"]
+        pil_image = to_pil_image(first_image[0][0].cpu().permute(1,2,0).numpy().astype(np.uint8))
+        image_emb = encode_image_with_mask(vae, image_encoder, pil_image, num_frames,
+                                            height, width, ref_mask, ref_images, dtype=dtype)
+    return clip_context
+
+@torch.no_grad
+def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
+    _, num_frames, _, height, width = batch["images"].shape
+    if 'raw_last_image' in batch:
+        raise NotImplementedError("raw_last_image is not supported yet")
+    elif 'raw_first_image' in batch:
+        raw_first_image = batch["raw_first_image"]
+        pil_image = to_pil_image(
+            raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        )
+        image = preprocess_image(pil_image.resize((width, height))).to(torch.cuda.current_device())
+        msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
+
+        msk[:, 1:] = 0 # 1, 1:81, 56, 98
+        msk = torch.concat(
+            [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
+        ) # 1, 4, 56, 98; # 1, 80, 56, 98 => 1, 84, 56, 98
+
+        msk = msk.view(1, msk.shape[1] // 4, 4, height // 8, width // 8) # 1, 21, 4, 56, 98
+        msk = msk.transpose(1, 2)[0]
+        vae_input = torch.concat(
+            [image.transpose(0, 1), torch.zeros(3, num_frames - 1, height, width).to(image.device)],
+            dim=1,
+        )
+        y = vae.encode(
+            [vae_input.to(dtype=dtype, device=torch.cuda.current_device())],
+            device=torch.cuda.current_device(),
+            tiled=False,
+            tile_size=(34, 34),
+            tile_stride=(18, 16),
+        )[0]
+        y = y.to(dtype=dtype, device=torch.cuda.current_device())
+        y = torch.concat([msk, y])
+        y = y.unsqueeze(0)
+        y = y.to(dtype=dtype, device=torch.cuda.current_device())
+    elif  'ref_images' in batch:
+        raise NotImplementedError("ref_images is not supported yet")
+    return y
+
+def get_latents(batch, vae, dtype=torch.bfloat16):
+    latents = encode_video(vae,
+            rearrange(batch["images"], "b t c h w -> b c t h w").to(
+                dtype=dtype, device=torch.cuda.current_device()
+            ),
+            tiled=True,
+            tile_size=(34, 34), 
+            tile_stride=(18, 16),
+        )[0]
+    latents = latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
+    return latents
+
+def get_noise(batch, dtype=torch.bfloat16):
+    if 'latents' in batch:
+        return torch.randn_like(batch['latents']).to(dtype=dtype, device=torch.cuda.current_device())
+    else:
+        bsz, num_frames, _, height, width = batch["images"].shape
+        return torch.randn(bsz, 16, (num_frames + 3) // 4, height // 8, width // 8).to(dtype=dtype, device=torch.cuda.current_device())
+

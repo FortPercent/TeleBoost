@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
-from teletron.models.encoder_registry import get_encoder, get_encoder_name
+from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTY_DIMS
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
-    features = tuple([packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))])
+    features = [packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))]
     if producer_tensors is not None:
         assert len(producer_tensors) == len(features)
     return features
@@ -104,87 +104,38 @@ class VastDistBatchLoader(BaseBatchLoader):
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
 
-        training_step = 1000
-        i_moe = comm_pair.consumer // torch.distributed.get_world_size() 
-        timestep_range = [int(f * training_step) for f in args.moe_step_factor_list][i_moe:i_moe+2] 
-        
-        encoder = get_encoder(name=get_encoder_name(args.model), device=torch.cuda.current_device())
-
+        batch = {}
+        # unpack
         if args.distributed_vae:
-            if args.consumer_models_num == 1:
-                # 计算大小
-                transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
-                clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
-                first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
-                video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
-                # noise_size = video_embedding_size
-                
-                # 准备接收缓冲区
-                # total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-                total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-                recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-
-                intervals = [0, 
-                            transformer_embedding_size, 
-                            transformer_embedding_size + clip_embedding_size,
-                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
-                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size,
-                            #  transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-                            ]
-                # 异步接收并等待
-                req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
-                req.wait()
-                context, clip_feature, img_y, latents = unpack_tensors(recv_tensor, intervals, encoder.get_output_schema())
-            else:
-                # 计算大小
-                transformer_embedding_size = tensors_info[0] * tensors_info[1] * tensors_info[2]
-                clip_embedding_size = tensors_info[3] * tensors_info[4] * tensors_info[5]
-                first_img_embedding_size = tensors_info[6] * tensors_info[7] * tensors_info[8] * tensors_info[9] * tensors_info[10]
-                video_embedding_size = tensors_info[11] * tensors_info[12] * tensors_info[13] * tensors_info[14] * tensors_info[15]
-                noise_size = video_embedding_size
-                
-                # 准备接收缓冲区
-                total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-                # total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-                recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-
-                intervals = [0, 
-                            transformer_embedding_size, 
-                            transformer_embedding_size + clip_embedding_size,
-                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
-                            transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size,
-                             transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size + noise_size
-                            ]
+            start_dim = 0
+            intervals = [0]
             
-                # 异步接收并等待
-                req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
-                req.wait()
-                context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals, encoder.get_output_schema())
-                noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
-
-            # 解包并重塑 Tensors
-            # context, clip_feature, img_y, latents, noise = unpack_tensors(recv_tensor, intervals)
+            for data_to_get in TeleaiEncoder.get_output_schema():
+                dims = PROPERTY_DIMS[data_to_get]
+                data_size = 1
+                for dim in tensors_info[start_dim:start_dim + dims].tolist():
+                    data_size *= dim 
+                start_dim += dims
+                intervals.append(intervals[-1] + data_size)
             
-            context = context.view(tensors_info[0], tensors_info[1], tensors_info[2])
-            clip_feature = clip_feature.view(tensors_info[3], tensors_info[4], tensors_info[5])
-            img_y = img_y.view(tensors_info[6], tensors_info[7], tensors_info[8], tensors_info[9], tensors_info[10])
-            latents = latents.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
-            # noise = noise.view(tensors_info[11], tensors_info[12], tensors_info[13], tensors_info[14], tensors_info[15])
+            total_size = intervals[-1]
+            recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+            req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
+            req.wait()
+            
+            unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+            start_dim = 0
+            for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):
+                dims = PROPERTY_DIMS[data_to_get]
+                tensor_shape = tensors_info[start_dim:start_dim + dims].tolist()
+                reshaped_data = unpacked_data[i].view(*tensor_shape)
+                batch[data_to_get] = reshaped_data
+                start_dim += dims
         else:
             # 如果 distributed_vae 为 False，需要定义相应的行为
             # 例如，返回空的或默认的 tensors
             raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
 
-        # 3. 构建批次字典
-        batch = {
-            "context": context,
-            "clip_feature": clip_feature,
-            "image_emb_y": img_y,
-            "latents": latents,
-            'timestep_range': timestep_range,
-        }
-        if args.consumer_models_num > 1:
-            batch['noise']=noise
         
         return batch
 
