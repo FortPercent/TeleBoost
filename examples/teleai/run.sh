@@ -12,37 +12,37 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
-CP=1
+CP=2
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=24
-N_GPU_FOR_DATA=24
+N_GPU_FOR_TRAIN=64
+N_GPU_FOR_DATA=16
 
 # Single-node config 
 # N_MOE=1
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-# EXPR_NAME=sr_720p
-EXPR_NAME=f1fn2v_1.3B
-
-# MODEL_ARGS=(
-#     --num-layers 30
-#     --hidden-size 5120
-#     --ffn-hidden-size 13824
-#     --num-attention-heads 40
-# ) # 10B I2V
+EXPR_NAME=sr_720p
+# EXPR_NAME=f1fn2v_1.3B
 
 MODEL_ARGS=(
     --num-layers 30
-    --hidden-size 1536
-    --ffn-hidden-size 8960
-    --num-attention-heads 12
-) # 1.3B I2V
+    --hidden-size 5120
+    --ffn-hidden-size 13824
+    --num-attention-heads 40
+) # 10B I2V
 
-TASK=teleai_multimask
+# MODEL_ARGS=(
+#     --num-layers 30
+#     --hidden-size 1536
+#     --ffn-hidden-size 8960
+#     --num-attention-heads 12
+# ) # 1.3B I2V
+
+TASK=teleai_sr
 
 CONFIG_PATH=config.${TASK}.config
 

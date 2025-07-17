@@ -159,6 +159,7 @@ config = dict(
             dict(
                 type="GenerateRefImagesWithMask",
                 mask_cfg={
+                    # "i2v": 1,
                     "transition": 0.4, # first and last frame
                     "f1fn2v": 0.6, # first frame and random frames
                 },

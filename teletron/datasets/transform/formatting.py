@@ -61,7 +61,16 @@ class PackInputs:
             images = F.crop(images, y1, x1, dst_height, dst_width)
             data_dict[image_key] = images
         for embedding_key in self.embedding_keys:
-            if embedding_key in ["raw_first_image"]:
+            if embedding_key in ['ref_mask']:
+                msk = data_dict[embedding_key]
+                msk_height = dst_height // 8
+                msk_width = dst_width // 8
+                msk = F.resize(
+                    msk, (msk_height, msk_width), InterpolationMode.NEAREST
+                )
+                data_dict[embedding_key] = msk
+            else:
+                # resize and crop images, too
                 cond_image = data_dict[embedding_key]
                 cond_image = F.resize(
                     cond_image, (new_height, new_width), InterpolationMode.BILINEAR

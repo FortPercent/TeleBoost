@@ -405,9 +405,9 @@ def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
 def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
     _, num_frames, _, height, width = batch["images"].shape
     if 'ref_images' in batch:
-        ref_images = rearrange(batch["ref_images"], "b t c h w -> b c t h w")
+        ref_images = rearrange(batch["ref_images"], "b t c h w -> b c t h w") * (2 / 255) - 1
         y = vae.encode(
-            [ref_images.to(dtype=dtype, device=torch.cuda.current_device())],
+            ref_images.to(dtype=dtype, device=torch.cuda.current_device()),
             device=torch.cuda.current_device(),
             tiled=False,
             tile_size=(34, 34),
