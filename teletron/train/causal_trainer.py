@@ -1,7 +1,8 @@
 import gc
 import logging
 
-from teletron.models.model import CausalDiffusion
+from teletron.models.causwan import CausalDiffusion
+from teletron.train import Trainer
 from teletron.utils.dataset import ShardingLMDBDataset, cycle
 from teletron.utils.wan_dataset import TensorDataset, cycle
 from teletron.utils.misc import set_seed
@@ -16,8 +17,8 @@ from datetime import datetime
 from torch.utils.data import RandomSampler
 
 class DiffusionTrainer:
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, args):
+        self.config = args
         self.step = 0
 
         # Step 1: Initialize the distributed training environment (rank, seed, dtype, logging etc.)
@@ -27,41 +28,41 @@ class DiffusionTrainer:
         # launch_distributed_job()
         # global_rank = dist.get_rank()
 
-        self.dtype = torch.bfloat16 if config.mixed_precision else torch.float32
+        self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
         self.device = torch.cuda.current_device()
         # self.is_main_process = global_rank == 0
         self.is_main_process = True
         self.causal = True # config.causal
-        self.disable_tensorboard = getattr(config, 'disable_tensorboard', False)
+        self.disable_tensorboard = getattr(args, 'disable_tensorboard', True)
 
         # use a random seed for the training
-        if config.seed == 0:
+        if args.seed == 0:
             random_seed = torch.randint(0, 10000000, (1,), device=self.device)
             # dist.broadcast(random_seed, src=0)
-            config.seed = random_seed.item()
+            args.seed = random_seed.item()
 
         # set_seed(config.seed + global_rank)
-        set_seed(config.seed)
+        set_seed(args.seed)
 
         # Initialize TensorBoard writer
         self.writer = None
-        if self.is_main_process and not self.disable_tensorboard:
-            # Add timestamp to tensorboard log directory
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_tensorboard_dir = getattr(config, 'tensorboard_log_dir', os.path.join(config.logdir, 'tensorboard'))
-            tensorboard_log_dir = os.path.join(base_tensorboard_dir, f"run_{timestamp}")
+        # if self.is_main_process and not self.disable_tensorboard:
+        #     # Add timestamp to tensorboard log directory
+        #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #     base_tensorboard_dir = getattr(config, 'tensorboard_log_dir', os.path.join(config.logdir, 'tensorboard'))
+        #     tensorboard_log_dir = os.path.join(base_tensorboard_dir, f"run_{timestamp}")
             
-            os.makedirs(tensorboard_log_dir, exist_ok=True)
-            self.writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        #     os.makedirs(tensorboard_log_dir, exist_ok=True)
+        #     self.writer = SummaryWriter(log_dir=tensorboard_log_dir)
             
-            # Log config as text
-            config_str = OmegaConf.to_yaml(config)
-            self.writer.add_text('config', config_str, 0)
+        #     # Log config as text
+        #     config_str = OmegaConf.to_yaml(config)
+        #     self.writer.add_text('config', config_str, 0)
 
-        self.output_path = config.logdir
+        self.output_path = args.save
 
         # Step 2: Initialize the model and optimizer
-        self.model = CausalDiffusion(config, device=self.device)
+        self.model = CausalDiffusion(args, device=self.device)
 
         # self.model.generator = fsdp_wrap(
         #     self.model.generator,
@@ -77,16 +78,16 @@ class DiffusionTrainer:
         #     wrap_strategy=config.text_encoder_fsdp_wrap_strategy
         # )
         self.model.text_encoder = self.model.text_encoder.to(torch.bfloat16).to(self.device)
-        if not config.no_visualize or config.load_raw_video:
-            self.model.vae = self.model.vae.to(
-                device=self.device, dtype=torch.bfloat16 if config.mixed_precision else torch.float32)
+        # if not config.no_visualize or config.load_raw_video:
+        #     self.model.vae = self.model.vae.to(
+        #         device=self.device, dtype=torch.bfloat16 if config.mixed_precision else torch.float32)
 
         self.generator_optimizer = torch.optim.AdamW(
             [param for param in self.model.generator.parameters()
              if param.requires_grad],
-            lr=config.lr,
-            betas=(config.beta1, config.beta2),
-            weight_decay=config.weight_decay
+            lr=args.lr,
+            betas=(args.beta1, args.beta2),
+            weight_decay=args.weight_decay
         )
 
         # world_size = dist.get_world_size() 
@@ -95,13 +96,13 @@ class DiffusionTrainer:
         #     print(f"num of all gpus: {world_size}")
 
         # Step 3: Initialize the dataloader
-        dataset = TensorDataset(config.base_paths, config.metadata_paths)
+        dataset = TensorDataset(args.base_paths, args.metadata_paths)
         # sampler = torch.utils.data.distributed.DistributedSampler(
         #     dataset, shuffle=True, drop_last=True)
         sampler = RandomSampler(dataset)
         dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=config.batch_size,
+            batch_size=args.batch_size,
             sampler=sampler,
             num_workers=8)
 
@@ -127,9 +128,9 @@ class DiffusionTrainer:
 
         ##############################################################################################################
         # 7. (If resuming) Load the model and optimizer, lr_scheduler, ema's statedicts
-        if getattr(config, "generator_ckpt", False):
-            print(f"Loading pretrained generator from {config.generator_ckpt}")
-            state_dict = torch.load(config.generator_ckpt, map_location="cpu")
+        if getattr(args, "generator_ckpt", False):
+            print(f"Loading pretrained generator from {args.generator_ckpt}")
+            state_dict = torch.load(args.generator_ckpt, map_location="cpu")
             if "generator" in state_dict:
                 state_dict = state_dict["generator"]
             elif "model" in state_dict:
@@ -162,7 +163,6 @@ class DiffusionTrainer:
                   f"checkpoint_model_{self.step:06d}", "model.pt"))
 
     def train_one_step(self, batch):
-        self.log_iters = 1
 
         if self.step % 20 == 0:
             torch.cuda.empty_cache()
@@ -248,7 +248,7 @@ class DiffusionTrainer:
             batch = next(self.dataloader)
             self.train_one_step(batch)
             
-            if (not self.config.no_save) and self.step % self.config.log_iters == 0:
+            if self.config.save is not None and self.step % self.config.save_interval == 0:
                 torch.cuda.empty_cache()
                 self.save()
                 torch.cuda.empty_cache()
@@ -289,3 +289,129 @@ class DiffusionTrainer:
         # Close tensorboard writer when trainer is destroyed
         if hasattr(self, 'writer') and self.writer is not None:
             self.writer.close()
+
+
+
+
+class CausalTrainer(Trainer):
+    def __init__(self, args, dataset_provider_func=None):
+        super.__init__(args)
+        self.initialize_megatron(args)
+        self.config = args
+        self.step = 0
+
+        # Step 1: Initialize the distributed training environment (rank, seed, dtype, logging etc.)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        # launch_distributed_job()
+        # global_rank = dist.get_rank()
+
+        self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
+        self.device = torch.cuda.current_device()
+        # self.is_main_process = global_rank == 0
+        self.is_main_process = True
+        self.causal = True # config.causal
+
+        # Initialize TensorBoard writer
+        self.writer = None
+        # if self.is_main_process and not self.disable_tensorboard:
+        #     # Add timestamp to tensorboard log directory
+        #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #     base_tensorboard_dir = getattr(config, 'tensorboard_log_dir', os.path.join(config.logdir, 'tensorboard'))
+        #     tensorboard_log_dir = os.path.join(base_tensorboard_dir, f"run_{timestamp}")
+            
+        #     os.makedirs(tensorboard_log_dir, exist_ok=True)
+        #     self.writer = SummaryWriter(log_dir=tensorboard_log_dir)
+            
+        #     # Log config as text
+        #     config_str = OmegaConf.to_yaml(config)
+        #     self.writer.add_text('config', config_str, 0)
+
+        self.output_path = args.save
+
+        # Step 2: Initialize the model and optimizer
+        self.model = CausalDiffusion(args, device=self.device)
+
+        # self.model.generator = fsdp_wrap(
+        #     self.model.generator,
+        #     sharding_strategy=config.sharding_strategy,
+        #     mixed_precision=config.mixed_precision,
+        #     wrap_strategy=config.generator_fsdp_wrap_strategy
+        # )
+        self.model.generator = self.model.generator.to(torch.bfloat16).to(self.device)
+        # self.model.text_encoder = fsdp_wrap(
+        #     self.model.text_encoder,
+        #     sharding_strategy=config.sharding_strategy,
+        #     mixed_precision=config.mixed_precision,
+        #     wrap_strategy=config.text_encoder_fsdp_wrap_strategy
+        # )
+        self.model.text_encoder = self.model.text_encoder.to(torch.bfloat16).to(self.device)
+        # if not config.no_visualize or config.load_raw_video:
+        #     self.model.vae = self.model.vae.to(
+        #         device=self.device, dtype=torch.bfloat16 if config.mixed_precision else torch.float32)
+
+        self.generator_optimizer = torch.optim.AdamW(
+            [param for param in self.model.generator.parameters()
+             if param.requires_grad],
+            lr=args.lr,
+            betas=(args.beta1, args.beta2),
+            weight_decay=args.weight_decay
+        )
+
+        # world_size = dist.get_world_size() 
+        # local_rank = dist.get_rank()
+        # if local_rank == 0:
+        #     print(f"num of all gpus: {world_size}")
+
+        # Step 3: Initialize the dataloader
+        dataset = TensorDataset(args.base_paths, args.metadata_paths)
+        # sampler = torch.utils.data.distributed.DistributedSampler(
+        #     dataset, shuffle=True, drop_last=True)
+        sampler = RandomSampler(dataset)
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            num_workers=8)
+
+        # if dist.get_rank() == 0:
+        print("DATASET SIZE %d" % len(dataset))
+        self.dataloader = cycle(dataloader)
+
+        ##############################################################################################################
+        # 6. Set up EMA parameter containers
+        rename_param = (
+            lambda name: name.replace("_fsdp_wrapped_module.", "")
+            .replace("_checkpoint_wrapped_module.", "")
+            .replace("_orig_mod.", "")
+        )
+        self.name_to_trainable_params = {}
+        for n, p in self.model.generator.named_parameters():
+            if not p.requires_grad:
+                continue
+
+            renamed_n = rename_param(n)
+            self.name_to_trainable_params[renamed_n] = p
+
+
+        ##############################################################################################################
+        # 7. (If resuming) Load the model and optimizer, lr_scheduler, ema's statedicts
+        if getattr(args, "generator_ckpt", False):
+            print(f"Loading pretrained generator from {args.generator_ckpt}")
+            state_dict = torch.load(args.generator_ckpt, map_location="cpu")
+            if "generator" in state_dict:
+                state_dict = state_dict["generator"]
+            elif "model" in state_dict:
+                state_dict = state_dict["model"]
+            self.model.generator.load_state_dict(
+                state_dict, strict=True
+            )
+
+        ##############################################################################################################
+
+        self.max_grad_norm = 0.5
+        self.previous_time = None
+
+
+

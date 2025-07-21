@@ -2,8 +2,8 @@ from .trainer import Trainer
 # from .config import (get_args,
 #                      set_args)
 from .arguments import parse_args
-from .diffusion import DiffusionTrainer
+from .causal_trainer import DiffusionTrainer
 
-__all__ = [
-    "DiffusionTrainer",
-]
+# __all__ = [
+#     "DiffusionTrainer",
+# ]
