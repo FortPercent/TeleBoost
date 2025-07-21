@@ -37,9 +37,10 @@ N_GPU_FOR_DATA=2
 # N_GPU_FOR_DATA=1
 
 TENSORBOARD_LOGS_PATH=./logs
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
-mkdir -p $CHECKPOINT_PATH_SAVE
+# CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/ckpt/teletron
+# CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/code/Teletron/debug/ckpt/wan_layer25_i2v/refactor/expr4_transform
+CHECKPOINT_PATH=/nvfile-heatstorage/yuc/refactor/Teletron/test
+mkdir -p $CHECKPOINT_PATH
 
 ####################################### 
 
@@ -158,11 +159,13 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-log-interval 1
     --tensorboard-queue-size 10
     --log-interval 1 # for terminal infos
-    --save-interval 200
-    --eval-interval 100
+    --save-interval 2
+    --eval-interval 2
     # --load $CHECKPOINT_PATH_LOAD 
-    --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
-    --eval-iters 20 # sample 20 video to eval
+    # --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
+    # --load $CHECKPOINT_PATH/node_$I_MOE
+    --save $CHECKPOINT_PATH/node_$I_MOE
+    --eval-iters 2 # sample 20 video to eval
 )
 
 

@@ -49,7 +49,7 @@ from teletron.train.lr_scheduler import SchedulerMixin
 from teletron.train.telelogger import TeleLoggerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
-from teletron.core.distributed.distributed_encoder import producer_process
+from teletron.core.distributed.distributed_encoder import DistDataProducer
 from teletron.models.encoder_registry import get_encoder_name
 from teletron.train.consumer_dataloader import create_batch_loader
 
@@ -74,15 +74,24 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
         if transformer_group is None:            
-            producer_process(
-                rank=dist.get_rank(), 
-                world_size=dist.get_world_size(),
+            # producer_process(
+            #     rank= int(os.environ.get("RANK", 0)), 
+            #     world_size=dist.get_world_size(),
+            #     encoder_name=get_encoder_name(args.model),
+            #     device=torch.cuda.current_device(),
+            #     build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+            #     train_ds=None,
+            # )
+            # DistDataProducer
+            producer = DistDataProducer(
+                rank= int(os.environ.get("RANK", 0)), 
+                # world_size=dist.get_world_size(),
                 encoder_name=get_encoder_name(args.model),
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
                 train_ds=None,
             )
-            
+            producer.run()
             exit()        
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
@@ -874,7 +883,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     num_microbatches=eval_num_microbatches,
                     seq_length=args.seq_length,
                     micro_batch_size=args.micro_batch_size,
-                    decoder_seq_length=args.decoder_seq_length,
+                    # decoder_seq_length=args.decoder_seq_length,
                     forward_only=True)
 
                 # Empty unused memory
