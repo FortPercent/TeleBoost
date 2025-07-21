@@ -104,6 +104,7 @@ class VastDistBatchLoader(BaseBatchLoader):
         tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
+        del req
 
         batch = {}
         # unpack
@@ -123,6 +124,7 @@ class VastDistBatchLoader(BaseBatchLoader):
             recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
             req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
             req.wait()
+            del req
             
             unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
             start_dim = 0
