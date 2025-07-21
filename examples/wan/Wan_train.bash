@@ -1,7 +1,7 @@
 # export PYTHONPATH=$(pwd)
 
 # 设置单POD的GPU数量
-export GPUS_PER_NODE=2
+export GPUS_PER_NODE=1
 export WORLD_SIZE=1
 export MASTER_ADDR=$GEMINI_HOST_IP_taskrole1_0
 export MASTER_PORT=21456

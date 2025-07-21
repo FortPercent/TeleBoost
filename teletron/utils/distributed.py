@@ -19,6 +19,13 @@ def fsdp_state_dict(model):
 
     return checkpoint
 
+def nofsdp_wrap(module, sharding_strategy="full", mixed_precision=False, wrap_strategy="size", min_num_params=int(5e7), transformer_module=None, cpu_offload=False):
+    # 如果启用混合精度
+    if mixed_precision:
+        # 将模型参数的数据类型转换为 torch.bfloat16
+        module = module.to(torch.bfloat16)
+    # 如果不启用混合精度，保持模型参数的数据类型不变
+    return module.to(torch.cuda.current_device())
 
 def fsdp_wrap(module, sharding_strategy="full", mixed_precision=False, wrap_strategy="size", min_num_params=int(5e7), transformer_module=None, cpu_offload=False):
     if mixed_precision:

@@ -13,8 +13,7 @@ import time
 import os
 from tqdm import tqdm
 from datetime import datetime
-from teletron.utils.distributed import EMA_FSDP, barrier, fsdp_wrap, fsdp_state_dict, launch_distributed_job
-
+from torch.utils.data import RandomSampler
 
 class DiffusionTrainer:
     def __init__(self, config):
@@ -25,22 +24,24 @@ class DiffusionTrainer:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        launch_distributed_job()
-        global_rank = dist.get_rank()
+        # launch_distributed_job()
+        # global_rank = dist.get_rank()
 
         self.dtype = torch.bfloat16 if config.mixed_precision else torch.float32
         self.device = torch.cuda.current_device()
-        self.is_main_process = global_rank == 0
+        # self.is_main_process = global_rank == 0
+        self.is_main_process = True
         self.causal = True # config.causal
         self.disable_tensorboard = getattr(config, 'disable_tensorboard', False)
 
         # use a random seed for the training
         if config.seed == 0:
             random_seed = torch.randint(0, 10000000, (1,), device=self.device)
-            dist.broadcast(random_seed, src=0)
+            # dist.broadcast(random_seed, src=0)
             config.seed = random_seed.item()
 
-        set_seed(config.seed + global_rank)
+        # set_seed(config.seed + global_rank)
+        set_seed(config.seed)
 
         # Initialize TensorBoard writer
         self.writer = None
@@ -62,20 +63,20 @@ class DiffusionTrainer:
         # Step 2: Initialize the model and optimizer
         self.model = CausalDiffusion(config, device=self.device)
 
-        self.model.generator = fsdp_wrap(
-            self.model.generator,
-            sharding_strategy=config.sharding_strategy,
-            mixed_precision=config.mixed_precision,
-            wrap_strategy=config.generator_fsdp_wrap_strategy
-        )
-
-        self.model.text_encoder = fsdp_wrap(
-            self.model.text_encoder,
-            sharding_strategy=config.sharding_strategy,
-            mixed_precision=config.mixed_precision,
-            wrap_strategy=config.text_encoder_fsdp_wrap_strategy
-        )
-
+        # self.model.generator = fsdp_wrap(
+        #     self.model.generator,
+        #     sharding_strategy=config.sharding_strategy,
+        #     mixed_precision=config.mixed_precision,
+        #     wrap_strategy=config.generator_fsdp_wrap_strategy
+        # )
+        self.model.generator = self.model.generator.to(torch.bfloat16).to(self.device)
+        # self.model.text_encoder = fsdp_wrap(
+        #     self.model.text_encoder,
+        #     sharding_strategy=config.sharding_strategy,
+        #     mixed_precision=config.mixed_precision,
+        #     wrap_strategy=config.text_encoder_fsdp_wrap_strategy
+        # )
+        self.model.text_encoder = self.model.text_encoder.to(torch.bfloat16).to(self.device)
         if not config.no_visualize or config.load_raw_video:
             self.model.vae = self.model.vae.to(
                 device=self.device, dtype=torch.bfloat16 if config.mixed_precision else torch.float32)
@@ -88,23 +89,24 @@ class DiffusionTrainer:
             weight_decay=config.weight_decay
         )
 
-        world_size = dist.get_world_size() 
-        local_rank = dist.get_rank()
-        if local_rank == 0:
-            print(f"num of all gpus: {world_size}")
+        # world_size = dist.get_world_size() 
+        # local_rank = dist.get_rank()
+        # if local_rank == 0:
+        #     print(f"num of all gpus: {world_size}")
 
         # Step 3: Initialize the dataloader
         dataset = TensorDataset(config.base_paths, config.metadata_paths)
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset, shuffle=True, drop_last=True)
+        # sampler = torch.utils.data.distributed.DistributedSampler(
+        #     dataset, shuffle=True, drop_last=True)
+        sampler = RandomSampler(dataset)
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.batch_size,
             sampler=sampler,
             num_workers=8)
 
-        if dist.get_rank() == 0:
-            print("DATASET SIZE %d" % len(dataset))
+        # if dist.get_rank() == 0:
+        print("DATASET SIZE %d" % len(dataset))
         self.dataloader = cycle(dataloader)
 
         ##############################################################################################################
@@ -143,8 +145,9 @@ class DiffusionTrainer:
 
     def save(self):
         print("Start gathering distributed model states...")
-        generator_state_dict = fsdp_state_dict(
-            self.model.generator)
+        # generator_state_dict = fsdp_state_dict(
+        #     self.model.generator)
+        generator_state_dict = self.model.generator.state_dict()
 
         state_dict = {
             "generator": generator_state_dict,
@@ -208,7 +211,9 @@ class DiffusionTrainer:
         generator_loss.backward()
 
         if (self.step + 1) % accumulation_steps == 0:
-            generator_grad_norm = self.model.generator.clip_grad_norm_(self.max_grad_norm)
+            # generator_grad_norm = self.model.generator.clip_grad_norm_(self.max_grad_norm)
+            generator_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.generator.parameters(), self.max_grad_norm)
             self.generator_optimizer.step()
             self.generator_optimizer.zero_grad()
         else:
@@ -248,7 +253,7 @@ class DiffusionTrainer:
                 self.save()
                 torch.cuda.empty_cache()
 
-            barrier()
+            # barrier()
             if self.is_main_process:
                 current_time = time.time()
                 if self.previous_time is None:
