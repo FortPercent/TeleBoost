@@ -25,27 +25,23 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
     def update_policy(self, data: DataProto):
+        #这里显存就开始增加了
         data = data.to(get_device_id())
         # make sure we are in training mode
         self.actor_module.train()
-
-        # 训练前 shuffle step-level 顺序（不同 batch 内 permute）
-        timesteps = data.batch["timesteps"]
+ 
+        device = torch.device(f"cuda:{get_device_id()}")
         perms = torch.stack([
-            torch.randperm(len(timesteps[0])) 
+            torch.randperm(len(data.batch["timesteps"][0])) 
             for _ in range(data.batch.batch_size[0])
-        ]).to(get_device_id())
-        
-        # 对关键 tensor 字段进行 step-level 打乱
-        for key in ["context_orig_lengths"]:
-            data.batch[key] =  data.batch[key][perms]
-            
+        ]).to(device)
         for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-            data.batch[key] =  data.batch[key][
-                torch.arange(data.batch.batch_size[0]).to(get_device_id())[:, None],
+            data.batch[key] = data.batch[key][
+                torch.arange(data.batch.batch_size[0]).to(device)[:, None],
                 perms,
             ]
-
+        
+        # print(data.batch["timesteps"].shape,type(data.batch["timesteps"]),data.batch["timesteps"][0].shape,type(data.batch["timesteps"][0]),len(data.batch["timesteps"][0].shape[1]))
         train_timesteps = int(len(data.batch["timesteps"][0]) * self.config.timestep_fraction)
         grad_norm = None
         
@@ -72,13 +68,15 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
 
         for batch_idx, data in enumerate(dataloader):
-            mini_batch = data
+            # mini_batch = data
 
             self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
-            # split batch into micro_batches
-            micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
+            # print("gradient_accumulation",self.gradient_accumulation)
+            # print("ppo_mini_batch_size",self.config.ppo_mini_batch_size,self.config.ppo_micro_batch_size_per_gpu)
+            # # split batch into micro_batches
+            # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
 
             self.actor_optimizer.zero_grad()
             target_length = data.batch["contexts"][0].shape[0]
@@ -86,7 +84,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 data.batch["contexts"][i] = data.batch["contexts"][i][:target_length]
             # print(data.batch["contexts"][0].shape)
             # context=[data.batch["contexts"].squeeze(0)]
-            context=data.batch["contexts"]
+            context=data.batch["contexts"].squeeze()
             for step_idx in range(train_timesteps):
                 clip_range = self.config.clip_range
                 adv_clip_max = self.config.adv_clip_max
@@ -95,11 +93,11 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 seq_len = math.ceil(
                     (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
                 )
-                
+
                 new_log_probs = self.grpo_wan_one_step(
                     data.batch["latents"][:, step_idx],
                     data.batch["next_latents"][:, step_idx],
-                    context,  # List[Tensor]格式
+                    [context],  # List[Tensor]格式
                     seq_len,
                     self.actor_module,
                     data.batch["timesteps"][:, step_idx],
@@ -123,7 +121,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     1.0 + clip_range,
                 )
                 loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-
+                print("loss",loss)
                 loss.backward()
                 avg_loss = loss.detach().clone()
 
@@ -161,11 +159,17 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
         
         # 使用适当的数据类型进行autocast
+        # computation_dtype = torch.float32  # 关键计算使用FP32以保持精度 这里也暂时改成fp16吧
+        # free, total = torch.cuda.mem_get_info()
+        # print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
+        # print(f"总显存:   {total / (1024 ** 3):.2f} GB")
+        # print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
+        # exit(0)
         autocast_dtype = torch.float16
         with torch.autocast("cuda", dtype=autocast_dtype):
             pred = transformer(
                 x=[latents],
-                t=timesteps.squeeze(),
+                t=timesteps,
                 context=context,
                 seq_len=seq_len
             )
@@ -178,7 +182,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 model_output = pred
 
         # 确保数据类型一致性
-        # computation_dtype = torch.float32  # 关键计算使用FP32以保持精度 这里也暂时改成fp16吧
+
         computation_dtype = torch.float16
         _, _, log_prob = self.wan_step(
             model_output.to(computation_dtype), 

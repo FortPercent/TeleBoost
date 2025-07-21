@@ -441,7 +441,6 @@ class DiffusionRewardModelWorker(RewardModelWorker):
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
 
-
 # ================================= Async related workers =================================
 class AsyncActorRolloutRefWorker(ActorRolloutRefWorker):
     def _build_rollout(self, trust_remote_code=False):
