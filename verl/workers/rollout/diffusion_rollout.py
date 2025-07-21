@@ -52,6 +52,11 @@ class DiffusionRollout(BaseRollout):
         self.vae_module=vae
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
+        free, total = torch.cuda.mem_get_info()
+        print("begin rollout")
+        print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
+        print(f"总显存:   {total / (1024 ** 3):.2f} GB")
+        print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
         num_frames = self.config.num_frames
         size = (self.config.w, self.config.h)
         sample_steps = self.config.sampling_steps
@@ -102,14 +107,17 @@ class DiffusionRollout(BaseRollout):
             input_latents = torch.randn(latent_shape, device=get_device_id(), dtype=latent_dtype)
 
         for index, batch_idx in enumerate(batch_indices):
+
             batch_captions = [caption[i] for i in batch_idx]
             batch_contexts = [context[i].to(get_device_id()) for i in batch_idx]
             batch_neg_context = [neg_context[i].to(get_device_id()) for i in batch_idx]
             batch_context_orig_lengths = [context_orig_lengths[i] for i in batch_idx]
 
             for i in range(len(batch_contexts)):
+                print("batch_contexts before",batch_contexts[i].shape,batch_captions[i])
                 batch_contexts[i] = batch_contexts[i][:batch_context_orig_lengths[i]]
-            
+                print("batch_contexts after",batch_contexts[i].shape,batch_captions[i])
+
             if not self.config.init_same_noise:
                 latent_shape = (
                     16,
@@ -125,7 +133,7 @@ class DiffusionRollout(BaseRollout):
 
             grpo_sample = True
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
-            
+
             with torch.no_grad():      
                 _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
                     [input_latents],
@@ -137,7 +145,7 @@ class DiffusionRollout(BaseRollout):
                     seq_len,
                     grpo_sample,
                 )
-
+            print("final_latents",final_latents.shape,"batch_latents",batch_latents.shape,"batch_log_probs",batch_log_probs.shape)
             batch_latents = batch_latents.unsqueeze(0)
             batch_log_probs = batch_log_probs.unsqueeze(0)
 
@@ -150,15 +158,17 @@ class DiffusionRollout(BaseRollout):
                 # 确保final_latents的数据类型正确
                 final_latents_vae = final_latents.to(dtype=autocast_dtype)
                 self.vae_module.model.to(get_device_id())
+
                 decoded_videos = self.vae_module.decode([final_latents_vae])
                 video_frames = decoded_videos[0]
-                
+
                 # 后处理
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
                 video_frames = video_frames.unsqueeze(0)
             all_video_frames.append(video_frames)
-
+            torch.cuda.empty_cache()
+            
         if len(all_latents) > 1:
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
@@ -170,15 +180,13 @@ class DiffusionRollout(BaseRollout):
             all_video_frames = all_video_frames[0]
             all_sigma_schedule = all_sigma_schedule[0]
 
-
         timestep_value = [int(sigma * 1000) for sigma in all_sigma_schedule[0].squeeze()][:self.config.sampling_steps]
         
         timestep_values = [timestep_value[:] for _ in range(B)]
 
         timesteps =  torch.tensor(timestep_values, device=get_device_id(), dtype=torch.long)
-        
-        timesteps = timesteps.unsqueeze(0).repeat(B, 1,1)
 
+        # timesteps = timesteps.unsqueeze(0).repeat(B, 1,1)
         latents=all_latents[:, :-1]
         next_latents=all_latents[:, 1:]
         batch = TensorDict(
@@ -190,12 +198,17 @@ class DiffusionRollout(BaseRollout):
                 "log_probs": all_log_probs,  # we will recompute old log prob with actor
                 "video_frames": all_video_frames,
                 "sigma_schedule": all_sigma_schedule,
-                'timesteps':timesteps
+                'timesteps':timesteps[:, :-1]
             },
             batch_size=B
         )
-
+        print("timesteps",batch['timesteps'].shape)
         non_tensor_batch = prompts.non_tensor_batch
+        free, total = torch.cuda.mem_get_info()
+
+        print(f"before compute reward 剩余显存: {free / (1024 ** 3):.2f} GB")
+        print(f"before compute reward 总显存:   {total / (1024 ** 3):.2f} GB")
+        print(f"before compute reward 已用显存: {(total - free) / (1024 ** 3):.2f} GB")
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     @torch.no_grad()
@@ -310,7 +323,7 @@ class DiffusionRollout(BaseRollout):
             
             for i in progress_bar:
                 B = len(context) if isinstance(context, list) else context.shape[0]
-                
+                print("DEBUG",B)
                 # 确保设备一致
                 device = latents[0].device
                 
@@ -390,7 +403,15 @@ class DiffusionRollout(BaseRollout):
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
             
-            # print(f"WAN after stack: all_latents={all_latents.shape}, all_log_probs={all_log_probs.shape}")
+            # print("B",B)
+            # print("[DEBUG] all_latents",all_latents.shape)
+            # print("+"*20)
+            # print("[DEBUG] all_log_probs",all_log_probs.shape)
+            # print("+"*20)
+            # print("[DEBUG] all_video_frames",all_video_frames.shape)
+            # print("+"*100)
+            # exit(0)
+            print(f"WAN after stack: all_latents={all_latents.shape}, all_log_probs={all_log_probs.shape}")
             # (9, 16, 7, 64, 64), (8,)
             
             return latents, final_latents, all_latents, all_log_probs

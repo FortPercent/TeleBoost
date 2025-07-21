@@ -575,7 +575,9 @@ class WanModel(ModelMixin, ConfigMixin):
             freqs=self.freqs,
             context=context,
             context_lens=context_lens)
-        
+
+        print("x",x.shape)
+        print("+"*100)
         for block in self.blocks:
             x = block(x=x, **kwargs)
 

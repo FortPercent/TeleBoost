@@ -37,3 +37,4 @@ actor_rollout_ref:
 
 reward_model:
   type: diffusion
+  reward_manager: dancegrpo

@@ -51,9 +51,10 @@ def ulysses_self_flash_attn_forward(
         return q, k, v
 
     q, k, v = qkv_fn(x)
-
+    print("q",q.shape)
     f, h, w = grid_sizes[0,:]
     if ulysses_sp_size > 1:
+        print("come here")
         validate_ulysses_config(self.num_heads, ulysses_sp_size)
         # key_states = repeat_kv(key_states, self.num_key_value_groups)
         # value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -61,6 +62,7 @@ def ulysses_self_flash_attn_forward(
         q = gather_seq_scatter_heads(q, seq_dim=1, head_dim=2,unpadded_dim_size=target)
         k = gather_seq_scatter_heads(k, seq_dim=1, head_dim=2,unpadded_dim_size=target)
         v = gather_seq_scatter_heads(v, seq_dim=1, head_dim=2,unpadded_dim_size=target)
+        print("after gather",q.shape)
         #TODO:UNPAD
         # rank = torch.distributed.get_rank(group=sp_group)
         # world_size = torch.distributed.get_world_size(group=sp_group)

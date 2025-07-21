@@ -133,8 +133,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw):
+                        print(gen_batch.batch["context_orig_lengths"])
+                        print(gen_batch.non_tensor_batch["caption"])
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-
+       
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
@@ -166,7 +168,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
                                 new_batch = gen_batch_output.union(reward_tensor)
                                 del gen_batch_output
-
+                        else:
+                            reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
+                            new_batch = gen_batch_output.union(reward_tensor)
+                            del gen_batch_output
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)
 
@@ -177,8 +182,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     # TODO: Decouple the DP balancing and mini-batching.
 
                     
-                    if self.config.trainer.balance_batch:
-                        self._balance_batch(new_batch, metrics=metrics)
+                    # if self.config.trainer.balance_batch:
+                    #     self._balance_batch(new_batch, metrics=metrics)
 
                     # compute global_valid tokens
                     # batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
@@ -195,17 +200,17 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     #     old_log_prob.batch.pop("entropys")
                     #     batch = batch.union(old_log_prob)
 
-                    if self.use_reference_policy:
-                        # compute reference log_prob
-                        with marked_timer("ref", timing_raw):
-                            ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
-                            batch = batch.union(ref_log_prob)
+                    # if self.use_reference_policy:
+                    #     # compute reference log_prob
+                    #     with marked_timer("ref", timing_raw):
+                    #         ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
+                    #         batch = batch.union(ref_log_prob)
 
-                    # compute values
-                    if self.use_critic:
-                        with marked_timer("values", timing_raw):
-                            values = self.critic_wg.compute_values(batch)
-                            batch = batch.union(values)
+                    # # compute values
+                    # if self.use_critic:
+                    #     with marked_timer("values", timing_raw):
+                    #         values = self.critic_wg.compute_values(batch)
+                    #         batch = batch.union(values)
 
                     with marked_timer("adv", timing_raw):
                         # compute advantages, executed on the driver process
@@ -219,12 +224,12 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                         )
 
-                    # update critic
-                    if self.use_critic:
-                        with marked_timer("update_critic", timing_raw):
-                            critic_output = self.critic_wg.update_critic(batch)
-                        critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
-                        metrics.update(critic_output_metrics)
+                    # # update critic
+                    # if self.use_critic:
+                    #     with marked_timer("update_critic", timing_raw):
+                    #         critic_output = self.critic_wg.update_critic(batch)
+                    #     critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
+                    #     metrics.update(critic_output_metrics)
 
                     # implement critic warmup
                     if self.config.trainer.critic_warmup <= self.global_steps:

@@ -24,7 +24,7 @@ filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=2
 gen_prompt_bsz=$((train_prompt_bsz * 3))
-n_resp_per_prompt=12
+n_resp_per_prompt=4
 train_prompt_mini_bsz=1
 
 # Ray
@@ -37,7 +37,7 @@ MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
 TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
 TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
 temperature=1.0
@@ -46,7 +46,7 @@ top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
 val_top_p=0.7
 
 # Performance Related Parameter
-sp_size=2
+sp_size=4
 use_dynamic_bsz=False
 actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
 infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
@@ -65,12 +65,12 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/nvfile-heatstorage/model_zoo/Wan2___1-T2V-1___3B' \
-    actor_rollout_ref.model.vae_model_path='/nvfile-heatstorage/model_zoo/Wan2___1-T2V-1___3B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.path='/nvfile-heatstorage/model_zoo/Wan2___1-T2V-14B' \
+    actor_rollout_ref.model.vae_model_path='/nvfile-heatstorage/model_zoo/Wan2___1-T2V-14B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=0.0 \
-    actor_rollout_ref.h=720 \
+    actor_rollout_ref.h=480 \
     actor_rollout_ref.w=720 \
-    actor_rollout_ref.num_frames=1 \
+    actor_rollout_ref.num_frames=81 \
     actor_rollout_ref.sampling_steps=16 \
     actor_rollout_ref.actor.eta=0.3 \
     actor_rollout_ref.lr_warmup_steps=0 \
@@ -127,7 +127,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     trainer.logger=['tensorboard'] \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=8 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=5 \
