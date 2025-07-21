@@ -57,7 +57,6 @@ class FSDPUlyssesShardingManager(BaseShardingManager):
         """
         if self.device_mesh is not None:
             group = self.device_mesh["sp"].get_group()
-
             all_gather_data_proto(data=data, process_group=group)
         return data
 

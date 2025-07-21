@@ -106,6 +106,7 @@ class TaskRunner:
         reward_manager_cls = get_reward_manager_cls(reward_manager_name)
 
         compute_score = get_custom_reward_fn(config)
+
         reward_fn = reward_manager_cls(
             tokenizer=tokenizer,
             num_examine=0,

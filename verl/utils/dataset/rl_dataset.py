@@ -39,6 +39,7 @@ def wan_preprocessed_collate_function(data_list: list[dict]) -> dict:
     non_tensors = defaultdict(list)
     orig_lengths = defaultdict(list)
     for data in data_list:
+        print("to see length!!!",data['caption'],data['context'].shape)
         for key, val in data.items():
             if isinstance(val, torch.Tensor):
                 tensors[key].append(val)

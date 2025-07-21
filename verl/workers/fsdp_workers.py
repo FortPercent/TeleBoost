@@ -291,8 +291,6 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 torch_dtype=torch_dtype,
                 trust_remote_code=trust_remote_code
             )
-            print(dir(actor_module))
-            print("*"*100)
 
             # Apply Liger kernel to the model if use_liger is set to True
             if use_liger:
@@ -394,9 +392,14 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             actor_module_fsdp = actor_module
         else:
             raise NotImplementedError(f"not implement {fsdp_strategy}")
-        # if enable_activation_offload:
-        #     enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
-
+            
+        if enable_activation_offload:
+            enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
+        
+        free, total = torch.cuda.mem_get_info()
+        print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
+        print(f"总显存:   {total / (1024 ** 3):.2f} GB")
+        print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
         log_gpu_memory_usage(f"After {role} FSDP init", logger=logger)
 
         # TODO: add more optimizer args into config
