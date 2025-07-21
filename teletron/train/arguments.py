@@ -182,6 +182,15 @@ class UnifiedArguments:
         }
     )
 
+    # used for causal Wan
+    timestep_shift: float = field(default=0.5)
+    guidance_scale: float = field(default=5.0)
+    mixed_precision: bool = field(default=True)
+    num_frame_per_block: int = field(default=3)
+    image_or_video_shape: list[int] = field(default_factory=lambda: [1,21,16,60,104])
+
+
+
 
 
 def add_dataclass_arguments(parser, dataclass_type):

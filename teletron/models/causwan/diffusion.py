@@ -2,7 +2,7 @@ from typing import Tuple
 import torch
 
 from .base import BaseModel
-from teletron.utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
+from teletron.models.causwan.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 import torch.distributed as dist
 from tqdm import tqdm
 import os
@@ -51,7 +51,7 @@ class CausalDiffusion(BaseModel):
             self.generator.model.num_frame_per_block = self.num_frame_per_block
         self.independent_first_frame = getattr(args, "independent_first_frame", False)
 
-        if args.gradient_checkpointing:
+        if hasattr(args, 'gradient_checkpointing'):
             self.generator.enable_gradient_checkpointing()
 
         # Step 2: Initialize all hyperparameters
