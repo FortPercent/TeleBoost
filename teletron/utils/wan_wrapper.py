@@ -20,6 +20,7 @@ class WanTextEncoder(torch.nn.Module):
             encoder_only=True,
             return_tokenizer=False,
             dtype=torch.float32,
+            # dtype=torch.bfloat16,
             device=torch.device('cpu')
         ).eval().requires_grad_(False)
         self.text_encoder.load_state_dict(
