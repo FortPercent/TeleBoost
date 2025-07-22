@@ -181,6 +181,7 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
             models_num = margs.consumer_models_num
             model_world_size = (total_world_size - extra_model_parallel_world_size)
         else: 
+            models_num=1
             model_world_size = torch.distributed.get_world_size()
     
 

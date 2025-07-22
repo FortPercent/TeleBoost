@@ -67,8 +67,8 @@ def set_config():
         from config.wan_i2v_bucket import config
     elif args.task_type == "wan_multimask":
         from config.wan_i2v_multimask import config
-    elif args.task_type == "wan_self_forcing":
-        from config.wan_self_forcing import config
+    elif args.task_type == "wan_autoregressive":
+        from config.wan_autoregressive import config
     elif args.task_type == "vast":
         from config.vast import config
     elif args.task_type == "teleai_i2v":

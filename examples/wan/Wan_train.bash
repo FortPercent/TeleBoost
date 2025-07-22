@@ -1,4 +1,4 @@
-# export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Teletron-ref/
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/zbk/Teletron-ref/
 
 # 设置单POD的GPU数量
 export GPUS_PER_NODE=1

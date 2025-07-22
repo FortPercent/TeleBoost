@@ -9,7 +9,8 @@ config = dict(
             dataset=dict(
                 type="TensorDataset",
                 pth_paths=[
-                    "/nvfile-heatstorage/dj/datasets/istock/part_1_50000",
+                    "/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents",
+                    # "/nvfile-heatstorage/dj/datasets/istock/part_1_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_2_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_3_50000",
                     # "/nvfile-heatstorage/dj/datasets/istock/part_4_50000",
@@ -51,7 +52,8 @@ config = dict(
                     # "/nvfile-heatstorage/dj/datasets/istock/part_40_50000",
                 ],
                 metadata_paths=[
-                    "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_1_50000.csv",
+                    "/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/filtered_500.csv",
+                    # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_1_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_2_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_3_50000.csv",
                     # "/nvfile-heatstorage/dj/datasets/istock/istock_self_forcing/part_4_50000.csv",
@@ -103,38 +105,6 @@ config = dict(
                     training_suitability_th=5.0,
                     area_th=1280 * 720,
                 ),
-
-                transforms=[
-                    dict(
-                        type="SampleImages",
-                        num_frames=dst_num_frames,
-                    ),
-                    dict(
-                        type="PromptGenerator",
-                        clean_prompt=True,
-                        default_prompt_prob=0.1,
-                    ),
-                    dict(
-                        type="PackInputs",
-                        image_keys=[
-                            "images",
-                        ],
-                        #dst_size=dst_size,
-                    ),
-                    dict(
-                        type="GenerateRefImagesWithMask",
-                        mask_cfg={
-                            "t2v": 0.0,
-                            "i2v": 0.4,
-                            "clear": 0.0,
-                            "continuation": 0.2,
-                            "random": 0.0,
-                            "transition": 0.4
-                        },
-                        min_clear_ratio=0.0,
-                        max_clear_ratio=1.0,
-                    ),
-                ],
             ),
             batch_size_per_gpu=1,
             num_workers=NUM_WORKERS,

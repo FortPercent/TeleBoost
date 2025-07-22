@@ -1,7 +1,7 @@
 import random
 import torch
 import numpy as np
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, RandomSampler
 from megatron.core import mpu
 from teletron.utils import (
     get_args,
@@ -47,7 +47,10 @@ class DataloaderMixin:
                 valid_ds, 0, dp_rank, dp_size
             )
         else:
-            args.consumed_valid_samples = args.consumed_valid_samples % len(valid_ds)
+            if valid_ds is not None:
+                args.consumed_valid_samples = args.consumed_valid_samples % len(valid_ds)
+            else: 
+                args.consumed_valid_samples = 0
             valid_dataloader = self.build_pretraining_data_loader(
                 valid_ds, args.consumed_valid_samples, dp_rank, dp_size
             )
@@ -106,6 +109,9 @@ class DataloaderMixin:
 
         elif args.dataloader_type == "external":
             return dataset
+        elif args.dataloader_type == 'causal':
+            batch_sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, shuffle=True, drop_last=True)
         else:
             raise Exception('{} dataloader type is not supported.'.format(
                     args.dataloader_type))

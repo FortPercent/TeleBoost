@@ -2,10 +2,10 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-export GPUS_PER_NODE=1
+export GPUS_PER_NODE=2
 export MASTER_ADDR=$GEMINI_HOST_IP_taskrole1_0
 export MASTER_PORT=7890
 
@@ -28,13 +28,27 @@ DISTRIBUTED_ARGS=(
 
 
 TRAINING_ARGS=(
+    --task-type wan_autoregressive
     --lr 1e-5
-    --weight_decay 0.0
-    
+    --weight-decay 0.0
+    --adam-beta1 0.0
+    --adam-beta2 0.999
+    --use-distributed-optimizer
 )
+
+MODEL_PARALLEL_ARGS=(
+    --model CausalDiffusion
+    --tensor-model-parallel-size 1
+    --consumer-models-num 1
+    --distributed-vae
+    --distributed-vae-world-size 1
+
+)
+
 DATA_ARGS=(
-    # --dataset-type TensorDataset
-    --micro_batch_size 1
+    --dataset-type TensorDataset
+    --dataloader-type causal
+    --micro-batch-size 1
     # --data-path  /nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents
 )
 

@@ -1,20 +1,56 @@
-import gc
-import logging
-
 from teletron.models.causwan import CausalDiffusion
 from teletron.train import Trainer
-from teletron.utils.dataset import ShardingLMDBDataset, cycle
 from teletron.utils.wan_dataset import TensorDataset, cycle
 from teletron.utils.misc import set_seed
 import torch.distributed as dist
+import dataclasses
+from megatron.core import mpu, tensor_parallel
+from megatron.core.optimizer import OptimizerConfig
 from omegaconf import OmegaConf
+
+import deepspeed
 import torch
-from torch.utils.tensorboard import SummaryWriter
 import time
 import os
 from tqdm import tqdm
-from datetime import datetime
-from torch.utils.data import RandomSampler
+from teletron.utils import (
+    print_rank_0,
+    print_datetime,
+    get_model_config,
+    print_rank_last,
+    is_last_rank,
+    num_floating_point_operations,
+    validate_args,
+    set_args,
+    get_args,
+    update_num_microbatches,
+    get_num_microbatches,
+)
+from teletron.train.utils import (
+    _initialize_distributed,
+    _compile_dependencies,
+    set_jit_fusion_options,
+    core_transformer_config_from_args,
+    forward_step,
+    deepspeed_forward_backward,
+    _set_random_seed,
+    _initialize_tp_communicators,
+    calc_params_l2_norm,
+    get_grad_norm
+)
+from teletron.core.parallel_state import get_transformer_model_group
+from teletron.train.dataloader import DataloaderMixin
+from teletron.models.build import build_model
+from teletron.train.checkpoint import CheckPointMixin, unwrap_model, ensure_directory_exists
+from teletron.train.lr_scheduler import SchedulerMixin
+from teletron.train.telelogger import TeleLoggerMixin
+from logging import getLogger
+from teletron.datasets.build import build_train_valid_test_datasets
+from teletron.core.distributed.distributed_encoder import producer_process
+from teletron.models.encoder_registry import get_encoder_name
+from teletron.train.consumer_dataloader import create_batch_loader
+
+
 
 class DiffusionTrainer:
     def __init__(self, args):
@@ -97,9 +133,9 @@ class DiffusionTrainer:
 
         # Step 3: Initialize the dataloader
         dataset = TensorDataset(args.base_paths, args.metadata_paths)
-        # sampler = torch.utils.data.distributed.DistributedSampler(
-        #     dataset, shuffle=True, drop_last=True)
-        sampler = RandomSampler(dataset)
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset, shuffle=True, drop_last=True)
+        # sampler = RandomSampler(dataset)
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=args.batch_size,
@@ -295,123 +331,67 @@ class DiffusionTrainer:
 
 class CausalTrainer(Trainer):
     def __init__(self, args, dataset_provider_func=None):
-        super.__init__(args)
-        self.initialize_megatron(args)
-        self.config = args
-        self.step = 0
+        super().__init__(args)
+    
+    def model_provider(
+        self,
+        pre_process=True,
+        post_process=True,
+        add_encoder=True,
+        add_decoder=True,
+        parallel_output=True,
+    ):
+        args = get_args()
+        # cfg = core_transformer_config_from_args(args)
+        return build_model(args.model, args)
 
-        # Step 1: Initialize the distributed training environment (rank, seed, dtype, logging etc.)
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+    # def setup_model_and_optimizer(self, model_type, 
+    #                               no_wd_decay_cond=None, 
+    #                               scale_lr_cond=None, 
+    #                               lr_mult=1.0):
+    #     args = get_args()
+    #     # timers = get_timers()
+    #     assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
+    #     # timers = get_timers()
+    #     if args.use_zero2:
+    #         model = self.get_model(model_type, wrap_with_ddp=False)
+    #     else:
+    #         model = self.get_model(model_type)
+    #     # self.model.generator = self.model.generator.to(torch.bfloat16)
+    #     unwrapped_model = unwrap_model(model)
+    #     kwargs = {}
+    #     for f in dataclasses.fields(OptimizerConfig):
+    #         if hasattr(args, f.name):
+    #             kwargs[f.name] = getattr(args, f.name)
+    #     config = OptimizerConfig(**kwargs)
+    #     config.timers = None
+    #     if args.use_zero2:
+    #         deepspeed.init_distributed()
+    #         optimizer = self.get_optimizer_for_zero2(config, model, no_wd_decay_cond,
+    #                                     scale_lr_cond, lr_mult)
+    #     else:
+    #         optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
+    #                                     scale_lr_cond, lr_mult)
 
-        # launch_distributed_job()
-        # global_rank = dist.get_rank()
+    #     opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
 
-        self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
-        self.device = torch.cuda.current_device()
-        # self.is_main_process = global_rank == 0
-        self.is_main_process = True
-        self.causal = True # config.causal
+    #     if args.load is not None or args.pretrained_checkpoint is not None:
+    #         # timers('load-checkpoint', log_level=0).start(barrier=True)
+    #         args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
+    #             model, optimizer, opt_param_scheduler, strict=True)
+    #         # timers('load-checkpoint').stop(barrier=True)
+    #         # timers.log(['load-checkpoint'])
+    #     else:
+    #         args.iteration = 0
+    #         args.num_floating_point_operations_so_far = 0
+    #         args.last_microbatch_size_index = None
 
-        # Initialize TensorBoard writer
-        self.writer = None
-        # if self.is_main_process and not self.disable_tensorboard:
-        #     # Add timestamp to tensorboard log directory
-        #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        #     base_tensorboard_dir = getattr(config, 'tensorboard_log_dir', os.path.join(config.logdir, 'tensorboard'))
-        #     tensorboard_log_dir = os.path.join(base_tensorboard_dir, f"run_{timestamp}")
-            
-        #     os.makedirs(tensorboard_log_dir, exist_ok=True)
-        #     self.writer = SummaryWriter(log_dir=tensorboard_log_dir)
-            
-        #     # Log config as text
-        #     config_str = OmegaConf.to_yaml(config)
-        #     self.writer.add_text('config', config_str, 0)
+    #     # get model without FP16 and/or DDP wrappers
+    #     if args.iteration == 0 and len(unwrapped_model) == 1 \
+    #         and hasattr(unwrapped_model[0], 'init_state_dict_from_bert'):
+    #         print_rank_0("Initializing ICT from pretrained BERT model")
+    #         unwrapped_model[0].init_state_dict_from_bert()
+    #         if args.fp16:
+    #             optimizer.reload_model_params()
 
-        self.output_path = args.save
-
-        # Step 2: Initialize the model and optimizer
-        self.model = CausalDiffusion(args, device=self.device)
-
-        # self.model.generator = fsdp_wrap(
-        #     self.model.generator,
-        #     sharding_strategy=config.sharding_strategy,
-        #     mixed_precision=config.mixed_precision,
-        #     wrap_strategy=config.generator_fsdp_wrap_strategy
-        # )
-        self.model.generator = self.model.generator.to(torch.bfloat16).to(self.device)
-        # self.model.text_encoder = fsdp_wrap(
-        #     self.model.text_encoder,
-        #     sharding_strategy=config.sharding_strategy,
-        #     mixed_precision=config.mixed_precision,
-        #     wrap_strategy=config.text_encoder_fsdp_wrap_strategy
-        # )
-        self.model.text_encoder = self.model.text_encoder.to(torch.bfloat16).to(self.device)
-        # if not config.no_visualize or config.load_raw_video:
-        #     self.model.vae = self.model.vae.to(
-        #         device=self.device, dtype=torch.bfloat16 if config.mixed_precision else torch.float32)
-
-        self.generator_optimizer = torch.optim.AdamW(
-            [param for param in self.model.generator.parameters()
-             if param.requires_grad],
-            lr=args.lr,
-            betas=(args.beta1, args.beta2),
-            weight_decay=args.weight_decay
-        )
-
-        # world_size = dist.get_world_size() 
-        # local_rank = dist.get_rank()
-        # if local_rank == 0:
-        #     print(f"num of all gpus: {world_size}")
-
-        # Step 3: Initialize the dataloader
-        dataset = TensorDataset(args.base_paths, args.metadata_paths)
-        # sampler = torch.utils.data.distributed.DistributedSampler(
-        #     dataset, shuffle=True, drop_last=True)
-        sampler = RandomSampler(dataset)
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            sampler=sampler,
-            num_workers=8)
-
-        # if dist.get_rank() == 0:
-        print("DATASET SIZE %d" % len(dataset))
-        self.dataloader = cycle(dataloader)
-
-        ##############################################################################################################
-        # 6. Set up EMA parameter containers
-        rename_param = (
-            lambda name: name.replace("_fsdp_wrapped_module.", "")
-            .replace("_checkpoint_wrapped_module.", "")
-            .replace("_orig_mod.", "")
-        )
-        self.name_to_trainable_params = {}
-        for n, p in self.model.generator.named_parameters():
-            if not p.requires_grad:
-                continue
-
-            renamed_n = rename_param(n)
-            self.name_to_trainable_params[renamed_n] = p
-
-
-        ##############################################################################################################
-        # 7. (If resuming) Load the model and optimizer, lr_scheduler, ema's statedicts
-        if getattr(args, "generator_ckpt", False):
-            print(f"Loading pretrained generator from {args.generator_ckpt}")
-            state_dict = torch.load(args.generator_ckpt, map_location="cpu")
-            if "generator" in state_dict:
-                state_dict = state_dict["generator"]
-            elif "model" in state_dict:
-                state_dict = state_dict["model"]
-            self.model.generator.load_state_dict(
-                state_dict, strict=True
-            )
-
-        ##############################################################################################################
-
-        self.max_grad_norm = 0.5
-        self.previous_time = None
-
-
-
+    #     return model, optimizer, opt_param_scheduler

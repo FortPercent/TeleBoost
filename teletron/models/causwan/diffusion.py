@@ -40,30 +40,31 @@ def load_sharded_generator_distributed(model, shard_dir):
 
 
 class CausalDiffusion(BaseModel):
-    def __init__(self, args, device):
+    def __init__(self, config, device=torch.cuda.current_device()):
         """
         Initialize the Diffusion loss module.
         """
-        super().__init__(args, device)
-        self.num_frame_per_block = getattr(args, "num_frame_per_block", 3)
-        self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
+        super().__init__(config, device)
+        self.num_frame_per_block = getattr(config, "num_frame_per_block", 3)
+        self.dtype = torch.bfloat16 if config.mixed_precision else torch.float32
         if self.num_frame_per_block > 1:
             self.generator.model.num_frame_per_block = self.num_frame_per_block
-        self.independent_first_frame = getattr(args, "independent_first_frame", False)
+        self.independent_first_frame = getattr(config, "independent_first_frame", False)
 
-        if hasattr(args, 'gradient_checkpointing'):
+        if hasattr(config, 'gradient_checkpointing'):
             self.generator.enable_gradient_checkpointing()
 
         # Step 2: Initialize all hyperparameters
-        self.num_train_timestep = args.num_train_timestep
+        self.num_train_timestep = config.num_train_timestep
         self.min_step = int(0.02 * self.num_train_timestep)
         self.max_step = int(0.98 * self.num_train_timestep)
-        self.guidance_scale = args.guidance_scale
-        self.timestep_shift = getattr(args, "timestep_shift", 5.0)
+        self.guidance_scale = config.guidance_scale
+        self.timestep_shift = getattr(config, "timestep_shift", 5.0)
         self.teacher_forcing = True
 
         # Noise augmentation in teacher forcing, we add small noise to clean context latents
-        self.noise_augmentation_max_timestep = getattr(args, "noise_augmentation_max_timestep", 0)
+        self.noise_augmentation_max_timestep = getattr(config, "noise_augmentation_max_timestep", 0)
+        self.config = config
 
     def _initialize_models(self, args, device):
         self.generator = WanDiffusionWrapper(**getattr(args, "model_kwargs", {}), is_causal=True)
