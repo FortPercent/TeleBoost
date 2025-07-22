@@ -72,18 +72,17 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
     ):
         self.initialize_megatron(args)
         set_jit_fusion_options()
-        transformer_group = get_transformer_model_group()
-        if transformer_group is None:            
-            producer_process(
-                rank=dist.get_rank(), 
-                world_size=dist.get_world_size(),
-                encoder_name=get_encoder_name(args.model),
-                device=torch.cuda.current_device(),
-                build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
-                train_ds=None,
-            )
-            
-            exit()        
+        # transformer_group = get_transformer_model_group()
+        # if transformer_group is None:            
+        #     producer_process(
+        #         rank=dist.get_rank(), 
+        #         world_size=dist.get_world_size(),
+        #         encoder_name=get_encoder_name(args.model),
+        #         device=torch.cuda.current_device(),
+        #         build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+        #         train_ds=None,
+        #     )
+        #     exit()        
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
                                         dtype=torch.double,
@@ -102,10 +101,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                 self.get_iterator(len(self.model), dataset_provide_func)
 
         dataiters = (self.train_itrt, self.valid_itrt, self.test_itrt)
+        breakpoint()
         self.train_itrt, self.valid_itrt, self.test_itrt = [
-        create_batch_loader(args, ds) if ds is not None else None 
-                for ds in dataiters
-            ]
+            create_batch_loader(args, ds) if ds is not None else None 
+                    for ds in dataiters
+                ]
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  
@@ -139,11 +139,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
         opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
         if args.load is not None or args.pretrained_checkpoint is not None:
-            # timers('load-checkpoint', log_level=0).start(barrier=True)
             args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
                 model, optimizer, opt_param_scheduler, strict=True)
-            # timers('load-checkpoint').stop(barrier=True)
-            # timers.log(['load-checkpoint'])
         else:
             args.iteration = 0
             args.num_floating_point_operations_so_far = 0
@@ -310,7 +307,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         print("Building iterators.")
         dl_type = args.dataloader_type
 
-        assert dl_type in ['single', 'cyclic', 'external']
+        assert dl_type in ['single', 'cyclic', 'external','causal']
 
         def _get_iterator(dataloader_type, dataloader):
             """Return dataset iterator."""
@@ -321,6 +318,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             elif dataloader_type == "external":
                 # External dataloader is passed through. User is expected to define how to iterate.
                 return dataloader
+            elif dataloader_type == "causal":
+                return cyclic_iter(dataloader)
             else:
                 raise RuntimeError("unexpected dataloader type")
 
@@ -345,6 +344,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             return train_data_iterator, valid_data_iterator, test_data_iterator
 
     def initialize_megatron(self, args):
+        # breakpoint()
 
         if args.distributed_vae:
             args.world_size = (args.world_size - args.distributed_vae_world_size)  //args.consumer_models_num

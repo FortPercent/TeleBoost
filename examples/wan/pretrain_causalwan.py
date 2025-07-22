@@ -1,8 +1,9 @@
 import argparse
 import os
 from omegaconf import OmegaConf
-
-from teletron.train import DiffusionTrainer, parse_args
+import torch
+from teletron.train import parse_args
+from teletron.train.causal_trainer import CausalTrainer
 
 
 def extra_args(parser):
@@ -14,12 +15,12 @@ def extra_args(parser):
     group.add_argument("--real-name", type=str, default="Wan2.1-T2V-14B")
     group.add_argument("--negative_prompt",type=str,
                        default="色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
-    group.add_argument("--base_paths", typr=str, nargs = '+',
-                       default=['/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents',]
-                       )
-    group.add_argument("--metadata_paths", typr=str, nargs = '+',
-                       default=['/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/filtered_500.csv',]
-                       )
+    # group.add_argument("--base_paths", type=str, nargs = '+',
+    #                    default=['/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents',]
+    #                    )
+    # group.add_argument("--metadata_paths", type=str, nargs = '+',
+    #                    default=['/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/filtered_500.csv',]
+    #                    )
     # group.add_argument("--logdir", type=str, default="wan_experiments_test", help="Path to the directory to save logs")
     # group.add_argument("--test_valid", type=str, default="")
     # group.add_argument("--moe-step-factor-list", type=float, action='append')
@@ -51,8 +52,26 @@ def main():
 
 
 
+
+import torch.distributed as dist
+import debugpy
+
+def wait_for_debugger(rank_to_debug=0, port=5678):
+    rank = int(os.environ.get("RANK", "0"))
+    # All ranks pause here before debugger
+    if rank == rank_to_debug:
+        print(f"[Rank {rank}] Waiting for debugger on port {port}...")
+        debugpy.listen(("0.0.0.0", port))
+        debugpy.wait_for_client()
+        print(f"[Rank {rank}] Debugger attached.")
+
+
+
 if __name__ == "__main__":
-    main()
-    # args = parse_args(extra_args=extra_args)
-    # trainer = DiffusionTrainer(args)
+    # wait_for_debugger(0)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    # main()
+    args = parse_args(extra_args=extra_args)
+    trainer = CausalTrainer(args)
     # trainer.train()
