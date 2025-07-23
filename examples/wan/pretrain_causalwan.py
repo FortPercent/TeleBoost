@@ -4,7 +4,9 @@ from omegaconf import OmegaConf
 import torch
 from teletron.train import parse_args
 from teletron.train.causal_trainer import CausalTrainer
-
+from teletron.models.flow_match import FlowMatchScheduler
+from teletron.train.utils import get_batch, loss_func
+from megatron.core import mpu
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
@@ -35,20 +37,20 @@ def extra_args(parser):
     
     return parser
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config_path", type=str, required=True)
-    # parser.add_argument("--save", action="store_true")
-    parser.add_argument("--save", type=str, default="wan_experiments_test", help="Path to the directory to save logs")
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--config_path", type=str, required=True)
+#     # parser.add_argument("--save", action="store_true")
+#     parser.add_argument("--save", type=str, default="wan_experiments_test", help="Path to the directory to save logs")
 
-    args = parser.parse_args()
+#     args = parser.parse_args()
 
-    config = OmegaConf.load(args.config_path)
-    default_config = OmegaConf.load("/nvfile-heatstorage/teleai-infra/kaikai/dreamingforcing/WorldVideo/configs/default_config.yaml")
-    config = OmegaConf.merge(default_config, config)
-    trainer = DiffusionTrainer(config)
-    # breakpoint()
-    trainer.train()
+#     config = OmegaConf.load(args.config_path)
+#     default_config = OmegaConf.load("/nvfile-heatstorage/teleai-infra/kaikai/dreamingforcing/WorldVideo/configs/default_config.yaml")
+#     config = OmegaConf.merge(default_config, config)
+#     trainer = DiffusionTrainer(config)
+#     # breakpoint()
+#     trainer.train()
 
 
 
@@ -65,7 +67,76 @@ def wait_for_debugger(rank_to_debug=0, port=5678):
         debugpy.wait_for_client()
         print(f"[Rank {rank}] Debugger attached.")
 
+def forward_step(data_iterator, model):
+    flow_scheduler = model.scheduler
+    prompt_emb = {}
+    batch = next(data_iterator)
+    clean_latent = batch["latents"]
+    
+    noise = torch.randn_like(clean_latent) if "noise" not in batch else batch["noise"]
+    batch_size, num_frame = clean_latent.shape[:2]
+    index = model._get_timestep(
+        0,
+        flow_scheduler.num_train_timesteps,
+        clean_latent.shape[0],
+        clean_latent.shape[1],
+        model.num_frame_per_block,
+        uniform_timestep=False
+    )
+    timestep = flow_scheduler.timesteps[index].to(dtype=model.dtype, device=model.device)
+    
+    def broadcast_timesteps(input: torch.Tensor):
+        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+        if mpu.get_tensor_context_parallel_world_size() > 1:
+            dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
+    broadcast_timesteps(timestep)
+    broadcast_timesteps(noise)
+    prompt_emb["context"] = batch["context"]
+    prompt_emb["unconditional_dict"]= batch["unconditional_dict"] if "unconditional_dict"  in batch else None
+    training_target = flow_scheduler.training_target(clean_latent, noise, timestep)
+    
+    noisy_latents = flow_scheduler.add_noise(
+        clean_latent.flatten(0, 1),
+        noise.flatten(0, 1),
+        timestep.flatten(0, 1)
+    ).unflatten(0, (batch_size, num_frame))
+    
+    if model.noise_augmentation_max_timestep > 0:
+        index_clean_aug = model._get_timestep(
+            0,
+            model.noise_augmentation_max_timestep,
+            clean_latent.shape[0],
+            clean_latent.shape[1],
+            model.num_frame_per_block,
+            uniform_timestep=False
+        )
+        timestep_clean_aug = flow_scheduler.timesteps[index_clean_aug].to(dtype=model.dtype, device=model.device)
+        clean_latent_aug =flow_scheduler.add_noise(
+            clean_latent.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep_clean_aug.flatten(0, 1)
+        ).unflatten(0, (batch_size, num_frame))
+    else:
+        clean_latent_aug = clean_latent
+        timestep_clean_aug = None
+    
+    output_tensor_list = model(
+            noisy_latents=noisy_latents, 
+            timestep=timestep, 
+            conditional_dict=prompt_emb["context"],
+            unconditional_dict=prompt_emb["unconditional_dict"],
+            clean_latent_aug=clean_latent_aug,
+            timestep_clean_aug=timestep_clean_aug
+        )
+    
+    loss = torch.nn.functional.mse_loss(
+        output_tensor_list.float(), training_target.float()
+    )
+    loss_wo_w = loss
+    loss = loss * flow_scheduler.flow_scheduler.training_weight(timestep)
+    # print("loss", loss)
+    return [loss, loss_wo_w], loss_func
 
 if __name__ == "__main__":
     # wait_for_debugger(0)
@@ -73,5 +144,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.allow_tf32 = True
     # main()
     args = parse_args(extra_args=extra_args)
+    args.distributed_vae = None
     trainer = CausalTrainer(args)
-    # trainer.train()
+    trainer.pretrain(forward_step_func=forward_step)

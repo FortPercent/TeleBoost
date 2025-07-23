@@ -7,8 +7,9 @@ import dataclasses
 from megatron.core import mpu, tensor_parallel
 from megatron.core.optimizer import OptimizerConfig
 from omegaconf import OmegaConf
-
-import deepspeed
+from teletron.core.distributed import DistributedDataParallel as DDP
+from megatron.core.enums import ModelType
+from megatron.core.transformer.module import Float16Module
 import torch
 import time
 import os
@@ -344,54 +345,3 @@ class CausalTrainer(Trainer):
         args = get_args()
         # cfg = core_transformer_config_from_args(args)
         return build_model(args.model, args)
-
-    # def setup_model_and_optimizer(self, model_type, 
-    #                               no_wd_decay_cond=None, 
-    #                               scale_lr_cond=None, 
-    #                               lr_mult=1.0):
-    #     args = get_args()
-    #     # timers = get_timers()
-    #     assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
-    #     # timers = get_timers()
-    #     if args.use_zero2:
-    #         model = self.get_model(model_type, wrap_with_ddp=False)
-    #     else:
-    #         model = self.get_model(model_type)
-    #     # self.model.generator = self.model.generator.to(torch.bfloat16)
-    #     unwrapped_model = unwrap_model(model)
-    #     kwargs = {}
-    #     for f in dataclasses.fields(OptimizerConfig):
-    #         if hasattr(args, f.name):
-    #             kwargs[f.name] = getattr(args, f.name)
-    #     config = OptimizerConfig(**kwargs)
-    #     config.timers = None
-    #     if args.use_zero2:
-    #         deepspeed.init_distributed()
-    #         optimizer = self.get_optimizer_for_zero2(config, model, no_wd_decay_cond,
-    #                                     scale_lr_cond, lr_mult)
-    #     else:
-    #         optimizer = self.get_optimizer(config, model, no_wd_decay_cond,
-    #                                     scale_lr_cond, lr_mult)
-
-    #     opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
-
-    #     if args.load is not None or args.pretrained_checkpoint is not None:
-    #         # timers('load-checkpoint', log_level=0).start(barrier=True)
-    #         args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
-    #             model, optimizer, opt_param_scheduler, strict=True)
-    #         # timers('load-checkpoint').stop(barrier=True)
-    #         # timers.log(['load-checkpoint'])
-    #     else:
-    #         args.iteration = 0
-    #         args.num_floating_point_operations_so_far = 0
-    #         args.last_microbatch_size_index = None
-
-    #     # get model without FP16 and/or DDP wrappers
-    #     if args.iteration == 0 and len(unwrapped_model) == 1 \
-    #         and hasattr(unwrapped_model[0], 'init_state_dict_from_bert'):
-    #         print_rank_0("Initializing ICT from pretrained BERT model")
-    #         unwrapped_model[0].init_state_dict_from_bert()
-    #         if args.fp16:
-    #             optimizer.reload_model_params()
-
-    #     return model, optimizer, opt_param_scheduler
