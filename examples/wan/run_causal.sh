@@ -2,7 +2,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export GPUS_PER_NODE=2
@@ -15,7 +15,8 @@ export NNODES=1
 export NODE_RANK=0
 export WORLD_SIZE=$(($GPUS_PER_NODE * $NNODES))
 
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/yxy/zbk/Teletron-ref
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/teleai-infra/kaikai/examples
 # mkdir -p $CHECKPOINT_PATH_SAVE
 
 DISTRIBUTED_ARGS=(
@@ -49,14 +50,13 @@ DATA_ARGS=(
     --dataset-type TensorDataset
     --dataloader-type causal
     --micro-batch-size 1
-    # --data-path  /nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents
+    --data-path  /nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents
 )
 
 
 EVAL_AND_LOGGING_ARGS=(
     --save $CHECKPOINT_PATH_SAVE
 )
-
 
 
 torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_causalwan.py \

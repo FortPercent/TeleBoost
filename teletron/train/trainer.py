@@ -93,19 +93,21 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
             time.time() - _TRAIN_START_TIME))
         print_datetime('after megatron is initialized')
-
+        
         self.model, self.optimizer, self.scheduler = \
                                 self.setup_model_and_optimizer(args.model_type)
-
+        print_datetime('setup model succeed')
         self.train_itrt, self.valid_itrt, self.test_itrt = \
                                 self.get_iterator(len(self.model), dataset_provide_func)
-
+        print_datetime('get_iterator succeed')
+        
         dataiters = (self.train_itrt, self.valid_itrt, self.test_itrt)
-        breakpoint()
+        # breakpoint()
         self.train_itrt, self.valid_itrt, self.test_itrt = [
             create_batch_loader(args, ds) if ds is not None else None 
                     for ds in dataiters
                 ]
+        print_datetime('create_batch_loader succeed')
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  
@@ -113,7 +115,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                   no_wd_decay_cond=None,
                                   scale_lr_cond=None,
                                   lr_mult=1.0):
-
+        print('indoor setup_model_and_optimizer')
         args = get_args()
         # timers = get_timers()
         assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
@@ -153,6 +155,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             unwrapped_model[0].init_state_dict_from_bert()
             if args.fp16:
                 optimizer.reload_model_params()
+        print('outdoor setup_model_and_optimizer')
 
         return model, optimizer, opt_param_scheduler
 
@@ -288,7 +291,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, valid_ds_prev=None, return_ds=False
     ):
         """Build pretraining data iterators."""
-
         args = get_args()
 
         # Build loaders.
@@ -396,8 +398,9 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         process_non_loss_data_func=None,
     ):
         args = get_args()
-
+        print('start_pretain')
         if args.distributed_vae:
+            print("is distributed_vae")
             consumer_config = torch.zeros(
                 (3), dtype=torch.int64, device=torch.cuda.current_device()
             )
@@ -406,11 +409,16 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             consumer_config[2] = args.consumed_valid_samples
 
             from teletron.core.parallel_state import get_comm_pair
+            print(1)
             comm_pair = get_comm_pair()
+            print(2)
 
             if comm_pair is not None:
+                print('comm_pair is not None')
                 req = dist.isend(tensor=consumer_config, dst=comm_pair.producer, tag=0)
+                print('start wait')
                 req.wait()
+                print('stop wait')
         print_datetime('after dataloaders are built')
         print_rank_0('done with setup ...')
 
@@ -423,7 +431,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 print_rank_0("retro cyclic train iters : %d" % args.train_iters)
 
             iteration = 0
+            print(f'train_iters={args.train_iters}')
+            print(args.do_train)
             if args.do_train and args.train_iters > 0:
+                print('self.train...')
                 iteration, num_floating_point_operations_so_far = self.train(
                     forward_step_func,
                     # forward_step_func,

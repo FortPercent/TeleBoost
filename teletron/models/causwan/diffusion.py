@@ -99,6 +99,34 @@ class CausalDiffusion(BaseModel):
 
         self.scheduler = self.generator.get_scheduler()
         self.scheduler.timesteps = self.scheduler.timesteps.to(device)
+        
+    def forward(
+        self,
+        noisy_latents,
+        timestep,
+        conditional_dict: dict,
+        clean_latent_aug: torch.Tensor,
+        timestep_clean_aug: torch.Tensor,
+        unconditional_dict: dict = None
+    ) -> Tuple[torch.Tensor, dict]:     
+        guidance_drop_prob = 0.1
+        if torch.rand(1).item() > guidance_drop_prob:
+            flow_pred, x0_pred = self.generator(
+                noisy_image_or_video=noisy_latents,
+                conditional_dict=conditional_dict,
+                timestep=timestep,
+                clean_x=clean_latent_aug if self.teacher_forcing else None,
+                aug_t=timestep_clean_aug if self.teacher_forcing else None
+            )
+        else:
+            flow_pred, x0_pred = self.generator(
+                noisy_image_or_video=noisy_latents,
+                conditional_dict=unconditional_dict,
+                timestep=timestep,
+                clean_x=clean_latent_aug if self.teacher_forcing else None,
+                aug_t=timestep_clean_aug if self.teacher_forcing else None
+            )
+        return flow_pred, x0_pred 
 
     def generator_loss(
         self,
