@@ -129,6 +129,7 @@ class DistDataProducer:
         self.build_data_iterators_fn = build_train_valid_test_data_iterators
         self.train_ds_preloaded = train_ds
         self.valid_ds_preloaded = valid_ds
+        self.step=0
         
         # 1. 设置编码器
         self.encoder = get_encoder(name=encoder_name, device=self.device)
@@ -401,8 +402,13 @@ class DistDataProducer:
         old_train_sended_count = copy.deepcopy(self.train_sended_count)
         old_valid_sended_count = copy.deepcopy(self.valid_sended_count)
         
+        
+        
         # train data
         while any(self.train_sended_count[cp.consumer] - old_train_sended_count[cp.consumer] < train_data_count for cp in self.comm_pairs):
+            if self.profiler and self.step == self.args.profile_step_start:
+                self.profiler.start()
+
             # clean data
             self._cleanup_completed_sends()
             # produce data
@@ -412,6 +418,15 @@ class DistDataProducer:
             for cp in self.comm_pairs:
                 if self.train_sended_count[cp.consumer] - old_train_sended_count[cp.consumer] < train_data_count:
                     self._initiate_new_sends(cp, 'train')
+                    
+            if self.profiler and self.step == self.args.profile_step_end:
+                self.profiler.stop()
+                print(f"Rank {dist.get_rank()}: Profiler data saved.")
+            
+                
+            self.step += 1
+                    
+            
                     
         # valid data
         while any(self.valid_sended_count[cp.consumer] - old_valid_sended_count[cp.consumer] < valid_data_count for cp in self.comm_pairs):
@@ -424,22 +439,32 @@ class DistDataProducer:
             for cp in self.comm_pairs:
                 if self.valid_sended_count[cp.consumer] - old_valid_sended_count[cp.consumer] < valid_data_count:
                     self._initiate_new_sends(cp, 'valid')
+            
+            # if self.profiler and self.step == self.args.profile_step_end and:
+            #     self.profiler.stop()
+            #     print(f"Rank {dist.get_rank()}: Profiler data saved.")
+
+            # self.step += 1
                 
     def _produce_and_send_without_valid(self):
         for idx, mcp in self.merged_comm_pairs.items():
             self._produce_and_enqueue_data(idx, mcp)
         for cp in self.comm_pairs:
             self._initiate_new_sends(cp)
+        
+        if self.profiler and self.step == self.args.profile_step_end:
+            self.profiler.stop()
+            print(f"Rank {dist.get_rank()}: Profiler data saved.")
+
+        self.step += 1
             
     def run(self):
-        step=0
+        # step=0
         # args = get_args()
         try:
             while any(self.train_sended_count[cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in self.comm_pairs):
                 # 启动性能分析器
-                if self.profiler and step == self.args.profile_step_start:
-                    self.profiler.start()
-
+                
                 # 阶段 A: 清理已完成的发送
                 self._cleanup_completed_sends()
 
@@ -457,13 +482,6 @@ class DistDataProducer:
                 #                              args.consumed_valid_samples + current_valid_step_approx * len(self.merged_comm_pairs))
                 # time.sleep(0.01)
                 
-                # 停止性能分析器
-                if self.profiler and step == self.args.profile_step_end:
-                    self.profiler.stop()
-                    print(f"Rank {dist.get_rank()}: Profiler data saved.")
-                
-                
-                step += 1
                 time.sleep(0.01) # 短暂休眠以避免CPU空转
 
             # 等待所有挂起的通信完成
