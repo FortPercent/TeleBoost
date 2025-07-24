@@ -98,20 +98,13 @@ def sinusoidal_embedding_1d(dim, position):
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x.to(position.dtype)
 
-def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0):
+def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0, device="cuda"):
     # 1d rope precompute
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, device=device)
                    [: (dim // 2)].double() / dim))
     freqs = torch.outer(torch.arange(end, device=freqs.device), freqs)
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
     return freqs_cis
-
-def precompute_freqs_cis_3d(dim: int, end: int = 1024, theta: float = 10000.0):
-    # 3d rope precompute
-    f_freqs_cis = precompute_freqs_cis(dim - 2 * (dim // 3), end, theta)
-    h_freqs_cis = precompute_freqs_cis(dim // 3, end, theta)
-    w_freqs_cis = precompute_freqs_cis(dim // 3, end, theta)
-    return f_freqs_cis, h_freqs_cis, w_freqs_cis
 
 def apply_RoPE(x, freqs, num_heads):
     batch_size, seq_len, embed_dim = x.shape
@@ -361,8 +354,6 @@ class TeleaiModel(torch.nn.Module):
             for _ in range(self.num_layers)
         ])
         self.head = Head(self.dim, self.out_dim, self.patch_size, self.eps)
-        head_dim = self.dim // self.num_heads
-        self.freqs = precompute_freqs_cis_3d(head_dim)
 
         if self.has_image_input:
             # clip_feature_dim = 1280
@@ -417,10 +408,11 @@ class TeleaiModel(torch.nn.Module):
         f, h, w = grid_size
 
         # Compute 3D rotary positional embeddings for the patches
-        freqs_f = self.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1)
-        freqs_h = self.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1)
-        freqs_w = self.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
-        freqs = torch.cat([freqs_f, freqs_h, freqs_w], dim=-1)
+        head_dim = self.dim // self.num_heads
+        freq_f = precompute_freqs_cis(head_dim - 2 * (head_dim // 3), f).view(f, 1, 1, -1).expand(f, h, w, -1)
+        freq_h = precompute_freqs_cis(head_dim // 3, h).view(1, h, 1, -1).expand(f, h, w, -1)
+        freq_w = precompute_freqs_cis(head_dim // 3, w).view(1, 1, w, -1).expand(f, h, w, -1)
+        freqs = torch.cat([freq_f, freq_h, freq_w], dim=-1)
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
         def create_custom_forward(module):
