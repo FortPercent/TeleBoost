@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 class TensorDataset(torch.utils.data.Dataset):
-    def __init__(self, pth_paths, metadata_paths, *args):
+    def __init__(self, pth_paths, metadata_paths, **args):
         # Ensure inputs are lists
         if isinstance(pth_paths, str):
             pth_paths = [pth_paths]
@@ -26,6 +26,8 @@ class TensorDataset(torch.utils.data.Dataset):
             # Construct full tensor paths and check for file existence
             for file_name in metadata[name_column]:
                 tensor_path = os.path.join(pth_path, file_name) + ".tensors.pth"
+                if not os.path.exists(tensor_path):
+                    raise FileNotFoundError(f"❌ Tensor file not found: {tensor_path}")
                 self.path.append(tensor_path)
 
         print(f"✅ Total valid tensor files loaded: {len(self.path)}")
@@ -45,3 +47,30 @@ class TensorDataset(torch.utils.data.Dataset):
     def __len__(self):
         # Total number of available tensor files
         return len(self.path)
+
+
+
+
+def cycle(dl):
+    while True:
+        for data in dl:
+            yield data
+
+if __name__ == "__main__":
+    dt = TensorDataset(pth_paths="/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents",
+                       metadata_paths="/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/filtered_500.csv")
+    # sampler = torch.utils.data.distributed.DistributedSampler(
+    #     dt, shuffle=True, drop_last=True)
+    # sampler = RandomSampler(dataset)
+    dataloader = torch.utils.data.DataLoader(
+        dt,
+        batch_size=2,
+        # sampler=sampler,
+        num_workers=8)
+
+    # if dist.get_rank() == 0:
+    print("DATASET SIZE %d" % len(dt))
+    dataloader = cycle(dataloader)
+
+    batch=next(dataloader)
+    print(batch.keys())
