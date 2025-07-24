@@ -34,6 +34,13 @@ class ContextParallelTeleaiDitBlock(ContextParallelMixin, DiTBlock):
 
         return x
 
+def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0, device="cuda"):
+    # 1d rope precompute
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, device=device)
+                   [: (dim // 2)].double() / dim))
+    freqs = torch.outer(torch.arange(end, device=freqs.device), freqs)
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    return freqs_cis
 
 class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiModel):
     def __init__(self, config):
@@ -100,9 +107,10 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
 
         x, (f, h, w) = self.patchify(x)
 
-        freq_f = self.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1)
-        freq_h = self.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1)
-        freq_w = self.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+        head_dim = self.dim // self.num_heads
+        freq_f = precompute_freqs_cis(head_dim - 2 * (head_dim // 3), f).view(f, 1, 1, -1).expand(f, h, w, -1)
+        freq_h = precompute_freqs_cis(head_dim // 3, h).view(1, h, 1, -1).expand(f, h, w, -1)
+        freq_w = precompute_freqs_cis(head_dim // 3, w).view(1, 1, w, -1).expand(f, h, w, -1)
         freqs = torch.cat([freq_f, freq_h, freq_w], dim=-1)
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
