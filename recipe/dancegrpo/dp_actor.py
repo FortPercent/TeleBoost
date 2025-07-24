@@ -21,6 +21,27 @@ __all__ = ["DiffusionDataParallelPPOActor"]
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
+# hook 函数：保存输入数据和模块名
+def save_input_hook(name):
+    def hook(module, input, output):
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        file_name = f"output/{rank}_{name}_input.pt"
+        for param_name, param in module.named_parameters(recurse=False):
+            print(f"  Param: {name}, Shape: {param.shape},{param.float().norm().item()}")
+
+        # print(f"[HOOK] Saving {name} input to {file_name}")
+        torch.save({
+            "name": name,
+            "input": input,
+            "output": output
+        }, file_name)
+    return hook
+
+def register_all_hooks(model):
+    for name, module in model.named_modules():
+        print(f"[REGISTER] Hooking module: {name}")
+        module.register_forward_hook(save_input_hook(name))
+
 class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
@@ -70,6 +91,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         for batch_idx, data in enumerate(dataloader):
             # mini_batch = data
 
+            #TODO 需要修正
             self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
@@ -79,12 +101,15 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
 
             self.actor_optimizer.zero_grad()
-            target_length = data.batch["contexts"][0].shape[0]
+            batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
+
             for i in range(len(data)):
-                data.batch["contexts"][i] = data.batch["contexts"][i][:target_length]
-            # print(data.batch["contexts"][0].shape)
-            # context=[data.batch["contexts"].squeeze(0)]
-            context=data.batch["contexts"].squeeze()
+                orig_lengths =int(data.batch['context_orig_lengths'][i])
+                assert batch_contexts[i].shape[0] >= orig_lengths, \
+                    f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
+                batch_contexts[i] = batch_contexts[i][:orig_lengths]
+                
+            print("train_timesteps",train_timesteps)
             for step_idx in range(train_timesteps):
                 clip_range = self.config.clip_range
                 adv_clip_max = self.config.adv_clip_max
@@ -97,7 +122,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 new_log_probs = self.grpo_wan_one_step(
                     data.batch["latents"][:, step_idx],
                     data.batch["next_latents"][:, step_idx],
-                    [context],  # List[Tensor]格式
+                    batch_contexts,  # List[Tensor]格式
                     seq_len,
                     self.actor_module,
                     data.batch["timesteps"][:, step_idx],
@@ -158,21 +183,41 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         if latents.shape[0] != 16:
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
         
-        # 使用适当的数据类型进行autocast
-        # computation_dtype = torch.float32  # 关键计算使用FP32以保持精度 这里也暂时改成fp16吧
-        # free, total = torch.cuda.mem_get_info()
-        # print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
-        # print(f"总显存:   {total / (1024 ** 3):.2f} GB")
-        # print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
-        # exit(0)
-        autocast_dtype = torch.float16
+        # 加载保存的 tensor 和数据
+        file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/0_latent_timestep_data.pt"
+        print(file_name)
+        data = torch.load(file_name)
+
+        latents = data["latents"]      # torch.Tensor
+        timesteps = data["timestep"]     # torch.Tensor
+        seq_len = data["seq_len"]          # int
+        context = data["context"]       # list of tensor 或 tensor
+
+        print("latents:", latents.shape)
+        print("timestep:", timesteps)
+        print("seq_len:", seq_len)
+        print(len(context))
+
+        autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
+            torch.manual_seed(42)
+            from tensorwatch import TensorWatch,watch_module_forward_backward
+
+            watch_module_forward_backward(transformer, use_megatron=False, use_deepspeed=False)
+            print("come here!!!!")
+            register_all_hooks(transformer)
+            
             pred = transformer(
                 x=[latents],
                 t=timesteps,
                 context=context,
                 seq_len=seq_len
             )
+            TensorWatch.step()
+            file_name = f"{torch.distributed.get_rank()}_pred_cond_debug_tensors.pt"
+            print(file_name)
+            torch.save(pred, file_name)
+            exit(0)
             
             if isinstance(pred, dict) and 'rgb' in pred:
                 model_output = pred['rgb'][0]
