@@ -12,37 +12,38 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-L
 
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
-CP=2
+CP=1
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=64
-N_GPU_FOR_DATA=16
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=8
 
 # Single-node config 
 # N_MOE=1
 # N_GPU_FOR_TRAIN=1
 # N_GPU_FOR_DATA=1
 
-EXPR_NAME=sr_720p
-# EXPR_NAME=f1fn2v_1.3B
-
-MODEL_ARGS=(
-    --num-layers 30
-    --hidden-size 5120
-    --ffn-hidden-size 13824
-    --num-attention-heads 40
-) # 10B I2V
+# EXPR_NAME=sr_720p
+EXPR_NAME=f1fn2v_1.3B
+# EXPR_NAME=expr_480p_bf16
 
 # MODEL_ARGS=(
 #     --num-layers 30
-#     --hidden-size 1536
-#     --ffn-hidden-size 8960
-#     --num-attention-heads 12
-# ) # 1.3B I2V
+#     --hidden-size 5120
+#     --ffn-hidden-size 13824
+#     --num-attention-heads 40
+# ) # 10B I2V
 
-TASK=teleai_sr
+MODEL_ARGS=(
+    --num-layers 30
+    --hidden-size 1536
+    --ffn-hidden-size 8960
+    --num-attention-heads 12
+) # 1.3B I2V
+
+TASK=teleai_multimask
 
 CONFIG_PATH=config.${TASK}.config
 
@@ -60,7 +61,8 @@ NODE_RANK=${RANK:-'0'}
 MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
 NNODES=$((($N_GPU-1)/8+1))
-WORLD_SIZE=$N_GPU_FOR_TRAIN
+WORLD_SIZE=$N_GPU_FOR_TRAIN/expr_480p_bf16
+
 N_VAE=$N_GPU_FOR_DATA
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 
@@ -95,10 +97,10 @@ TRAINING_ARGS=(
     --bf16
     --lr 1e-5
     --lr-decay-style constant
-    --lr-warmup-fraction 0
+    --lr-warmup-fraction 0.02
     --recompute-granularity full 
     --recompute-method block 
-    --activation-offload
+    # --activation-offload
     --use-distributed-optimizer
     --recompute-num-layers 40
     --no-rope-fusion
@@ -118,7 +120,7 @@ DATA_ARGS=(
     --dataset-type VastDataset
     --split 949,50,1
     --dataloader-type single
-    --num-workers 1
+    --num-workers 8
     --config-path ${CONFIG_PATH}
 )
 

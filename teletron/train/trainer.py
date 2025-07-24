@@ -883,7 +883,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     num_microbatches=eval_num_microbatches,
                     seq_length=args.seq_length,
                     micro_batch_size=args.micro_batch_size,
-                    # decoder_seq_length=args.decoder_seq_length,
                     forward_only=True)
 
                 # Empty unused memory
