@@ -40,7 +40,7 @@ from teletron.utils import get_args
 
 random.seed(42)
 
-decord.bridge.set_bridge("torch")
+# decord.bridge.set_bridge("torch")
 
 class UnifiedFrameSampler:
     def __init__(
