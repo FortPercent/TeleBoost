@@ -133,8 +133,6 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw):
-                        print(gen_batch.batch["context_orig_lengths"])
-                        print(gen_batch.non_tensor_batch["caption"])
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
        
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
