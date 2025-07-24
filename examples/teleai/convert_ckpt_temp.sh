@@ -7,8 +7,8 @@ TP=1
 PP=1
 
 HF_CKPT_PATH="/nvfile-heatstorage/model_zoo/huggingface/Wan2.1-I2V-14B-720P-Diffusers/transformer"
-CHECKPOINT_PATH=/nvfile-heatstorage/myk/vast/teletron/step15000/
-TARGET_CKPT_PATH=/nvfile-heatstorage/myk/Teletron/checkpoint/f1fn2v_1.3B
+CHECKPOINT_PATH=/nvfile-heatstorage/myk/models/i2v_1.3B/teletron_step28000
+TARGET_CKPT_PATH=/nvfile-heatstorage/myk/Teletron/checkpoint/f1fn2v_1.3B_new
 
 python  examples/teleai/convert_checkpoint_temp.py  \
     --hf-ckpt-path ${HF_CKPT_PATH} \

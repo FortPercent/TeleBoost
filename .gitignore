@@ -21,3 +21,5 @@ checkpoint/*
 results/*
 examples/teleai/results
 logs*
+profile
+.ipynb_checkpoints

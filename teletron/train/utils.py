@@ -379,6 +379,19 @@ def get_batch(data_iterator):
     # batch = get_batch_on_this_tp_rank_vast(data_iterator)
     return batch
 
+def flow_loss_func(output_tensor):
+    """Loss function."""
+    loss = output_tensor[0].mean()
+    averaged_loss = average_losses_across_data_parallel_group([loss])
+    loss = loss.unsqueeze(0)
+
+    loss_wo_w = output_tensor[1].mean()
+    averaged_loss_wo_w  = average_losses_across_data_parallel_group([loss_wo_w])
+    loss_wo_w = loss_wo_w.unsqueeze(0)
+    
+    return loss, {"loss": averaged_loss[0], "loss_wo_w": averaged_loss_wo_w[0]}
+
+
 def loss_func(output_tensor):
     """Loss function."""
     loss = output_tensor[0].mean()

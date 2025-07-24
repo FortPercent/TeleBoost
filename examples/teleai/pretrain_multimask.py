@@ -3,7 +3,7 @@ from teletron.train import Trainer, parse_args
 import torch.distributed as dist
 from megatron.core import mpu
 from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train.utils import get_batch, loss_func
+from teletron.train.utils import get_batch, loss_func, flow_loss_func
 
 
 
@@ -59,15 +59,7 @@ def forward_step(data_iterator, model):
     loss_wo_w = loss
     loss = loss * flow_scheduler.training_weight(timestep)
 
-    first_frame_pred = output_tensor_list[:, :, :1, :, :]
-    first_frame_target = training_target[:, :, :1, :, :]
-    assert first_frame_pred.shape[1] == 16
-    first_frame_loss = torch.nn.functional.mse_loss(
-        first_frame_pred.float(), first_frame_target.float()
-    )
-    loss += first_frame_loss
-
-    return [loss, loss_wo_w, first_frame_loss], loss_func
+    return [loss, loss_wo_w], flow_loss_func
 
 
 
