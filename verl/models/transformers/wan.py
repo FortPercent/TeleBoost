@@ -39,10 +39,12 @@ def ulysses_self_flash_attn_forward(
     **kwargs,
 ):
     from wan.modules.model import rope_apply
+    from wan.modules.attention import flash_attention
     attention_mask=None
     # bsz, q_len, _ = x.size()  # q_len = seq_length / sp_size
     b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
     ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
+
     # query, key, value function
     def qkv_fn(x):
         q = self.norm_q(self.q(x)).view(b, s, n, d)
@@ -51,58 +53,44 @@ def ulysses_self_flash_attn_forward(
         return q, k, v
 
     q, k, v = qkv_fn(x)
-    print("q",q.shape)
     f, h, w = grid_sizes[0,:]
     if ulysses_sp_size > 1:
-        print("come here")
         validate_ulysses_config(self.num_heads, ulysses_sp_size)
         # key_states = repeat_kv(key_states, self.num_key_value_groups)
         # value_states = repeat_kv(value_states, self.num_key_value_groups)
-        target = f*h*w
+        target = get_target_len()
         q = gather_seq_scatter_heads(q, seq_dim=1, head_dim=2,unpadded_dim_size=target)
         k = gather_seq_scatter_heads(k, seq_dim=1, head_dim=2,unpadded_dim_size=target)
         v = gather_seq_scatter_heads(v, seq_dim=1, head_dim=2,unpadded_dim_size=target)
-        print("after gather",q.shape)
-        #TODO:UNPAD
-        # rank = torch.distributed.get_rank(group=sp_group)
-        # world_size = torch.distributed.get_world_size(group=sp_group)
-
-        # if rank == world_size - 1:
-        #     padding_size = ulysses_sp_size- f*h*w % ulysses_sp_size
-        #     q = _unpad_tensor(q, seq_dim=1, padding_size)
-        #     k = _unpad_tensor(k, seq_dim=1, padding_size)
-        #     v = _unpad_tensor(v, seq_dim=1, padding_size)
-        # (batch_size, num_head / sp_size, seq_length, head_size)
         
         full_q_len = q.size(1)  # full_q_len = seq_length
     else:
         full_q_len = s
 
-    import torch.nn.functional as F
-    torch.backends.cuda.enable_cudnn_sdp(False)
-    #unpad 
+    attn_output = flash_attention(
+            q=rope_apply(q, grid_sizes, freqs),
+            k=rope_apply(k, grid_sizes, freqs),
+            v=v,
+            k_lens=seq_lens,
+            window_size=self.window_size)
 
-    q=rope_apply(q, grid_sizes, freqs)
-    k=rope_apply(k, grid_sizes, freqs)
-
-    q = q.transpose(1, 2)
-    k = k.transpose(1, 2)
-    v = v.transpose(1, 2)
-    attn_output = F.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        attn_mask=attention_mask,
-        dropout_p=0.0,
-        is_causal=False,
-    )  # b h s d
-
+    # attn_output = attn_output.transpose(1, 2).flatten(2, 3).contiguous()
     if ulysses_sp_size > 1:
-        attn_output = gather_heads_scatter_seq(attn_output, head_dim=1, seq_dim=2)
+        attn_output = gather_heads_scatter_seq(attn_output, head_dim=2, seq_dim=1)
 
-    attn_output = attn_output.transpose(1, 2).flatten(2, 3).contiguous()
+    attn_output = attn_output.flatten(2).contiguous()
+
     attn_output = self.o(attn_output)
     return attn_output
+
+_TARGET_SIZE = None
+
+def set_target_len(target_size):
+    global _TARGET_SIZE
+    _TARGET_SIZE=target_size
+
+def get_target_len():
+    return _TARGET_SIZE
 
 _PAD_SIZE = None
 

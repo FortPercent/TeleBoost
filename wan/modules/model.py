@@ -236,6 +236,12 @@ WAN_CROSSATTENTION_CLASSES = {
     'i2v_cross_attn': WanI2VCrossAttention,
 }
 
+class TestModule(nn.Module):
+    def __init__(self):
+        super(TestModule, self).__init__()
+
+    def forward(self, x):
+        return x
 
 class WanAttentionBlock(nn.Module):
 
@@ -258,6 +264,9 @@ class WanAttentionBlock(nn.Module):
         self.eps = eps
 
         # layers
+        self.test1=TestModule()
+        self.test2=TestModule()
+        self.test3=TestModule()
         self.norm1 = WanLayerNorm(dim, eps)
         self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
                                           eps)
@@ -296,7 +305,14 @@ class WanAttentionBlock(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         # assert e.dtype == torch.float32
+        e = e.to(torch.bfloat16)
         with amp.autocast(dtype=torch.float32):
+            # assert e.dtype == torch.float32
+            print("e"*10,e.dtype)
+            print("="*100)
+            self.test1(self.modulation+e)
+            self.test2(e)
+            self.test3(self.modulation)
             e = (self.modulation + e).chunk(6, dim=1)
         # assert e[0].dtype == torch.float32
 
@@ -463,7 +479,6 @@ class WanModel(ModelMixin, ConfigMixin):
         self.time_embedding = nn.Sequential(
             nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
-
         # blocks
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
@@ -576,8 +591,6 @@ class WanModel(ModelMixin, ConfigMixin):
             context=context,
             context_lens=context_lens)
 
-        print("x",x.shape)
-        print("+"*100)
         for block in self.blocks:
             x = block(x=x, **kwargs)
 

@@ -114,9 +114,7 @@ class DiffusionRollout(BaseRollout):
             batch_context_orig_lengths = [context_orig_lengths[i] for i in batch_idx]
 
             for i in range(len(batch_contexts)):
-                print("batch_contexts before",batch_contexts[i].shape,batch_captions[i])
                 batch_contexts[i] = batch_contexts[i][:batch_context_orig_lengths[i]]
-                print("batch_contexts after",batch_contexts[i].shape,batch_captions[i])
 
             if not self.config.init_same_noise:
                 latent_shape = (
@@ -166,6 +164,7 @@ class DiffusionRollout(BaseRollout):
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
                 video_frames = video_frames.unsqueeze(0)
+            print("video_frames",video_frames.shape)
             all_video_frames.append(video_frames)
             torch.cuda.empty_cache()
             
@@ -323,7 +322,6 @@ class DiffusionRollout(BaseRollout):
             
             for i in progress_bar:
                 B = len(context) if isinstance(context, list) else context.shape[0]
-                print("DEBUG",B)
                 # 确保设备一致
                 device = latents[0].device
                 
@@ -339,7 +337,7 @@ class DiffusionRollout(BaseRollout):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
 
                     #TODO!!!!
-                    #管理!!!有hook!!!
+                    #管理!!!可能有hook!!!
 
                     transformer.to(device)
                     pred_cond = transformer(
@@ -403,14 +401,6 @@ class DiffusionRollout(BaseRollout):
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
             
-            # print("B",B)
-            # print("[DEBUG] all_latents",all_latents.shape)
-            # print("+"*20)
-            # print("[DEBUG] all_log_probs",all_log_probs.shape)
-            # print("+"*20)
-            # print("[DEBUG] all_video_frames",all_video_frames.shape)
-            # print("+"*100)
-            # exit(0)
             print(f"WAN after stack: all_latents={all_latents.shape}, all_log_probs={all_log_probs.shape}")
             # (9, 16, 7, 64, 64), (8,)
             

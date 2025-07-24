@@ -338,7 +338,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             buffer_dtype = torch.float32
 
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
-
+        print(fsdp_config.get("wrap_policy", None))
+        print("="*100)
         auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get("wrap_policy", None), is_lora=self.config.model.get("lora_rank", 0) > 0)
 
         if self._is_rollout and self.config.rollout.name == "hf":
