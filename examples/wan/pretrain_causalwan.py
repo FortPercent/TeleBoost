@@ -144,6 +144,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.allow_tf32 = True
     # main()
     args = parse_args(extra_args=extra_args)
-    args.distributed_vae = None
+    # args.distributed_vae = None
     trainer = CausalTrainer(args)
     trainer.pretrain(forward_step_func=forward_step)

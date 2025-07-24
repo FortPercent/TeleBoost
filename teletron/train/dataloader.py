@@ -90,7 +90,7 @@ class DataloaderMixin:
             data_parallel_size = mpu.get_data_parallel_world_size()
 
         # Megatron sampler
-        if args.dataloader_type == 'single':
+        if args.dataloader_type in ['single','causal'] :
             batch_sampler = MegatronPretrainingSampler(
                 total_samples=len(dataset),
                 consumed_samples=consumed_samples,
@@ -109,9 +109,9 @@ class DataloaderMixin:
 
         elif args.dataloader_type == "external":
             return dataset
-        elif args.dataloader_type == 'causal':
-            batch_sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset, shuffle=True, drop_last=True)
+        # elif args.dataloader_type == 'causal':
+        #     batch_sampler = torch.utils.data.distributed.DistributedSampler(
+        #         dataset, shuffle=True, drop_last=True)
         else:
             raise Exception('{} dataloader type is not supported.'.format(
                     args.dataloader_type))

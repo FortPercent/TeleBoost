@@ -207,6 +207,26 @@ class HunyuanOriginBatchLoader(BaseBatchLoader):
         
         return batch
 
+
+class CausalWanOriginalBatchLoader(BaseBatchLoader):
+    def _prepare_batch_on_rank_zero(self):
+        if self.data_iterator is None:
+            return None
+        
+        try:
+            data = next(self.data_iterator)
+        except StopIteration:
+            raise NotImplementedError("CausalWanModel")
+            return None # 返回 None 以向基类发出迭代结束的信号
+
+        batch = {
+            'latents': data["latents"].cuda(non_blocking=True),
+            'prompt_emb': data["prompt_emb"]['context'].cuda(non_blocking=True),
+            # 'image_emb': data["image_emb"], 
+        }
+        return batch
+
+
 def create_batch_loader(args, data_iterator):
     model_name_lower = args.model.lower()
     is_distributed_vae = args.distributed_vae
@@ -230,6 +250,12 @@ def create_batch_loader(args, data_iterator):
         else:
             print("Info: Creating HunyuanOriginBatchLoader.")
             return HunyuanOriginBatchLoader(data_iterator)
-            
+    elif 'causal' in model_name_lower:
+        if is_distributed_vae:
+            print("Info: Creating CausalWanBatchLoader.")
+            raise NotImplementedError("A distributed VAE loader for CausalWanModel is not implemented.")
+        else:
+            print("Info: Creating CausalWanOriginalBatchLoader.")
+            return CausalWanOriginalBatchLoader(data_iterator)
     else:
         raise ValueError(f"Unknown model name '{args.model_name}' for batch loader creation.")
