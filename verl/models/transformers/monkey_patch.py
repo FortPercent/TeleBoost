@@ -149,14 +149,12 @@ def patch_diffusion_for_ulysses_input_slicing(model: type):
     def _create_ulysses_wrapped_block_forward(original_forward):
         def ulysses_wrapped_block_forward(*args, **kwargs):
             x = kwargs.get("x")
-            print("[x],xxxx",x.float().norm().item())
-            
+      
             current_ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
             # x = torch.load("/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/output/0__fsdp_wrapped_module.blocks.0._checkpoint_wrapped_module._fsdp_wrapped_module.self_attn_input.pt")["input"][0]
             slice_now = x is not None and current_ulysses_sp_size > 1
             if slice_now:
                 total_seq_len = x.shape
-                print(total_seq_len)
                 pad_size = (current_ulysses_sp_size - total_seq_len[1] % current_ulysses_sp_size) % current_ulysses_sp_size
                 set_target_len(total_seq_len[1])
                 set_pad_size(pad_size)
