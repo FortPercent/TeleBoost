@@ -201,7 +201,6 @@ class DiffusionRollout(BaseRollout):
             },
             batch_size=B
         )
-        print("timesteps",batch['timesteps'].shape)
         non_tensor_batch = prompts.non_tensor_batch
         free, total = torch.cuda.mem_get_info()
 

@@ -264,9 +264,6 @@ class WanAttentionBlock(nn.Module):
         self.eps = eps
 
         # layers
-        self.test1=TestModule()
-        self.test2=TestModule()
-        self.test3=TestModule()
         self.norm1 = WanLayerNorm(dim, eps)
         self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
                                           eps)
@@ -308,11 +305,6 @@ class WanAttentionBlock(nn.Module):
         e = e.to(torch.bfloat16)
         with amp.autocast(dtype=torch.float32):
             # assert e.dtype == torch.float32
-            print("e"*10,e.dtype)
-            print("="*100)
-            self.test1(self.modulation+e)
-            self.test2(e)
-            self.test3(self.modulation)
             e = (self.modulation + e).chunk(6, dim=1)
         # assert e[0].dtype == torch.float32
 
