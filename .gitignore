@@ -129,4 +129,6 @@ outputs
 ./tensorboard_log
 *.json
 *.npy
+*.jpg
+*.png
 events.*
