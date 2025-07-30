@@ -129,3 +129,4 @@ outputs
 ./tensorboard_log
 *.json
 *.npy
+events.*
