@@ -744,7 +744,7 @@ def get_batch_on_this_tp_cp_rank_vast(data_iterator):
 
         batch["context"] = context
         batch["clip_feature"] = clip_feature
-        batch["image_emb_y"] = img_y
+        batch["img_emb_y"] = img_y
         batch["latents"] = latents
         for key, tensor in batch.items():
             if isinstance(tensor, torch.Tensor):
@@ -854,7 +854,7 @@ def get_batch_on_this_tp_cp_rank_vast_dist(data_iterator):
         batch={}
         batch["context"] = context
         batch["clip_feature"] = clip_feature
-        batch["image_emb_y"] = img_y
+        batch["img_emb_y"] = img_y
         batch["latents"] = latents
         batch["noise"] = noise
         for key, tensor in batch.items():
