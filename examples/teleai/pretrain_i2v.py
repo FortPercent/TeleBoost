@@ -20,6 +20,8 @@ def extra_args(parser):
                        )
     group.add_argument("--encoder_tokenizer_path", type=str, default=
                        "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
+    group.add_argument("--test-with-pseudo-data", action="store_true")
+    group.add_argument("--test-resolution", type=str, default="360")
     
     return parser
 
@@ -47,17 +49,31 @@ def forward_step(data_iterator, model):
 
     training_target = flow_scheduler.training_target(latents, noise, timestep)    
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
-    output_tensor_list = model(x=noisy_latents, 
-                               timestep=timestep, 
-                               context=batch['context'],
-                               clip_feature=batch['img_clip_feature'],
-                               y=batch['img_emb_y'])
+    loss_weight = flow_scheduler.training_weight(timestep)
+    if args.test_with_pseudo_data:
+        dp_rank = mpu.get_data_parallel_rank() % 2
+        curr_iter = args.curr_iteration % 1000
+        input_dict = torch.load(f"../test_data/saved_inputs_{args.test_resolution}/input_dict_iter{curr_iter}_rank{dp_rank}.pt", weights_only=False, map_location="cpu")
+        # print(input_dict['noisy_latents'].shape)
+        output_tensor_list = model(x=input_dict['noisy_latents'].cuda(),
+                                timestep=input_dict['timestep'].cuda(),
+                                context=input_dict['prompt_emb']['context'].cuda(),
+                                clip_feature=input_dict['image_emb']['clip_feature'].cuda(),
+                                y=input_dict['image_emb']['y'].cuda())
+        training_target = input_dict['training_target'].cuda()
+        loss_weight = input_dict['loss_weight'].cuda()
+    else:
+        output_tensor_list = model(x=noisy_latents, 
+                                timestep=timestep, 
+                                context=batch['context'],
+                                clip_feature=batch['img_clip_feature'],
+                                y=batch['img_emb_y'])
 
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
     )
     loss_wo_w = loss
-    loss = loss * flow_scheduler.training_weight(timestep)
+    loss = loss * loss_weight
 
     first_frame_pred = output_tensor_list[:, :, :1, :, :]
     first_frame_target = training_target[:, :, :1, :, :]
