@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
+from teletron.models.wan.encoder.wan_encoder import WanVideoEncoder
 from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTY_DIMS
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
@@ -142,6 +143,57 @@ class VastDistBatchLoader(BaseBatchLoader):
         
         return batch
 
+class WanDistBatchLoader(BaseBatchLoader):
+
+    def _prepare_batch_on_rank_zero(self):
+        if self.data_iterator is None:
+            return None
+        
+        # 1. 从数据迭代器获取原始数据（如果需要的话）
+        # data = next(self.data_iterator)
+        
+        # 2. 从 producer rank 接收 Tensors
+        comm_pair = get_comm_pair()
+        args = get_args()
+        tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
+        req = dist.irecv(tensors_info, comm_pair.producer)
+        req.wait()
+
+        batch = {}
+        # unpack
+        if args.distributed_vae:
+            start_dim = 0
+            intervals = [0]
+            
+            for data_to_get in WanVideoEncoder.get_output_schema():
+                dims = PROPERTY_DIMS[data_to_get]
+                data_size = 1
+                for dim in tensors_info[start_dim:start_dim + dims].tolist():
+                    data_size *= dim 
+                start_dim += dims
+                intervals.append(intervals[-1] + data_size)
+            
+            total_size = intervals[-1]
+            recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+            req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
+            req.wait()
+            
+            unpacked_data = unpack_tensors(recv_tensor, intervals, WanVideoEncoder.get_output_schema())
+            start_dim = 0
+            for i, data_to_get in enumerate(WanVideoEncoder.get_output_schema()):
+                dims = PROPERTY_DIMS[data_to_get]
+                tensor_shape = tensors_info[start_dim:start_dim + dims].tolist()
+                reshaped_data = unpacked_data[i].view(*tensor_shape)
+                batch[data_to_get] = reshaped_data
+                start_dim += dims
+        else:
+            # 如果 distributed_vae 为 False，需要定义相应的行为
+            # 例如，返回空的或默认的 tensors
+            raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
+
+        
+        return batch
+
 class HunyuanDistBatchLoader(BaseBatchLoader):
     """
     `get_batch_on_this_tp_cp_rank_Hunyuan_dist` 的实现。
@@ -223,7 +275,7 @@ def create_batch_loader(args, data_iterator):
     elif 'wan' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating VastDistBatchLoader.")
-            return VastDistBatchLoader(data_iterator)
+            return WanDistBatchLoader(data_iterator)
         else:
             raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")        
     elif 'hunyuan' in model_name_lower:
