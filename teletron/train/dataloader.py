@@ -50,7 +50,7 @@ class DataloaderMixin:
             if valid_ds is None:
                 valid_dataloader = None
             else:
-                args.consumed_valid_samples = args.consumed_valid_samples % len(valid_ds)
+                args.consumed_valid_samples = args.consumed_valid_samples % len(valid_ds) if valid_ds is not None else args.consumed_valid_samples
                 valid_dataloader = self.build_pretraining_data_loader(
                     valid_ds, args.consumed_valid_samples, dp_rank, dp_size
                 )
@@ -60,14 +60,10 @@ class DataloaderMixin:
 
         # Flags to know if we need to do training/validation/testing.
         
-        if args.temp_accelerate:
-            do_train = args.train_iters > 0
-            do_valid = args.eval_iters > 0
-            do_test = False
-        else:
-            do_train = train_dataloader is not None and args.train_iters > 0
-            do_valid = valid_dataloader is not None and args.eval_iters > 0
-            do_test = test_dataloader is not None and args.eval_iters > 0
+        do_train =  args.train_iters > 0
+        do_valid =  args.eval_iters > 0
+        do_test = args.eval_iters > 0
+        
         flags = torch.tensor(
             [int(do_train), int(do_valid), int(do_test)],
             dtype=torch.long, device='cuda')

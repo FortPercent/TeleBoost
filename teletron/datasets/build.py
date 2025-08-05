@@ -63,14 +63,12 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
     elif args.dataset_type == "VastDataset": 
         global_config = set_config()
         transformer_group = get_transformer_model_group()
-        if args.temp_accelerate:
+        if args.distributed_vae:
             if transformer_group is not None:
                 return  None, None, None
             else:
                 import os
-                local_rank = int(os.environ.get("LOCAL_RANK", 0))
                 global_rank = int(os.environ.get("RANK", 0))
-                world_size = int(os.environ.get("WORLD_SIZE", 1))
                 all_data_paths = global_config.dataset.data_path_list
                 num_samples = len(all_data_paths)
 

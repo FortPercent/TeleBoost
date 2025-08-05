@@ -1,6 +1,6 @@
 
 import torch
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List,Union
 from teletron.core.distributed.base_encoder import BaseEncoder
 from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
 from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
@@ -114,22 +114,27 @@ class TeleaiEncoder(BaseEncoder):
             return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
         else:
             return work_fn
-
-    def encode(self, raw_batch: Dict[str, Any]) -> Tuple[List[torch.Tensor], torch.Tensor]:
+    
+    def encode(self, raw_batch: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[List[Any], List[List[Any]]]:
         """
         使用teleai模型对数据批次进行编码。
-        """
-        batch = dict(raw_batch)
         
-        # produce data
-        for data_to_produce in TeleaiEncoder.get_output_schema():
-            batch[data_to_produce] = self.work_fn[data_to_produce](batch=batch)
+        Args:
+            raw_batch: 单个数据样本（字典）或一批数据样本（字典列表）。
 
-        # pack tensors
-        tensors_to_send = []
-        for data_to_produce in TeleaiEncoder.get_output_schema():
-            tensors_to_send.append(batch[data_to_produce])
+        Returns:
+            如果输入是单个样本，返回编码后的张量列表。
+            如果输入是样本列表，返回一个包含两个列表的列表，分别对应每个样本的编码结果。
+        """
+        batch = {}
+        for data_to_produce in self.get_output_schema():
 
-        size_info_tensor = self._get_tensors_size(tensors_to_send, device=self.device)
+            batch[data_to_produce] = self.work_fn[data_to_produce](batch=raw_batch)
 
-        return tensors_to_send, size_info_tensor
+        if isinstance(raw_batch, list):
+            schema = self.get_output_schema()
+            batch0 = [batch[key][0] for key in schema]
+            batch1 = [batch[key][1] for key in schema]
+            return [batch0, batch1]
+        else:
+            return [batch[key] for key in self.get_output_schema()]
