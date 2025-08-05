@@ -18,14 +18,14 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
         eps: float = 1e-6,
         **kwargs,
         ):
-        TensorParallelMixin.__init__(self, config)
         DiTBlock.__init__(self, has_image_input, dim, num_heads, ffn_dim, eps, **kwargs)
         # from ContextParallelMixin
         self.enable_context_parallel(self.self_attn.attn)
         
-        self.enable_ffn_tensor_parallel(self.ffn)
-        self.enable_self_attn_tensor_parallel_alpha(self.self_attn)
-        self.enable_cross_attn_tensor_parallel_alpha(self.cross_attn)
+        # from Tensor ParallelMixin
+        self.enable_ffn_tensor_parallel(self.ffn, config)
+        self.enable_self_attn_tensor_parallel_base(self.self_attn, config)
+        self.enable_cross_attn_tensor_parallel_base(self.cross_attn, config)
         
     def forward(self, x, context, t_mod, freqs):
         modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)

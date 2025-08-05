@@ -92,8 +92,6 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
     teleaiConfig = TeleaiParams()
     torch.manual_seed(1234)
     teleai_model = TeleaiModel(teleaiConfig).cuda(cuda_rank).to(torch.bfloat16)
-    # model_dict = torch.load("model_weights.pth")
-    # teleai_model.load_state_dict(model_dict)
     torch.manual_seed(1234)
     parallel_teleai_model = ParallelTeleaiModel(cfg).cuda(cuda_rank).to(torch.bfloat16)
     
@@ -130,8 +128,7 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
             logging.info(f"{name}: {norm_euclid_dist} {model_grads[name].norm().item()} {parallel_model_grads[name].norm().item()} rank{rank}")
             grad_allclose = False
     if grad_allclose:
-        q.put(f"{TELEAI_MODEL_BWD_FAIL} rank{rank}")
-        # q.put(f"{TELEAI_MODEL_BWD_SUCCESS} rank{rank}")
+        q.put(f"{TELEAI_MODEL_BWD_SUCCESS} rank{rank}")
     else:
         q.put(f"{TELEAI_MODEL_BWD_FAIL} rank{rank}")
 

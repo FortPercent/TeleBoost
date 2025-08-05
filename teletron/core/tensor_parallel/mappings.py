@@ -109,51 +109,7 @@ class _GatherFromColModelParallelRegion(torch.autograd.Function):
     def backward(ctx, grad_output):
         return _split_along_last_dim(grad_output)
 
-
-# class TeleParallelRMSNormFunction(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, x, weight, eps):
-#         ctx.eps = eps
-#         x_squared = x.pow(2)
-#         world_size = get_tensor_model_parallel_world_size()
-#         ctx.global_hidden_dim = x.size(-1) * world_size
-        
-#         mean_x_squared_local = x_squared.mean(dim=-1, keepdim=True)
-#         mean_x_squared = mean_x_squared_local.clone()
-#         torch.distributed.all_reduce(mean_x_squared, group=get_tensor_model_parallel_group())
-#         mean_x_squared /= world_size
-        
-#         rms = torch.sqrt(mean_x_squared+eps)
-#         rms_factor = torch.rsqrt(mean_x_squared+eps)
-#         normalized_x = x * rms_factor
-        
-#         ctx.save_for_backward(x, weight, rms_factor, rms)
-        
-#         torch.cuda.empty_cache()
-#         return normalized_x * weight
-    
-#     @staticmethod
-#     def backward(ctx, grad_output):
-#         x, weight, rms_factor, rms = ctx.saved_tensors
-#         eps = ctx.eps
-#         global_hidden_dim = ctx.global_hidden_dim
-        
-#         normalized_x = x * rms_factor
-#         grad_weight = (grad_output * normalized_x).sum(dim=(0, 1))
-        
-#         w_grad_output = grad_output * weight
-        
-#         partial_sum = (w_grad_output * normalized_x).sum(dim=-1, keepdim=True)
-        
-#         global_sum = partial_sum.clone()
-#         torch.distributed.all_reduce(global_sum, group=get_tensor_model_parallel_group())
-        
-#         sum_part = global_sum / global_hidden_dim
-#         grad_x = (w_grad_output - normalized_x * sum_part) * rms_factor
-        
-#         return grad_x, grad_weight, None
-
-class TeleParallelRMSNormFunction(torch.autograd.Function):
+class _TeleParallelRMSNormFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, eps):
         ctx.eps = eps
@@ -197,8 +153,7 @@ class TeleParallelRMSNormFunction(torch.autograd.Function):
         
         global_sum = partial_sum.clone()
         torch.distributed.all_reduce(global_sum, op=torch.distributed.ReduceOp.SUM, group=get_tensor_model_parallel_group())
-        
-        # 使用全局维度H计算梯度
+
         sum_part = global_sum / H
         grad_x = (w_grad_output - normalized_x * sum_part) * rms_factor
         
@@ -216,3 +171,6 @@ def scatter_to_tensor_model_parallel_region(input_):
 
 def gather_from_col_tensor_model_parallel_region(input_):
     return _GatherFromColModelParallelRegion.apply(input_)
+
+def tele_rmsnorm_cuisine(x, weight, eps):
+    return _TeleParallelRMSNormFunction.apply(x, weight, eps)
