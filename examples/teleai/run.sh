@@ -114,7 +114,6 @@ MODEL_PARALLEL_ARGS=(
     --distributed-vae
     --distributed-vae-world-size $N_VAE
     --consumer-models-num $N_MOE
-    --temp-accelerate
 )
 DATA_ARGS=(
     --dataset-type VastDataset
