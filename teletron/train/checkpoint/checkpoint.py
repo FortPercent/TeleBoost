@@ -83,7 +83,7 @@ class CheckPointMixin:
 
         # Collect args, model, RNG.
         if not torch.distributed.is_initialized() \
-                or mpu.get_data_modulo_expert_parallel_rank() == 0 \
+                or mpu.get_data_parallel_rank(with_context_parallel=True) == 0 \
                 or args.use_dist_ckpt:
 
             optim_sd_kwargs = {}
