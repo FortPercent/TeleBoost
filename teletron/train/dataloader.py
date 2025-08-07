@@ -62,7 +62,7 @@ class DataloaderMixin:
         
         do_train =  args.train_iters > 0
         do_valid =  args.eval_iters > 0
-        do_test = args.eval_iters > 0
+        do_test = False
         
         flags = torch.tensor(
             [int(do_train), int(do_valid), int(do_test)],

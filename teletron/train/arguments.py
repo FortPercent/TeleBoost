@@ -107,6 +107,7 @@ class UnifiedArguments:
     context_parallel_size: int = field(default=1,)
     distributed_vae: bool = field(default=False,)
     distributed_vae_world_size: int = field(default=1,)
+    producer_batch_size: int = field(default=1,)
     consumer_models_num: int = field(default=1,)
     encoder_dtype: str = field(
         default='bfloat16',
