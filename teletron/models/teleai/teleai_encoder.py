@@ -126,15 +126,18 @@ class TeleaiEncoder(BaseEncoder):
             如果输入是单个样本，返回编码后的张量列表。
             如果输入是样本列表，返回一个包含两个列表的列表，分别对应每个样本的编码结果。
         """
-        batch = {}
-        for data_to_produce in self.get_output_schema():
+        schema = self.get_output_schema()
+        batch = {data_to_produce: list() for data_to_produce in schema}
+        for data_to_produce in schema:
+            if data_to_produce == "latents":
+                batch[data_to_produce] = self.work_fn[data_to_produce](batch=[raw_batch[idx] for idx in range(len(raw_batch))])
+            else:
+                for idx in range(len(raw_batch)):
+                    batch[data_to_produce].append(self.work_fn[data_to_produce](batch=raw_batch[idx]))
 
-            batch[data_to_produce] = self.work_fn[data_to_produce](batch=raw_batch)
-
-        if isinstance(raw_batch, list):
-            schema = self.get_output_schema()
-            batch0 = [batch[key][0] for key in schema]
-            batch1 = [batch[key][1] for key in schema]
-            return [batch0, batch1]
-        else:
-            return [batch[key] for key in self.get_output_schema()]
+        encoded_data = list()
+        for idx in range(len(raw_batch)):
+            encoded_data.append([batch[key][idx] for key in schema])
+            
+        return encoded_data
+                

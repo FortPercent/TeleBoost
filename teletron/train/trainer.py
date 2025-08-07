@@ -74,18 +74,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
         if transformer_group is None:            
-            # producer_process(
-            #     rank= int(os.environ.get("RANK", 0)), 
-            #     world_size=dist.get_world_size(),
-            #     encoder_name=get_encoder_name(args.model),
-            #     device=torch.cuda.current_device(),
-            #     build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
-            #     train_ds=None,
-            # )
-            # DistDataProducer
             producer = DistDataProducer(
                 rank= int(os.environ.get("RANK", 0)), 
-                # world_size=dist.get_world_size(),
                 encoder_name=get_encoder_name(args.model),
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
@@ -112,7 +102,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         
         self.train_itrt = create_batch_loader(args, self.train_itrt) if args.train_iters > 0 else None
         self.valid_itrt = create_batch_loader(args, self.valid_itrt) if args.eval_iters > 0 else None
-        self.test_itrt =  create_batch_loader(args, self.test_itrt) if args.eval_iters > 0 else None
+        self.test_itrt =  None
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  

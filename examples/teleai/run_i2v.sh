@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
+export CUDA_VISIBLE_DEVICES=2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -143,6 +143,7 @@ MODEL_PARALLEL_ARGS=(
     --distributed-vae
     --distributed-vae-world-size $N_VAE
     --consumer-models-num $N_MOE
+    --producer-batch-size 1
 )
 DATA_ARGS=(
     --dataset-type VastDataset
@@ -158,8 +159,8 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-log-interval 1
     --tensorboard-queue-size 10
     --log-interval 1 # for terminal infos
-    --save-interval 2
-    --eval-interval 2
+    --save-interval 2000
+    --eval-interval 2000
     # --load $CHECKPOINT_PATH_LOAD 
     # --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
     # --load $CHECKPOINT_PATH/node_$I_MOE

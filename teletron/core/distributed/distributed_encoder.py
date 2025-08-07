@@ -62,7 +62,6 @@ class DistDataProducer:
         build_train_valid_test_data_iterators: Callable,
         train_ds: Any = None,
         valid_ds: Any = None,
-        batch_size:Literal[1, 2] = 1
     ):
         self.args = get_args()
         self.rank = rank
@@ -78,7 +77,7 @@ class DistDataProducer:
         if self.args.producer_profile:
             self.batch_size = 1
         else:
-            self.batch_size = batch_size
+            self.batch_size = self.args.producer_batch_size
         
         self.encoder.setup()
         self.comm_pairs = get_comm_pair()
@@ -134,8 +133,6 @@ class DistDataProducer:
             first_consumer = mcp.consumer[0]
             self.same_data_group[first_consumer] = mcp.consumer
         
-        # self.train_ds_preloaded = train_ds_current
-        # self.valid_ds_preloaded = valid_ds_current
 
     def _initialize_queues_and_trackers(self):
         all_consumer_ranks = [cp.consumer for cp in self.comm_pairs]
@@ -185,19 +182,13 @@ class DistDataProducer:
         
         if len(self.data_queues[mode][first_consumer]) < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
             try:
-                if self.batch_size == 2:
-                    raw_batch = list((next(self.data_iterators[mode][idx]), next(self.data_iterators[mode][idx])))
-                else:
-                    raw_batch = next(self.data_iterators[mode][idx])
+                raw_batch = [next(self.data_iterators[mode][idx]) for i in range(self.batch_size)]
             except StopIteration:
                 # 统一处理迭代器耗尽的情况
                 print(f"信息: {mode} 模式的数据迭代器 {idx} 已耗尽。")
                 return
 
             tensors_to_send = self.encoder.encode(raw_batch)
-            
-            if self.batch_size==1:       
-                tensors_to_send = [tensors_to_send]
 
             for item in tensors_to_send:
                 size_info_tensor = self.encoder._get_tensors_size(item, device=self.device)
@@ -209,38 +200,6 @@ class DistDataProducer:
 
             if mode == TRAIN_MODE:
                 self.step += self.batch_size
-    
-    # def _produce_and_enqueue_data(self, idx: int, mcp: CommPair, mode: str):
-    #     first_consumer = mcp.consumer[0]
-        
-    #     if len(self.data_queues[mode][first_consumer]) < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
-    #         try:
-    #             if self.batch_size == 2:
-    #                 raw_batch = list((next(self.data_iterators[mode][idx]), next(self.data_iterators[mode][idx])))
-    #             else:
-    #                 raw_batch = next(self.data_iterators[mode][idx])
-    #         except StopIteration:
-    #             # 统一处理迭代器耗尽的情况
-    #             print(f"信息: {mode} 模式的数据迭代器 {idx} 已耗尽。")
-    #             return
-
-    #         tensors_to_send = self.encoder.encode(raw_batch)
-    #         if type(tensors_to_send) is list:
-    #             for item in tensors_to_send:
-    #                 size_info_tensor = self.encoder._get_tensors_size(item, device=self.device)
-    #                 packed_tensor = self.encoder._pack_tensors(item)
-    #                 for consumer_rank in self.same_data_group[first_consumer]:
-    #                     self.size_queues[mode][consumer_rank].append(size_info_tensor)
-    #                     self.data_queues[mode][consumer_rank].append(packed_tensor)
-    #         else:
-    #             size_info_tensor = self.encoder._get_tensors_size(tensors_to_send, device=self.device)
-    #             packed_tensor = self.encoder._pack_tensors(tensors_to_send)
-    #             for consumer_rank in self.same_data_group[first_consumer]:
-    #                 self.size_queues[mode][consumer_rank].append(size_info_tensor)
-    #                 self.data_queues[mode][consumer_rank].append(packed_tensor)
-                
-    #         if mode == TRAIN_MODE:
-    #             self.step+=self.batch_size
     
     def _initiate_new_sends(self, cp: CommPair, mode: str):
         consumer_rank = cp.consumer
