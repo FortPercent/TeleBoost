@@ -172,21 +172,19 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 optimizer.reload_model_params()
 
         if args.with_ema:
-            ema_models = self.set_ema_models(model)
+            ema_models = []
+            for train_model in model:
+                ema_model = EMAModel(
+                    decay=args.ema_decay,
+                    rank=mpu.get_data_parallel_rank(with_context_parallel=True), 
+                    world_size=mpu.get_data_parallel_world_size(with_context_parallel=True),
+                )
+                ema_model.load_state_dict(train_model.state_dict(), device=torch.cuda.current_device(), dtype=torch.float32)
+                ema_models.append(ema_model)
         else:
             ema_models = None
         
         return model, optimizer, opt_param_scheduler, ema_models
-
-    def set_ema_models(self, models):
-        ema_models = []
-        for model in models:
-            ema_model = EMAModel(
-                rank=mpu.get_data_parallel_rank(with_context_parallel=True), world_size=mpu.get_data_parallel_world_size(with_context_parallel=True),
-            )
-            ema_model.load_state_dict(model.state_dict(), device=torch.cuda.current_device(), dtype=torch.float32)
-            ema_models.append(ema_model)
-        return ema_models
 
     def model_provider(
         self,
