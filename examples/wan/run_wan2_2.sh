@@ -68,7 +68,6 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --has-image-input
     --num-layers $N_LAYERS
     --hidden-size 5120        
     --num-attention-heads 40
@@ -93,7 +92,7 @@ TRAINING_ARGS=(
     --recompute-granularity full 
     --recompute-method block 
     --activation-offload
-    --use-distributed-optimizer
+    --use-zero2
     --recompute-num-layers 40
     --no-rope-fusion
     --distributed-timeout-minutes 60
@@ -127,7 +126,7 @@ EVAL_AND_LOGGING_ARGS=(
 )
 
 
-torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
+torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan2_2.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
@@ -135,4 +134,4 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan.py \
     ${DATA_ARGS[@]}    \
     ${EVAL_AND_LOGGING_ARGS[@]} \
     ${LORA_CFG[@]} \
-    "$@" | tee wan.log
+    "$@" 2>&1 | tee wan2_2.log

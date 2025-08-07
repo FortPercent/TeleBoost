@@ -328,11 +328,16 @@ class TeleaiModel(torch.nn.Module):
         self.freq_dim = get_config_param(config, 'freq_dim')
         self.eps = get_config_param(config, 'eps')
         self.patch_size = get_config_param(config, 'patch_size')
-        self.has_image_input = get_config_param(config, 'has_image_input')
+        # self.has_image_input = get_config_param(config, 'has_image_input')
         self.has_image_pos_emb = get_config_param(config, 'has_image_pos_emb')
         self.dim = get_config_param(config, 'hidden_size')
         self.num_heads = get_config_param(config, 'num_attention_heads')
         self.num_layers = get_config_param(config, 'num_layers')
+
+        #args
+        from teletron.utils import get_args
+        args = get_args()
+        self.has_image_input = args.has_image_input
 
         self.patch_emb = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
@@ -394,8 +399,10 @@ class TeleaiModel(torch.nn.Module):
         # Project the context (text) embedding to the model dimension
         context_emb = self.text_emb(context)
 
-        if self.has_image_input:
+        if y is not None:
             x = torch.cat([x, y], dim=1)
+
+        if self.has_image_input:            
             clip_emb = self.img_emb(clip_feature)
             context_emb = torch.cat([clip_emb, context_emb], dim=1)
 

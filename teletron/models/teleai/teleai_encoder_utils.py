@@ -363,7 +363,7 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtyp
 
 @torch.no_grad
 def get_context(batch, prompter, dtype=torch.bfloat16):
-    prompt_emb = encode_prompt(prompter, batch["dense_prompt"][0])
+    prompt_emb = encode_prompt(prompter, batch["struct_prompt"][0])
     prompt_emb["context"] = prompt_emb["context"].to(
             dtype=dtype, device=torch.cuda.current_device()
     )
@@ -407,7 +407,8 @@ def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
 def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
     _, num_frames, _, height, width = batch["images"].shape
     if 'ref_images' in batch:
-        ref_images = rearrange(batch["ref_images"], "b t c h w -> b c t h w") * (2 / 255) - 1
+        # assert False, "ref_images is not supported yet"
+        ref_images = rearrange(batch["ref_images"], "b t c h w -> b c t h w")
         y = vae.encode(
             ref_images.to(dtype=dtype, device=torch.cuda.current_device()),
             device=torch.cuda.current_device(),
@@ -417,6 +418,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
         )
         msk = batch['ref_mask'].transpose(1, 2).to(dtype=dtype, device=torch.cuda.current_device())
         y = torch.concat([msk, y], dim=1)
+    
     elif 'raw_first_image' in batch:
         raw_first_image = batch["raw_first_image"]
         pil_image = to_pil_image(
@@ -447,6 +449,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16):
         y = torch.concat([msk, y])
         y = y.unsqueeze(0)
         y = y.to(dtype=dtype, device=torch.cuda.current_device())
+    
     
     return y
 
@@ -519,12 +522,17 @@ def get_fake_latents(batch, vae, dtype=torch.bfloat16):
     bsz, latent_channels, latent_frames, latent_height, latent_width = latents.shape
     fake_latents = torch.nn.functional.interpolate(
         rearrange(low_res_latent, "b c t h w -> (b t) c h w"),
-        size=(latents.shape[-2], latents.shape[-1]),
+        size=(latent_height, latent_width),
         mode='nearest'
     ).reshape(bsz, latent_frames, latent_channels, latent_height, latent_width)[0] # t, c, h, w
     fake_latents = fake_latents.permute(1, 0, 2, 3) # c, t, h, w
-    assert fake_latents.shape == latents.shape
     
     fake_latents = fake_latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
 
     return fake_latents
+
+@torch.no_grad
+def get_frame_interval(batch, dtype=torch.bfloat16):
+    return batch['frame_interval'].to(
+        dtype=dtype, device=torch.cuda.current_device()
+    )
