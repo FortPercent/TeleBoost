@@ -739,12 +739,12 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         self.pooled_projection_dim = hunyuan_config.pooled_projection_dim
         self.rope_theta = hunyuan_config.rope_theta
         self.rope_axes_dim = hunyuan_config.rope_axes_dim
+        self.num_refiner_layers = hunyuan_config.num_refiner_layers
 
         # config
         self.inner_dim = config.hidden_size
         self.num_layers = config.num_layers
         self.num_single_layers = config.num_single_layers
-        self.num_refiner_layers = config.num_refiner_layers
 
         # 1. Latent and condition embedders
         self.x_embedder = HunyuanVideoPatchEmbed(

@@ -109,6 +109,7 @@ GPT_MODEL_ARGS=(
     --num-layers $N_LAYERS
     --hidden-size 5120        
     --num-attention-heads 40
+    --has-image-input
     --seq-length 512          
     --max-position-embeddings 4096
     --tokenizer-type NullTokenizer
