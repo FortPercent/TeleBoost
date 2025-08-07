@@ -44,7 +44,7 @@ from teletron.train.utils import (
 from teletron.core.parallel_state import get_transformer_model_group
 from teletron.train.dataloader import DataloaderMixin
 from teletron.models.build import build_model
-from teletron.train.checkpoint import CheckPointMixin, unwrap_model, ensure_directory_exists
+from teletron.train.checkpoint import CheckPointMixin, unwrap_model, ensure_directory_exists, EMAModel
 from teletron.train.lr_scheduler import SchedulerMixin
 from teletron.train.telelogger import TeleLoggerMixin
 from logging import getLogger
@@ -104,7 +104,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             time.time() - _TRAIN_START_TIME))
         print_datetime('after megatron is initialized')
 
-        self.model, self.optimizer, self.scheduler = \
+        self.model, self.optimizer, self.scheduler, self.ema_models = \
                                 self.setup_model_and_optimizer(args.model_type)
 
         self.train_itrt, self.valid_itrt, self.test_itrt = \
@@ -171,7 +171,22 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             if args.fp16:
                 optimizer.reload_model_params()
 
-        return model, optimizer, opt_param_scheduler
+        if args.with_ema:
+            ema_models = self.set_ema_models(model)
+        else:
+            ema_models = None
+        
+        return model, optimizer, opt_param_scheduler, ema_models
+
+    def set_ema_models(self, models):
+        ema_models = []
+        for model in models:
+            ema_model = EMAModel(
+                rank=mpu.get_data_parallel_rank(with_context_parallel=True), world_size=mpu.get_data_parallel_world_size(with_context_parallel=True),
+            )
+            ema_model.load_state_dict(model.state_dict(), device=torch.cuda.current_device(), dtype=torch.float32)
+            ema_models.append(ema_model)
+        return ema_models
 
     def model_provider(
         self,
@@ -443,13 +458,13 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     # forward_step_func,
                     self.model, self.optimizer, self.scheduler,
                     self.train_itrt, self.valid_itrt,
-                    process_non_loss_data_func, self.config)
+                    process_non_loss_data_func, self.config, self.ema_models)
 
             print_datetime('after training is done')
 
             if args.save and iteration != 0 and iteration % args.save_interval != 0:
                 self.save_checkpoint(iteration, self.model, self.optimizer, self.scheduler,
-                                num_floating_point_operations_so_far)
+                                num_floating_point_operations_so_far, self.ema_models)
         else:
             print_rank_0('skipping training (--skip-train is on) ...')
             iteration = args.iteration
@@ -478,6 +493,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         valid_data_iterator,
         process_non_loss_data_func,
         config,
+        ema_models,
     ):
         args = get_args()
         # model = self.model
@@ -561,7 +577,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     "number of microbatches should be increasing due to batch size rampup"
                 self.save_checkpoint_and_time(iteration, model, optimizer,
                                         opt_param_scheduler,
-                                        num_floating_point_operations_so_far)
+                                        num_floating_point_operations_so_far,
+                                        ema_models)
             num_microbatches = get_num_microbatches()
             update_num_microbatches(args.consumed_train_samples, consistency_check=True)
 
@@ -575,7 +592,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                         model,
                         optimizer,
                         opt_param_scheduler,
-                        config)
+                        config,
+                        ema_models)
             
             if grad_norm is None:
                 if args.use_zero2:
@@ -658,7 +676,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                             iteration % args.save_interval == 0:
                 self.save_checkpoint_and_time(iteration, model, optimizer,
                                         opt_param_scheduler,
-                                        num_floating_point_operations_so_far)
+                                        num_floating_point_operations_so_far,
+                                        ema_models)
                 saved_checkpoint = True
 
             # Exiting based on duration
@@ -674,7 +693,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     if not saved_checkpoint:
                         self.save_checkpoint_and_time(iteration, model, optimizer,
                                                 opt_param_scheduler,
-                                                num_floating_point_operations_so_far)
+                                                num_floating_point_operations_so_far,
+                                                ema_models)
                     print_datetime('exiting program after {} minutes'.format(train_time))
                     exit = True
                     break
@@ -684,7 +704,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 if args.save and not saved_checkpoint:
                     self.save_checkpoint_and_time(iteration, model, optimizer,
                                             opt_param_scheduler,
-                                            num_floating_point_operations_so_far)
+                                            num_floating_point_operations_so_far,
+                                            ema_models)
                 torch.distributed.barrier()
                 print_datetime('exiting program at iteration {}'.format(iteration))
                 exit = True
@@ -727,6 +748,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         optimizer,
         opt_param_scheduler,
         config,
+        ema_models,
     ):
         """Single training step."""
         args = get_args()
@@ -773,6 +795,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             num_zeros_in_grad = None
         else:
             update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+
+        #ema model step
+        if ema_models is not None:
+            for model, ema_model in zip(model, ema_models):
+                state_dict = model.state_dict()
+                ema_model.step(state_dict)
 
         # Vision momentum.
         if getattr(args, 'vision_pretraining', False) and args.vision_pretraining_type == "dino":
