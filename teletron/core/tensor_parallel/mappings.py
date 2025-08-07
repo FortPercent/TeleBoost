@@ -169,7 +169,7 @@ def reduce_mean(input_):
 def scatter_to_tensor_model_parallel_region(input_):
     return _ScatterToModelParallelRegion.apply(input_)
 
-def gather_from_col_tensor_model_parallel_region(input_):
+def gather_from_tensor_model_parallel_region(input_):
     return _GatherFromColModelParallelRegion.apply(input_)
 
 def tele_rmsnorm_cuisine(x, weight, eps):

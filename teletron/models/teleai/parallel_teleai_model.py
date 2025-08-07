@@ -24,8 +24,8 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
         
         # from Tensor ParallelMixin
         self.enable_ffn_tensor_parallel(self.ffn, config)
-        self.enable_self_attn_tensor_parallel_base(self.self_attn, config)
-        self.enable_cross_attn_tensor_parallel_base(self.cross_attn, config)
+        self.enable_self_attn_tensor_parallel(self.self_attn, config)
+        self.enable_cross_attn_tensor_parallel(self.cross_attn, config)
         
     def forward(self, x, context, t_mod, freqs):
         modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)
@@ -121,7 +121,6 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
 
         x = self.split_input(x, dim=1)
         freqs = self.split_input(freqs, dim=0)
-        # freqs = self.tp_split_input(freqs)
         # freqs = self.split_input(freqs, dim=-1)
         x = self.blocks(x, context_emb, t_mod, freqs)
         x = self.gather_output(x, dim=1)

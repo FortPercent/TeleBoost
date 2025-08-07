@@ -36,7 +36,7 @@ class TeleParallelRMSNorm(nn.Module):
 
 # Baseline
 
-from .mappings import gather_from_col_tensor_model_parallel_region, scatter_to_tensor_model_parallel_region
+from .mappings import gather_from_tensor_model_parallel_region, scatter_to_tensor_model_parallel_region
 
 class TeleParallelRMSNormBase(nn.Module):
     def __init__(self, dim, eps=1e-5):
@@ -53,7 +53,7 @@ class TeleParallelRMSNormBase(nn.Module):
         return normalized_x
 
     def forward(self, x_local):
-        x = gather_from_col_tensor_model_parallel_region(x_local)
+        x = gather_from_tensor_model_parallel_region(x_local)
         dtype = x.dtype
         x_float = x.float()
         normalized_x = self.norm(x_float)
