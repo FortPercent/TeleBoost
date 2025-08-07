@@ -438,9 +438,6 @@ def deepspeed_forward_backward(
     data_iterator,
     model,
     num_microbatches,
-    seq_length,
-    micro_batch_size,
-    decoder_seq_length,
     forward_only,
     zero_optimizer,
 ):
@@ -1432,6 +1429,7 @@ def _add_network_size_args(parser):
     group.add_argument('--onnx-safe', type=bool, required=False,
                        help='Use workarounds for known problems with '
                        'Torch ONNX exporter')
+    group.add_argument("--has-image-input", action='store_true')
     group.add_argument('--bert-no-binary-head', action='store_false',
                        help='Disable BERT binary head.',
                        dest='bert_binary_head')

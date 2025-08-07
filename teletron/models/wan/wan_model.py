@@ -290,13 +290,17 @@ class WanModel(torch.nn.Module):
         self.freq_dim = wan_config.freq_dim
         self.eps = wan_config.eps
         self.patch_size = wan_config.patch_size
-        self.has_image_input = wan_config.has_image_input
         self.has_image_pos_emb = wan_config.has_image_pos_emb
 
         # config
         self.dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.num_layers = config.num_layers
+
+        #args
+        from teletron.utils import get_args
+        args = get_args()
+        self.has_image_input = args.has_image_input
 
         self.patch_embedding = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
@@ -352,8 +356,10 @@ class WanModel(torch.nn.Module):
         t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
         context = self.text_embedding(context)
         
-        if self.has_image_input:
+        if y is not None:
             x = torch.cat([x, y], dim=1)  # (b, c_x + c_y, f, h, w)
+
+        if self.has_image_input:
             clip_embdding = self.img_emb(clip_feature)
             context = torch.cat([clip_embdding, context], dim=1)
         

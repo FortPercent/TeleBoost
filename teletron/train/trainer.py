@@ -742,8 +742,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 data_iterator=data_iterator,
                 model=model,
                 num_microbatches=get_num_microbatches(),
-                seq_length=args.seq_length,
-                micro_batch_size=args.micro_batch_size,
                 forward_only=False,
                 zero_optimizer=optimizer)
         else:
