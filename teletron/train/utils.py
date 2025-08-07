@@ -1905,6 +1905,7 @@ def _add_checkpointing_args(parser):
                        help='Apply full save parallelization across DP for'
                             ' distributed checkpoints. Depending on ckpt format'
                             ' might increase number of files in the checkpoint.')
+    group.add_argument('--with-ema', action='store_true', help='save checkpoint with ema model')
 
     return parser
 
