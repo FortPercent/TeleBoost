@@ -438,9 +438,6 @@ def deepspeed_forward_backward(
     data_iterator,
     model,
     num_microbatches,
-    seq_length,
-    micro_batch_size,
-    decoder_seq_length,
     forward_only,
     zero_optimizer,
 ):
@@ -1432,6 +1429,7 @@ def _add_network_size_args(parser):
     group.add_argument('--onnx-safe', type=bool, required=False,
                        help='Use workarounds for known problems with '
                        'Torch ONNX exporter')
+    group.add_argument("--has-image-input", action='store_true')
     group.add_argument('--bert-no-binary-head', action='store_false',
                        help='Disable BERT binary head.',
                        dest='bert_binary_head')
@@ -1907,6 +1905,8 @@ def _add_checkpointing_args(parser):
                        help='Apply full save parallelization across DP for'
                             ' distributed checkpoints. Depending on ckpt format'
                             ' might increase number of files in the checkpoint.')
+    group.add_argument('--with-ema', action='store_true', help='save checkpoint with ema model')
+    group.add_argument('--ema-decay', type=float, default=0.9999, help='decay of ema model')
 
     return parser
 

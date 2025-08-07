@@ -37,6 +37,7 @@ EXPR_NAME=f1fn2v_1.3B
 # ) # 10B I2V
 
 MODEL_ARGS=(
+    --has-image-input
     --num-layers 30
     --hidden-size 1536
     --ffn-hidden-size 8960

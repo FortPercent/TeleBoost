@@ -190,7 +190,7 @@ class ClipDataset(BaseDataset):
             ]
         else:
             valid_data_list = new_data_list
-        logger.info(
+        print(
             f"finish filter dataset, from {len(self.data_list)} to {len(valid_data_list)} \n"
             f"too short data {too_short} \n"
             f"too small data {too_small} \n"

@@ -37,7 +37,7 @@ PROPERTY_DIMS = {
     'img_clip_feature': 3,
     'img_emb_y': 5,
     'latents': 5,
-    'nosie': 5,
+    'noise': 5,
     'fake_latents': 5,
 }
 

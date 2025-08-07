@@ -43,12 +43,12 @@ def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
 class CheckPointMixin:
 
     def save_checkpoint_and_time(self, iteration, model, optimizer, opt_param_scheduler,
-                             num_floating_point_operations_so_far):
+                             num_floating_point_operations_so_far, ema_models):
         self.save_checkpoint(iteration, model, optimizer, opt_param_scheduler,
-                        num_floating_point_operations_so_far)
+                        num_floating_point_operations_so_far, ema_models)
 
     def save_checkpoint(self, iteration, model, optimizer, opt_param_scheduler,
-                num_floating_point_operations_so_far):
+                num_floating_point_operations_so_far, ema_models):
         """Save a model checkpoint."""
         args = get_args()
 
@@ -64,6 +64,20 @@ class CheckPointMixin:
 
         # Checkpoint name.
         checkpoint_name = get_checkpoint_name(args.save, iteration, return_base_dir=args.use_dist_ckpt)
+        
+        #save ema model
+        if ema_models is not None:
+            ema_config_list = []
+            ema_state_dict_list = []
+            for ema_model in ema_models:
+                ema_state_dict_list.append(ema_model.state_dict())
+                ema_config_list.append(ema_model.config)
+            if not torch.distributed.is_initialized() or mpu.get_data_parallel_rank(with_context_parallel=True) == 0:
+                ema_checkpoint_name  = get_checkpoint_name(args.save, iteration, return_base_dir=args.use_dist_ckpt, ema=True)
+                ema_config_name  = get_checkpoint_name(args.save, iteration, return_base_dir=args.use_dist_ckpt, ema_config=True)
+                ensure_directory_exists(ema_checkpoint_name)
+                torch.save(ema_state_dict_list, ema_checkpoint_name)
+                torch.save(ema_config_list, ema_config_name)
 
         # Save distributed optimizer's custom parameter state.
         if args.use_distributed_optimizer and not args.no_save_optim and optimizer is not None and not args.use_dist_ckpt:
@@ -83,7 +97,7 @@ class CheckPointMixin:
 
         # Collect args, model, RNG.
         if not torch.distributed.is_initialized() \
-                or mpu.get_data_modulo_expert_parallel_rank() == 0 \
+                or mpu.get_data_parallel_rank(with_context_parallel=True) == 0 \
                 or args.use_dist_ckpt:
 
             optim_sd_kwargs = {}
@@ -125,7 +139,7 @@ class CheckPointMixin:
         if torch.distributed.is_initialized():
             torch.distributed.barrier()
 
-    def load_checkpoint(self, model, optimizer, opt_param_scheduler, load_arg='load', strict=True):
+    def load_checkpoint(self, model, optimizer, opt_param_scheduler, load_arg='load', strict=True, ema_models=None):
         """Load a model checkpoint and return the iteration.
         strict (bool): whether to strictly enforce that the keys in
             :attr:`state_dict` of the checkpoint match the names of
@@ -180,6 +194,18 @@ class CheckPointMixin:
         else:
             state_dict, checkpoint_name, release = _load_base_checkpoint(load_dir, rank0=False, **load_kwargs)
 
+        #load ema model
+        if ema_models is not None:
+            tracker_filename = get_checkpoint_tracker_filename(load_dir)
+            iteration, release = read_metadata(tracker_filename)
+            ema_checkpoint_name  = get_checkpoint_name(load_dir, iteration, return_base_dir=False, ema=True)
+            ema_config_name  = get_checkpoint_name(load_dir, iteration, return_base_dir=False, ema_config=True)
+            ema_models_state_dict = torch.load(ema_checkpoint_name, map_location='cpu', weights_only=False)
+            ema_config_state_dict = torch.load(ema_config_name, map_location='cpu', weights_only=False)
+            for ema_model, ema_state_dict, ema_config in zip(ema_models, ema_models_state_dict, ema_config_state_dict):
+                ema_model.load_state_dict(ema_state_dict, device=torch.cuda.current_device(), dtype=torch.float32)
+                ema_model.load_config(ema_config)
+        
         # Checkpoint not loaded.
         if state_dict is None:
             # Iteration and num_floating_point_operations_so_far default to 0.

@@ -95,9 +95,10 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
 
         context_emb = self.text_emb(context)
 
+        if y is not None:
+            x = torch.cat([x, y], dim=1)
+
         if self.has_image_input:
-            if y is not None:
-                x = torch.cat([x, y], dim=1)
             if clip_feature is not None:
                 clip_embedding = self.img_emb(clip_feature)
                 context_emb = torch.cat([clip_embedding, context_emb], dim=1)

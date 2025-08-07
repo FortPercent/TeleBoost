@@ -102,7 +102,8 @@ class VastDistBatchLoader(BaseBatchLoader):
         # breakpoint()
         comm_pair = get_comm_pair()
         args = get_args()
-        tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
+        info_size  = sum([PROPERTY_DIMS[data_to_get] for data_to_get in WanVideoEncoder.get_output_schema()])
+        tensors_info = torch.ones((info_size), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
         del req
@@ -155,7 +156,8 @@ class WanDistBatchLoader(BaseBatchLoader):
         # 2. 从 producer rank 接收 Tensors
         comm_pair = get_comm_pair()
         args = get_args()
-        tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
+        info_size  = sum([PROPERTY_DIMS[data_to_get] for data_to_get in WanVideoEncoder.get_output_schema()])
+        tensors_info = torch.ones((info_size), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
 
