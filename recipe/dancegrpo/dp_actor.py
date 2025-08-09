@@ -15,7 +15,7 @@ from verl.utils.ulysses import gather_outpus_and_unpad
 
 from verl.utils.debug import GPUMemoryLogger
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
-
+from tensorwatch import TensorWatch,watch_module_forward_backward
 __all__ = ["DiffusionDataParallelPPOActor"]
 
 logger = logging.getLogger(__file__)
@@ -47,6 +47,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
     @GPUMemoryLogger(role="dp actor", logger=logger)
     def update_policy(self, data: DataProto):
         #这里显存就开始增加了
+        print("in update policy",self.actor_module.dtype)
         data = data.to(get_device_id())
         # make sure we are in training mode
         self.actor_module.train()
@@ -68,7 +69,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         
         # num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
 
-        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages","context_orig_lengths"]
+        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages","context_orig_lengths","null_context"]
         non_tensor_select_keys = ["caption"]
 
         # Split to make minibatch iterator for updating the actor
@@ -96,6 +97,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
             self.actor_optimizer.zero_grad()
             batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
+            batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
 
             for i in range(len(data)):
                 orig_lengths =int(data.batch['context_orig_lengths'][i])
@@ -111,11 +113,13 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 seq_len = math.ceil(
                     (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
                 )
+    
 
                 new_log_probs = self.grpo_wan_one_step(
                     data.batch["latents"][:, step_idx],
                     data.batch["next_latents"][:, step_idx],
                     batch_contexts,  # List[Tensor]格式
+                    batch_null_contexts,
                     seq_len,
                     self.actor_module,
                     data.batch["timesteps"][:, step_idx],
@@ -123,24 +127,55 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     data.batch["sigma_schedule"][0], 
                 )
 
+                # print(new_log_probs)
+                # exit(0)
                 # 其余训练逻辑保持不变...
                 advantages = torch.clamp(
                     data.batch["advantages"],
                     -adv_clip_max,
                     adv_clip_max,
                 )
-
-                ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
-
+                print("adv_clip_max",adv_clip_max)
+                file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/debug_current_log_probs.pt"
+                # print(file_name)
+                batch = torch.load(file_name)
+                current_log_probs=batch["current_log_probs"]
+                advantages=batch["advantages"]
+                # ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
+                ratio = torch.exp(new_log_probs - current_log_probs)
+                
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
                     ratio,
                     1.0 - clip_range,
                     1.0 + clip_range,
                 )
-                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+                print("current_log_probs",current_log_probs)
+                print("new_log_probs",new_log_probs)
+                print("ratio",ratio)
+                print("advantages",advantages)
+                print("Uncipped Loss:", unclipped_loss)
+                print("Clipped Loss:", clipped_loss)
+                print("Maximum Loss:", torch.maximum(unclipped_loss, clipped_loss))
+                print("args.gradient_accumulation_steps",self.gradient_accumulation)
+                print("train_timesteps",train_timesteps)
+                #loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+                loss = torch.mean(unclipped_loss)/(self.gradient_accumulation * train_timesteps)
+                print("-"*100)
                 print("loss",loss)
                 loss.backward()
+                # with FSDP.summon_full_params(self.actor_module,writeback=False,   # 不回写
+                #     with_grads=False,   # 关键：还原 grad
+                #     offload_to_cpu=False,  # 需要的话可 True 省显存
+                #     rank0_only=True):
+                #     for name, param in self.actor_module.named_parameters():
+                #         print("for post backward check", name, param.float().norm().item())
+
+                # # torch.save(param, f"saved_params_for_check/{name}.pt")
+                # param=float(param.float().norm())
+                exit(0)
+                TensorWatch.step()
+  
                 avg_loss = loss.detach().clone()
 
                 torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
@@ -157,11 +192,13 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         latents,
         pre_latents,
         context,
+        context_null,
         seq_len,
         transformer,
         timesteps,
         i,
         sigma_schedule,
+        guide_scale=5.0,
     ):
         """GRPO的单步训练，支持FP16优化"""
         B = len(context) if isinstance(context, list) else context.shape[0]
@@ -177,31 +214,36 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         if latents.shape[0] != 16:
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
         
-        # # 加载保存的 tensor 和数据
-        # file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/0_latent_timestep_data.pt"
-        # print(file_name)
-        # data = torch.load(file_name)
-
-        # latents = data["latents"]      # torch.Tensor
-        # timesteps = data["timestep"]     # torch.Tensor
-        # seq_len = data["seq_len"]          # int
-        # context = data["context"]       # list of tensor 或 tensor
-
-        # print("latents:", latents.shape)
-        # print("timestep:", timesteps)
-        # print("seq_len:", seq_len)
-        # print(len(context))
 
         autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
-            # torch.manual_seed(42)
-            # from tensorwatch import TensorWatch,watch_module_forward_backward
+            # 加载保存的 tensor 和数据
+            file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/0_latent_timestep_data.pt"
+            print(file_name)
+            data = torch.load(file_name)
 
-            # watch_module_forward_backward(transformer, use_megatron=False, use_deepspeed=False)
-            # print("come here!!!!")
-            # register_all_hooks(transformer)
+            latents = data["latents"]      # torch.Tensor
+            timesteps = data["timestep"]     # torch.Tensor
+            seq_len = data["seq_len"]          # int
+            context = data["context"]       # list of tensor 或 tensor
+            pre_latents = data["pre_latents"]
+            context_null = data["context_null"]
+            sigma_schedule = data["sigma_schedule"]
+
+            print("latents:", latents.shape)
+            print("timestep:", timesteps)
+            print("seq_len:", seq_len)
+            print(len(context))
+            latents.to(pre_latents.device)
+
+            torch.manual_seed(42)
+
+            watch_module_forward_backward(transformer, use_megatron=False, use_deepspeed=False,use_fsdp=True)
+
+            print("come here!!!!")
+            register_all_hooks(transformer)
             
-            pred = transformer(
+            pred_cond = transformer(
                 x=[latents],
                 t=timesteps,
                 context=context,
@@ -213,12 +255,42 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             # torch.save(pred, file_name)
             # exit(0)
             
-            if isinstance(pred, dict) and 'rgb' in pred:
-                model_output = pred['rgb'][0]
-            elif isinstance(pred, list):
-                model_output = pred[0]
+            # 处理条件预测输出
+            if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
+                model_output_cond = pred_cond['rgb'][0]
+            elif isinstance(pred_cond, list):
+                model_output_cond = pred_cond[0]
             else:
-                model_output = pred
+                model_output_cond = pred_cond
+                
+            # 立即清理
+            del pred_cond
+            torch.cuda.empty_cache()
+                
+            # 再计算无条件预测
+            pred_uncond = transformer(
+                x=[latents],  # 保持List[Tensor]格式
+                t=timesteps,
+                context=context_null,  # List[Tensor]
+                seq_len=seq_len
+            )
+
+                
+            # 处理无条件预测输出
+            if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
+                model_output_uncond = pred_uncond['rgb'][0]
+            elif isinstance(pred_uncond, list):
+                model_output_uncond = pred_uncond[0]
+            else:
+                model_output_uncond = pred_uncond
+                
+            del pred_uncond
+            torch.cuda.empty_cache()
+            
+            # CFG组合
+            model_output = model_output_uncond + guide_scale * (model_output_cond - model_output_uncond)
+            del model_output_cond, model_output_uncond
+
 
         # 确保数据类型一致性
 
@@ -248,7 +320,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         sde_solver: bool,            # 使用SDE求解器
     ):
         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
-        
+        print("model_output",model_output.float().norm())
+        print("latents",latents.float().norm())
+        print("eta",eta)
+        print("sigmas",sigmas)
+        index=0
+        print("index",index)
         sigma = sigmas[index]
         dsigma = sigmas[index + 1] - sigma  # sigma差分
         
@@ -259,7 +336,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         pred_original_sample = latents - sigma * model_output
         
         delta_t = sigma - sigmas[index + 1]  # 时间差分
-        std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
+        # std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
+        std_dev_t = eta * torch.sqrt(delta_t)  # 根据hunyuan改的
         
         if sde_solver:  # 使用SDE求解器（和FLUX相同）
             score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
@@ -281,4 +359,52 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             return prev_sample, pred_original_sample, log_prob
         else:
             return prev_sample_mean, pred_original_sample
+
+
+import torch
+import torch.distributed as dist
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+def print_full_grads_per_param(model: FSDP):
+    """
+    遍历 FSDP 包装的模型，并打印每个原始参数的完整梯度范数。
+    警告：这个函数会进行通信和显存分配，只用于调试。
+    """
+    if dist.get_rank() != 0:
+        return
+
+    world_size = dist.get_world_size()
+
+    print("\n--- Rank 0: Printing full gradients per original parameter ---")
+
+    # 遍历 FSDP 模型中的所有 FSDP 包装的模块
+    for fsdp_module in model.modules():
+        print(isinstance(fsdp_module, FSDP),fsdp_module)
+        if isinstance(fsdp_module, FSDP):
+            # 获取 FSDP 模块内部的原始参数列表
+            # FSDP 在内部维护了一个 `flat_param`，但我们仍然可以访问原始参数的元数据
+            
+            # 这一步是关键：我们需要获取每个参数的梯度分片
+            # 我们直接从 FSDP 模块内部的参数列表来获取
+            # `fsdp_module.params` 包含了所有原始参数的引用
+            for param_name, param in fsdp_module.named_parameters(recurse=False):
+                # param.grad 此时就是分片梯度
+                if param.grad is not None:
+                    # 创建一个列表来收集所有分片
+                    grad_shard = param.grad.data
+                    grad_list = [torch.zeros_like(grad_shard) for _ in range(world_size)]
                     
+                    # 执行 all_gather
+                    dist.all_gather(grad_list, grad_shard)
+                    
+                    # 将分片拼接成完整的梯度
+                    # FSDP 默认沿第一个维度分片，因此我们用 torch.cat(..., dim=0)
+                    full_grad = torch.cat(grad_list, dim=0)
+                    
+                    # 打印结果
+                    print(f"  > FSDP Module: {fsdp_module.name}, Param: {param_name}, Full Grad Norm: {full_grad.norm().item()}")
+
+    print("--- Rank 0: Finished printing full gradients ---\n")
+
+# 在你的训练循环中调用它
+# print_full_grads_per_param(fsdp_model)

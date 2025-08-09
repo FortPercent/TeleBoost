@@ -40,6 +40,7 @@ def ulysses_self_flash_attn_forward(
 ):
     from wan.modules.model import rope_apply
     from wan.modules.attention import flash_attention
+    from verl.utils.ulysses import get_target_len
     attention_mask=None
     # bsz, q_len, _ = x.size()  # q_len = seq_length / sp_size
     b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
@@ -82,21 +83,3 @@ def ulysses_self_flash_attn_forward(
 
     attn_output = self.o(attn_output)
     return attn_output
-
-_TARGET_SIZE = None
-
-def set_target_len(target_size):
-    global _TARGET_SIZE
-    _TARGET_SIZE=target_size
-
-def get_target_len():
-    return _TARGET_SIZE
-
-_PAD_SIZE = None
-
-def set_pad_size(pad_size):
-    global _PAD_SIZE
-    _PAD_SIZE=pad_size
-
-def get_pad_size():
-    return _PAD_SIZE

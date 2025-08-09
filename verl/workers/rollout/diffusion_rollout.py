@@ -132,7 +132,8 @@ class DiffusionRollout(BaseRollout):
             grpo_sample = True
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
 
-            with torch.no_grad():      
+            with torch.no_grad(): 
+                print("before sample",self.module.dtype)     
                 _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
                     [input_latents],
                     progress_bar,
@@ -143,6 +144,7 @@ class DiffusionRollout(BaseRollout):
                     seq_len,
                     grpo_sample,
                 )
+                print("after sample",self.module.dtype)   
             print("final_latents",final_latents.shape,"batch_latents",batch_latents.shape,"batch_log_probs",batch_log_probs.shape)
             batch_latents = batch_latents.unsqueeze(0)
             batch_log_probs = batch_log_probs.unsqueeze(0)
@@ -163,6 +165,104 @@ class DiffusionRollout(BaseRollout):
                 # 后处理
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
+                # 创建输出目录
+                os.makedirs("./videos", exist_ok=True)
+                os.makedirs("./images", exist_ok=True)
+                def save_video_and_prompt(video_frames, caption, index):
+                    """
+                    保存视频文件和对应的prompt文本
+                    Args:
+                        video_frames: torch.Tensor, shape (C, T, H, W), 范围 [0, 1]
+                        caption: str, 对应的文本prompt
+                        rank: int, 当前进程的rank
+                        index: int, 当前batch的索引
+                        args: 配置参数
+                    """
+                    import time
+                    from datetime import datetime
+                    import numpy as np
+                    import cv2
+                    from PIL import Image
+
+                    # 获取当前时间戳
+
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    # 确保video_frames是正确的格式 (C, T, H, W)
+                    if video_frames.dim() == 4:
+                        C, T, H, W = video_frames.shape
+                        
+                        # 转换为numpy格式 (T, H, W, C)
+                        video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+                        video_np = (video_np * 255).astype(np.uint8)
+                        
+                        # 如果是单通道，扩展为3通道
+                        if C == 1:
+                            video_np = np.repeat(video_np, 3, axis=-1)
+                        
+                        # 1. 保存第一帧图像
+                        first_frame = video_np[0]  # (H, W, C)
+                        
+                        # 保存第一帧为PNG图像
+                        if C >= 3:
+                            first_frame_pil = Image.fromarray(first_frame)
+                        else:
+                            first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
+                        
+                        image_filename = f"wan_frame_batch{index}.png"
+                        image_path = os.path.join("./images", image_filename)
+                        
+                        try:
+                            first_frame_pil.save(image_path)
+                            # print(f"First frame saved: {image_path}")
+                        except Exception as e:
+                            print(f"Error saving first frame {image_path}: {e}")
+
+                        # 保存视频
+                        video_filename = f"wan_video__batch{index}.mp4"
+                        video_path = os.path.join("./videos", video_filename)
+                        
+                        try:
+                            # 使用opencv保存视频
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                            fps = self.config.video_fps
+                            
+                            out = cv2.VideoWriter(video_path, fourcc, fps, (W, H))
+                            
+                            for t in range(T):
+                                frame = video_np[t]  # (H, W, C)
+                                # OpenCV使用BGR格式
+                                if C == 3:
+                                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                                else:
+                                    frame_bgr = frame
+                                out.write(frame_bgr)
+                            
+                            out.release()
+                            print(f"Video saved: {video_path}")
+                            
+                        except Exception as e:
+                            print(f"Error saving vid/eo {video_path}: {e}")
+                            # 如果视频保存失败，至少保存第一帧作为图像
+                            first_frame = video_np[0]  # (H, W, C)
+                            if C == 3:
+                                first_frame_pil = Image.fromarray(first_frame)
+                            else:
+                                first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
+                            
+                            image_filename = f"wan_frame_batch{index}_{timestamp}.png"
+                            image_path = os.path.join("./images", image_filename)
+                            first_frame_pil.save(image_path)
+                            # print(f"First frame saved as image: {image_path}")
+                    else:
+                        print(f"Unexpected video_frames shape: {video_frames.shape}")
+
+                # 保存视频
+                save_video_and_prompt(
+                    video_frames,
+                    batch_captions[0],
+                    index
+                )
                 video_frames = video_frames.unsqueeze(0)
             print("video_frames",video_frames.shape)
             all_video_frames.append(video_frames)
@@ -192,6 +292,7 @@ class DiffusionRollout(BaseRollout):
             {
                 "context_orig_lengths":context_orig_lengths,
                 "contexts": context,
+                "null_context":neg_context,
                 "latents": latents,
                 "next_latents": next_latents,
                 "log_probs": all_log_probs,  # we will recompute old log prob with actor
@@ -208,100 +309,6 @@ class DiffusionRollout(BaseRollout):
         print(f"before compute reward 总显存:   {total / (1024 ** 3):.2f} GB")
         print(f"before compute reward 已用显存: {(total - free) / (1024 ** 3):.2f} GB")
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
-
-    @torch.no_grad()
-    def _generate_minibatch(self, prompts: DataProto) -> DataProto:
-        idx = prompts.batch['input_ids']  # (bs, prompt_length)
-        attention_mask = prompts.batch['attention_mask']  # left-padded attention_mask
-        position_ids = prompts.batch['position_ids']
-
-        # used to construct attention_mask
-        eos_token_id = prompts.meta_info['eos_token_id']
-        pad_token_id = prompts.meta_info['pad_token_id']
-
-        batch_size = idx.size(0)
-        prompt_length = idx.size(1)
-
-        self.module.eval()
-        param_ctx = contextlib.nullcontext()
-
-        # make sampling args can be overriden by inputs
-        do_sample = prompts.meta_info.get('do_sample', self.config.do_sample)
-        response_length = prompts.meta_info.get('response_length', self.config.response_length)
-        top_p = prompts.meta_info.get('top_p', self.config.get('top_p', 1.0))
-        top_k = prompts.meta_info.get('top_k', self.config.get('top_k', 0))
-
-        if top_k is None:
-            top_k = 0
-        top_k = max(0, top_k)  # to be compatible with vllm
-
-        temperature = prompts.meta_info.get('temperature', self.config.temperature)
-
-        generation_config = GenerationConfig(temperature=temperature, top_p=top_p, top_k=top_k)
-
-        if isinstance(self.module, FSDP):
-            # recurse need to set to False according to https://github.com/pytorch/pytorch/issues/100069
-            param_ctx = FSDP.summon_full_params(self.module, writeback=False, recurse=False)
-        with param_ctx:
-            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-                output = self.module.generate(
-                    input_ids=idx,
-                    attention_mask=attention_mask,
-                    do_sample=do_sample,
-                    max_new_tokens=response_length,
-                    # max_length=max_length,
-                    eos_token_id=eos_token_id,
-                    pad_token_id=pad_token_id,
-                    generation_config=generation_config,
-                    # renormalize_logits=True,
-                    output_scores=False,  # this is potentially very large
-                    return_dict_in_generate=True,
-                    use_cache=True)
-        # TODO: filter out the seq with no answers like ds-chat
-        seq = output.sequences
-
-        # huggingface generate will stop generating when all the batch reaches [EOS].
-        # We have to pad to response_length
-        sequence_length = prompt_length + self.config.response_length
-        delta_length = sequence_length - seq.shape[1]
-
-        if delta_length > 0:
-            delta_tokens = torch.ones(size=(batch_size, delta_length), device=seq.device, dtype=seq.dtype)
-            delta_tokens = pad_token_id * delta_tokens
-            seq = torch.cat((seq, delta_tokens), dim=1)
-
-        assert seq.shape[1] == sequence_length
-
-        prompt = seq[:, :prompt_length]  # (bs, prompt_length)
-        response = seq[:, prompt_length:]  # (bs, response_length)
-
-        response_length = response.size(1)
-        delta_position_id = torch.arange(1, response_length + 1, device=position_ids.device)
-        delta_position_id = delta_position_id.unsqueeze(0).repeat(batch_size, 1)
-
-        response_position_ids = position_ids[:, -1:] + delta_position_id
-        position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-
-        response_attention_mask = get_response_mask(response_id=response,
-                                                    eos_token=eos_token_id,
-                                                    dtype=attention_mask.dtype)
-        attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
-
-        batch = TensorDict(
-            {
-                'prompts': prompt,
-                'responses': response,
-                'input_ids': seq,
-                'attention_mask': attention_mask,
-                'position_ids': position_ids
-            },
-            batch_size=batch_size)
-
-        # empty cache before compute old_log_prob
-        torch.cuda.empty_cache()
-
-        self.module.train()
-        return DataProto(batch=batch)
 
     def run_wan_sample_step(
         self,
@@ -337,7 +344,6 @@ class DiffusionRollout(BaseRollout):
 
                     #TODO!!!!
                     #管理!!!可能有hook!!!
-
                     transformer.to(device)
                     pred_cond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]

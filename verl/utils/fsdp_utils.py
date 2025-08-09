@@ -494,3 +494,24 @@ def layered_summon_lora_params(fsdp_module) -> OrderedDict:
                     submodule._is_root = False
                 get_torch_device().empty_cache()
     return lora_params
+
+from torch.distributed.fsdp._runtime_utils import _post_backward_hook as original_post_hook
+from typing import no_type_check, Any
+
+@no_type_check
+@torch.no_grad()
+def patched_post_backward_hook(
+    state,
+    handle,
+    flat_param,
+    *unused: Any,
+):
+    # --- 自定义：开始前打印 ---
+    views_grads=handle._get_unflat_views(handle.flat_param.grad)
+    for i, (view, (param_name, module, module_name)) in enumerate(
+            zip(views_grads, handle.flat_param._param_infos)
+        ):
+        if "modulation" in param_name.lower():
+            view = view / 2
+    
+    original_post_hook(state, handle, flat_param, *unused)
