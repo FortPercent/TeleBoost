@@ -513,5 +513,7 @@ def patched_post_backward_hook(
         ):
         if "modulation" in param_name.lower():
             view = view / 2
+            # print("modulation",param_name,view.float().norm().item())
+            # exit(0)
     
     original_post_hook(state, handle, flat_param, *unused)
