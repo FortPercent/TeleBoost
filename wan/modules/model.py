@@ -8,6 +8,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
 from .attention import flash_attention
+from verl.utils.ulysses import modulate_with_cp_grad_reduce, gate_with_cp_grad_reduce
 
 __all__ = ['WanModel']
 
@@ -282,6 +283,8 @@ class WanAttentionBlock(nn.Module):
 
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim ** 0.5)
+        self.test0=TestModule()
+        self.test1=TestModule()
 
     def forward(
         self,
@@ -301,30 +304,121 @@ class WanAttentionBlock(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
-        # assert e.dtype == torch.float32
-        e = e.to(torch.bfloat16)
+        assert e.dtype == torch.float32
+        # e = e.to(torch.bfloat16)
         with amp.autocast(dtype=torch.float32):
             # assert e.dtype == torch.float32
+            self.test0(e)
             e = (self.modulation + e).chunk(6, dim=1)
+            self.test1(e)
         # assert e[0].dtype == torch.float32
 
         # self-attention
+        normed_x1= self.norm1(x).float()
+        modulated_x1 = modulate_with_cp_grad_reduce(normed_x1, e[0], e[1])
         y = self.self_attn(
-            self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes,
+            modulated_x1, seq_lens, grid_sizes,
             freqs)
         with amp.autocast(dtype=torch.float32):
-            x = x + y * e[2]
+            x = gate_with_cp_grad_reduce(x, e[2], y)
+            # x = x + y * e[2]
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
             x = x + self.cross_attn(self.norm3(x), context, context_lens)
-            y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
+            modulated_x2 = modulate_with_cp_grad_reduce(self.norm2(x).float(), e[3], e[4])
+            y = self.ffn(modulated_x2)
             with amp.autocast(dtype=torch.float32):
-                x = x + y * e[5]
+                # x = x + y * e[5]
+                x = gate_with_cp_grad_reduce(x, e[5], y)
             return x
 
         x = cross_attn_ffn(x, context, context_lens, e)
         return x
+# class WanAttentionBlock(nn.Module):
+
+#     def __init__(self,
+#                  cross_attn_type,
+#                  dim,
+#                  ffn_dim,
+#                  num_heads,
+#                  window_size=(-1, -1),
+#                  qk_norm=True,
+#                  cross_attn_norm=False,
+#                  eps=1e-6):
+#         super().__init__()
+#         self.dim = dim
+#         self.ffn_dim = ffn_dim
+#         self.num_heads = num_heads
+#         self.window_size = window_size
+#         self.qk_norm = qk_norm
+#         self.cross_attn_norm = cross_attn_norm
+#         self.eps = eps
+
+#         # layers
+#         self.norm1 = WanLayerNorm(dim, eps)
+#         self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
+#                                           eps)
+#         self.norm3 = WanLayerNorm(
+#             dim, eps,
+#             elementwise_affine=True) if cross_attn_norm else nn.Identity()
+#         self.cross_attn = WAN_CROSSATTENTION_CLASSES[cross_attn_type](dim,
+#                                                                       num_heads,
+#                                                                       (-1, -1),
+#                                                                       qk_norm,
+#                                                                       eps)
+#         self.norm2 = WanLayerNorm(dim, eps)
+#         self.ffn = nn.Sequential(
+#             nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
+#             nn.Linear(ffn_dim, dim))
+
+#         # modulation
+#         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim ** 0.5)
+
+#     def forward(
+#         self,
+#         x,
+#         e,
+#         seq_lens,
+#         grid_sizes,
+#         freqs,
+#         context,
+#         context_lens,
+#     ):
+#         r"""
+#         Args:
+#             x(Tensor): Shape [B, L, C]
+#             e(Tensor): Shape [B, 6, C]
+#             seq_lens(Tensor): Shape [B], length of each sequence in batch
+#             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+#             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+#         """
+#         # assert e.dtype == torch.float32
+#         e = e.to(torch.bfloat16)
+#         with amp.autocast(dtype=torch.float32):
+#             # assert e.dtype == torch.float32
+#             e = (self.modulation + e).chunk(6, dim=1)
+#         # assert e[0].dtype == torch.float32
+
+#         # self-attention
+#         y = self.self_attn(
+#             self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes,
+#             freqs)
+#         with amp.autocast(dtype=torch.float32):
+#             x = x + y * e[2]
+
+#         # cross-attention & ffn function
+#         def cross_attn_ffn(x, context, context_lens, e):
+#             x = x + self.cross_attn(self.norm3(x), context, context_lens)
+#             y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
+#             with amp.autocast(dtype=torch.float32):
+#                 x = x + y * e[5]
+#             return x
+
+#         x = cross_attn_ffn(x, context, context_lens, e)
+#         return x
+
+
 
 
 class Head(nn.Module):
@@ -582,7 +676,7 @@ class WanModel(ModelMixin, ConfigMixin):
             freqs=self.freqs,
             context=context,
             context_lens=context_lens)
-
+        
         for block in self.blocks:
             x = block(x=x, **kwargs)
 
