@@ -319,8 +319,8 @@ def apply_monkey_patch(
 
             WanSelfAttention.forward = ulysses_self_flash_attn_forward
 
-            # import torch.distributed.fsdp._runtime_utils
-            # torch.distributed.fsdp._runtime_utils._post_backward_hook = patched_post_backward_hook
+            import torch.distributed.fsdp._runtime_utils
+            torch.distributed.fsdp._runtime_utils._post_backward_hook = patched_post_backward_hook
             
             # WanI2VCrossAttention.forward = ulysses_cross_flash_attn_forward
         return
