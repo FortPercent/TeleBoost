@@ -127,7 +127,6 @@ outputs
 .history
 ./tensorwatch_data
 ./tensorboard_log
-*.json
 *.npy
 *.jpg
 *.png

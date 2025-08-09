@@ -186,34 +186,54 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             self.config.ref.log_prob_micro_batch_size //= self.device_mesh.size() // self.ulysses_sequence_parallel_size
             self.config.ref.log_prob_micro_batch_size_per_gpu = self.config.ref.log_prob_micro_batch_size
 
-    def apply_fsdp_checkpointing(self,model, no_split_modules, p=1):
-        # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
-        """apply activation checkpointing to model
-        returns None as model is updated directly
-        """
-        print("--> applying fdsp activation checkpointing...")
-        block_idx = 0
-        cut_off = 1 / 2
-        # when passing p as a fraction number (e.g. 1/3), it will be interpreted
-        # as a string in argv, thus we need eval("1/3") here for fractions.
-        p = eval(p) if isinstance(p, str) else p
+    # def apply_fsdp_checkpointing(self,model, no_split_modules, p=1):
+    #     # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
+    #     """apply activation checkpointing to model
+    #     returns None as model is updated directly
+    #     """
+    #     print("--> applying fdsp activation checkpointing...")
+    #     block_idx = 0
+    #     cut_off = 1 / 2
+    #     # when passing p as a fraction number (e.g. 1/3), it will be interpreted
+    #     # as a string in argv, thus we need eval("1/3") here for fractions.
+    #     p = eval(p) if isinstance(p, str) else p
 
-        def selective_checkpointing(submodule):
-            nonlocal block_idx
-            nonlocal cut_off
+    #     def selective_checkpointing(submodule):
+    #         nonlocal block_idx
+    #         nonlocal cut_off
 
-            if isinstance(submodule, no_split_modules):
-                block_idx += 1
-                if block_idx * p >= cut_off:
-                    cut_off += 1
-                    return True
-            return False
+    #         if isinstance(submodule, no_split_modules):
+    #             block_idx += 1
+    #             if block_idx * p >= cut_off:
+    #                 cut_off += 1
+    #                 return True
+    #         return False
 
-        apply_activation_checkpointing(
-            model,
-            checkpoint_wrapper_fn=non_reentrant_wrapper,
-            check_fn=selective_checkpointing,
-        )
+    #     apply_activation_checkpointing(
+    #         model,
+    #         checkpoint_wrapper_fn=non_reentrant_wrapper,
+    #         check_fn=selective_checkpointing,
+    #     )
+    def apply_fsdp_checkpointing(self,model, target_types, p=1.0):
+        # 1) 收集目标模块（按你希望的顺序）
+        import math
+        targets = [m for m in model.modules() if isinstance(m, target_types)]
+        k = math.ceil(len(targets) * float(p))
+        to_wrap = set(targets[:k])
+
+        # 2) non-reentrant 包装器
+        non_re_wrapper = partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
+
+        def check_fn(m):
+            return m in to_wrap
+
+        def wrapper_fn(m):
+            print("[CKPT NON-REENTRANT]", m.__class__.__name__)
+            return non_re_wrapper(m)
+
+        # 3) 应用
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import apply_activation_checkpointing
+        apply_activation_checkpointing(model, checkpoint_wrapper_fn=wrapper_fn, check_fn=check_fn)
         
     def _build_model_optimizer(
         self,
@@ -253,7 +273,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             torch_dtype = torch.float32 if self._is_actor else torch.bfloat16
         else:
             torch_dtype = PrecisionType.to_dtype(torch_dtype)
-
+        print("init",torch_dtype)
+        torch_dtype=torch.bfloat16
         # override model kwargs
         actor_model_config=GPT2Config.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
         # patch for kimi-vl
@@ -313,13 +334,14 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 #TODO:selective
                 from wan.modules.model import WanAttentionBlock
                 self.apply_fsdp_checkpointing(actor_module, WanAttentionBlock, 1.0)
+
             if self._is_lora:
                 print("Applying LoRA to actor module")
                 actor_module.enable_input_require_grads()
                 # Convert config to regular Python types before creating PEFT model
                 lora_config = {"task_type": TaskType.CAUSAL_LM, "r": self.config.model.lora_rank, "lora_alpha": self.config.model.lora_alpha, "target_modules": convert_to_regular_types(self.config.model.target_modules), "bias": "none"}
                 actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))
-
+        
         torch.distributed.barrier()
         if self.rank == 0:
             print_model_size(actor_module)
@@ -338,8 +360,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             buffer_dtype = torch.float32
 
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
-        print(fsdp_config.get("wrap_policy", None))
-        print("="*100)
+
         auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get("wrap_policy", None), is_lora=self.config.model.get("lora_rank", 0) > 0)
 
         if self._is_rollout and self.config.rollout.name == "hf":
@@ -371,6 +392,9 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 device_mesh=self.device_mesh,
                 forward_prefetch=self.config.actor.fsdp_config.forward_prefetch,
             )
+            from verl.utils.ulysses import register_cp_grad_reduce_hook
+            register_cp_grad_reduce_hook(actor_module_fsdp)
+            # print(f"{torch.distributed.get_rank()},after build fsdp")
         elif fsdp_strategy == "fsdp2":
             assert CPUOffloadPolicy is not None, "PyTorch version >= 2.4 is required for using fully_shard API (FSDP2)"
             mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=reduce_dtype, cast_forward_inputs=True)

@@ -32,7 +32,9 @@ from verl.utils.ulysses import (
     get_ulysses_sequence_parallel_group,
     get_ulysses_sequence_parallel_world_size,
     slice_input_tensor,
-    gather_outpus_and_unpad
+    gather_outpus_and_unpad,
+    diffusion_gather_outpus_and_unpad,
+    diffusion_slice_input_tensor_pad
 )
 
 
@@ -144,23 +146,25 @@ def patch_diffusion_for_ulysses_input_slicing(model: type):
     Applies a monkey patch to the `blocks.forward` method of a given diffusion model class
     to enable Ulysses sequence parallelism input slicing.
     """
-    from .wan import set_target_len, set_pad_size
 
     def _create_ulysses_wrapped_block_forward(original_forward):
         def ulysses_wrapped_block_forward(*args, **kwargs):
             x = kwargs.get("x")
-      
+            # freqs = kwargs.get("freqs")
+            # print("[freqs],xxxx",freqs.float().norm().item(),freqs.shape)
+            print("[x],xxxx",x.float().norm().item(),x.shape)
+            
             current_ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
             # x = torch.load("/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/output/0__fsdp_wrapped_module.blocks.0._checkpoint_wrapped_module._fsdp_wrapped_module.self_attn_input.pt")["input"][0]
             slice_now = x is not None and current_ulysses_sp_size > 1
             if slice_now:
-                total_seq_len = x.shape
-                pad_size = (current_ulysses_sp_size - total_seq_len[1] % current_ulysses_sp_size) % current_ulysses_sp_size
-                set_target_len(total_seq_len[1])
-                set_pad_size(pad_size)
-                x = torch.nn.functional.pad(x, (0, 0, 0, pad_size), value=0)
-                x_sliced = slice_input_tensor(x, dim=1, padding=False)
+                x_sliced = diffusion_slice_input_tensor_pad(x, dim=1, padding=True)
+                print("x",x_sliced.shape)
+                # no need to split head
+                # freqs_sliced = diffusion_slice_input_tensor_pad(freqs,dim=0,padding=True)
+                # print("freqs_sliced",freqs_sliced.shape)
                 kwargs["x"] = x_sliced
+                # kwargs["freqs"] = freqs_sliced
             try:
                 return original_forward(*args, **kwargs)
             finally:
@@ -171,23 +175,21 @@ def patch_diffusion_for_ulysses_input_slicing(model: type):
     # Monkey patch the forward method of blocks in the model class
     try:
         # 确保 model_class 实例有 .blocks 属性
-        # 所以我们要 monkey patch 的是 block 的 forward，而不是 model_class.blocks.forward
-        # 因此我们需要先实例化模型再做 patch，或者 patch ModuleList 中每个 block 的 forward
         new_forward=_create_ulysses_wrapped_block_forward(model.blocks[0].forward)
 
         model.blocks[0].forward = new_forward
 
-        print(f"Monkey patched {model}.blocks.forward for Ulysses SP input slicing.")
+        print(f"Monkey patched {type(model).__name__}.blocks.forward for Ulysses SP input slicing.")
     except Exception as e:
-        print(f"Failed to patch {model}: {e}")
+        print(f"Failed to patch {type(model).__name__}: {e}")
     
 
-def patch_diffusion_for_ulysses_head_gather(model: type):
+def patch_diffusion_for_ulysses_head_gather(module_class: type):
     """
     Applies a monkey patch to the `blocks.forward` method of a given diffusion model class
     to enable Ulysses sequence parallelism input slicing.
     """
-    from .wan import get_pad_size
+    from verl.utils.ulysses import get_pad_size
     def _create_ulysses_wrapped_block_forward(original_forward):
         print("begin to patch_diffusion_for_ulysses_head_gather")
         def ulysses_wrapped_block_forward(self,*args, **kwargs):
@@ -201,7 +203,7 @@ def patch_diffusion_for_ulysses_head_gather(model: type):
                 # x = torch.nn.functional.pad(x, (0, 0, 0, pad_size), value=0)
 
                 pad_size=get_pad_size()
-                x_sliced = gather_outpus_and_unpad(x,  gather_dim=1, unpad_dim=1, padding_size=pad_size)
+                x_sliced = diffusion_gather_outpus_and_unpad(x,  gather_dim=1, unpad_dim=1, padding_size=pad_size)
                 kwargs["x"] = x_sliced
 
             try:
@@ -213,15 +215,12 @@ def patch_diffusion_for_ulysses_head_gather(model: type):
 
     # Monkey patch the forward method of blocks in the model class
     try:
-        # 确保 model_class 实例有 .blocks 属性
-        # 所以我们要 monkey patch 的是 block 的 forward，而不是 model_class.blocks.forward
-        # 因此我们需要先实例化模型再做 patch，或者 patch ModuleList 中每个 block 的 forward
-        original_forward = model.Head.forward
-        model.Head.forward = _create_ulysses_wrapped_block_forward(original_forward)
+        original_forward = module_class.forward
+        module_class.forward = _create_ulysses_wrapped_block_forward(original_forward)
 
-        print(f"Monkey patched {model.__name__}.head.forward for Ulysses SP input slicing.")
+        print(f"Monkey patched {module_class.__name__}.forward for Ulysses SP input slicing.")
     except Exception as e:
-        print(f"Failed to patch {model.__name__}: {e}")
+        print(f"Failed to patch {module_class.__name__}: {e}")
 
 def patch_forward_with_backends(
     model: PreTrainedModel,
@@ -307,15 +306,22 @@ def apply_monkey_patch(
         return
 
     if model.config.model_type == "t2v":
-        # from wan.modules.model import WanModel
+        from verl.utils.ulysses import register_cp_grad_reduce_hook
+        from verl.utils.fsdp_utils import patched_post_backward_hook
+        from wan.modules.model import Head
         if ulysses_sp_size > 1:
             patch_diffusion_for_ulysses_input_slicing(model)
-            patch_diffusion_for_ulysses_head_gather(module)
+            patch_diffusion_for_ulysses_head_gather(Head)
+            # register_cp_grad_reduce_hook(model)
 
             from wan.modules.model import WanSelfAttention,WanI2VCrossAttention
             from .wan import ulysses_self_flash_attn_forward
 
             WanSelfAttention.forward = ulysses_self_flash_attn_forward
+
+            # import torch.distributed.fsdp._runtime_utils
+            # torch.distributed.fsdp._runtime_utils._post_backward_hook = patched_post_backward_hook
+            
             # WanI2VCrossAttention.forward = ulysses_cross_flash_attn_forward
         return
     # TODO: VLM models only, unify monkey patch to LLM models.
