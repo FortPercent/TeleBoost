@@ -318,34 +318,19 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
         # Build iterators.
         print("Building iterators.")
-        dl_type = args.dataloader_type
-
-        assert dl_type in ['single', 'cyclic', 'external']
-
-        def _get_iterator(dataloader_type, dataloader):
-            """Return dataset iterator."""
-            if dataloader_type == "single":
-                return iter(dataloader)
-            elif dataloader_type == "cyclic":
-                return iter(cyclic_iter(dataloader))
-            elif dataloader_type == "external":
-                # External dataloader is passed through. User is expected to define how to iterate.
-                return dataloader
-            else:
-                raise RuntimeError("unexpected dataloader type")
 
         if train_dataloader is not None:
-            train_data_iterator = _get_iterator(dl_type, train_dataloader)
+            train_data_iterator = iter(train_dataloader)
         else:
             train_data_iterator = None
 
         if valid_dataloader is not None:
-            valid_data_iterator = _get_iterator(dl_type, valid_dataloader)
+            valid_data_iterator = iter(valid_dataloader)
         else:
             valid_data_iterator = None
 
         if test_dataloader is not None:
-            test_data_iterator = _get_iterator(dl_type, test_dataloader)
+            test_data_iterator = iter(test_dataloader)
         else:
             test_data_iterator = None
 
@@ -426,12 +411,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
         if not args.skip_train:
             print_rank_0('training ...')
-
-            if args.dataloader_type == 'cyclic' and args.retro_project_dir:
-                assert args.retro_cyclic_train_iters is not None
-                args.train_iters = args.retro_cyclic_train_iters
-                print_rank_0("retro cyclic train iters : %d" % args.train_iters)
-
             iteration = 0
             if args.do_train and args.train_iters > 0:
                 iteration, num_floating_point_operations_so_far = self.train(

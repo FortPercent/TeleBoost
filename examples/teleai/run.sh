@@ -98,7 +98,7 @@ TRAINING_ARGS=(
     --bf16
     --lr 1e-5
     --lr-decay-style constant
-    --lr-warmup-fraction 0.02
+    --lr-warmup-fraction 0
     --recompute-granularity full 
     --recompute-method block 
     # --activation-offload
@@ -107,6 +107,7 @@ TRAINING_ARGS=(
     --no-rope-fusion
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
+    --data-parallel-random-init
 )
 
 MODEL_PARALLEL_ARGS=(
@@ -117,10 +118,8 @@ MODEL_PARALLEL_ARGS=(
     --consumer-models-num $N_MOE
 )
 DATA_ARGS=(
-    --dataset-type VastDataset
     --split 949,50,1
-    --dataloader-type single
-    --num-workers 8
+    --num-workers 2
     --config-path ${CONFIG_PATH}
 )
 

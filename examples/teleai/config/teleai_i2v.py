@@ -172,4 +172,11 @@ config = dict(
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
         ],
     ),
+    sampler=dict(
+        type="DefaultSampler",
+        shuffle=False,
+        seed=42,
+        drop_last=True,
+        infinite=True,
+    )
 )
