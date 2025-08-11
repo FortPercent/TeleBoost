@@ -52,8 +52,8 @@ model_mapping = {
     "parallelwanmodel": "wan_encoder",
     "wanmodel": "wan_encoder",
     "parallelteleaimodel": "teleai_encoder",
-    "teleaimodel": "teleai_encoder"
-
+    "teleaimodel": "teleai_encoder",
+    "causaldiffusion": "teleai_encoder"
 }
 
 def get_encoder_name(key):

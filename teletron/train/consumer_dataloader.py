@@ -264,6 +264,104 @@ class HunyuanOriginBatchLoader(BaseBatchLoader):
         
         return batch
 
+
+class CausalWanOriginalBatchLoader(BaseBatchLoader):
+    def _prepare_batch_on_rank_zero(self):
+        if self.data_iterator is None:
+            return None
+        
+        try:
+            data = next(self.data_iterator)
+        except StopIteration:
+            raise NotImplementedError("CausalWanModel")
+            return None # 返回 None 以向基类发出迭代结束的信号
+
+        batch = {
+            'latents': data["latents"].cuda(non_blocking=True),
+            'prompt_emb': data["prompt_emb"]['context'].cuda(non_blocking=True),
+            # 'image_emb': data["image_emb"], 
+        }
+        return batch
+
+class CausalWanBatchLoader(BaseBatchLoader):
+    def _prepare_batch_on_rank_zero(self):
+        if self.data_iterator is None:
+            return None
+        
+        try:
+            data = next(self.data_iterator)
+        except StopIteration:
+            raise NotImplementedError("CausalWanModel")
+            return None # 返回 None 以向基类发出迭代结束的信号
+
+        batch = {
+            'latents': data["latents"].cuda(non_blocking=True),
+            'prompt_emb': data["prompt_emb"].cuda(non_blocking=True),
+            'unprompt_emb': data["unprompt_emb"].cuda(non_blocking=True),
+        }
+        return batch
+
+class CausalDistBatchLoader(BaseBatchLoader):
+
+    def _prepare_batch_on_rank_zero(self):
+        if self.data_iterator is None:
+            return None
+        
+        # 1. 从数据迭代器获取原始数据（如果需要的话）
+        # data = next(self.data_iterator)
+        
+        # 2. 从 producer rank 接收 Tensors
+        comm_pair = get_comm_pair()
+        args = get_args()
+        tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
+        req = dist.irecv(tensors_info, comm_pair.producer)
+        req.wait()
+
+        batch = {}
+        # unpack
+        if args.distributed_vae:
+            start_dim = 0
+            intervals = [0]
+            print('start loder for')
+            for data_to_get in TeleaiEncoder.get_output_schema():
+                print('up')
+                dims = PROPERTY_DIMS[data_to_get]
+                data_size = 1
+                print(1)
+                num = 0
+                print(dims)
+                x = tensors_info[start_dim:start_dim + dims].tolist()
+                print(x)
+                for dim in tensors_info[start_dim:start_dim + dims].tolist():
+                    print(num)
+                    num+=1
+                    data_size *= dim 
+                start_dim += dims
+                print(2)
+                intervals.append(intervals[-1] + data_size)
+                print('down')
+            print('start loder req')
+            total_size = intervals[-1]
+            recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+            req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
+            req.wait()
+            print('scuceed loder req')
+            unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+            start_dim = 0
+            for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):
+                dims = PROPERTY_DIMS[data_to_get]
+                tensor_shape = tensors_info[start_dim:start_dim + dims].tolist()
+                reshaped_data = unpacked_data[i].view(*tensor_shape)
+                batch[data_to_get] = reshaped_data
+                start_dim += dims
+        else:
+            # 如果 distributed_vae 为 False，需要定义相应的行为
+            # 例如，返回空的或默认的 tensors
+            raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
+
+        
+        return batch
+    
 def create_batch_loader(args, data_iterator):
     model_name_lower = args.model.lower()
     is_distributed_vae = args.distributed_vae
@@ -287,6 +385,12 @@ def create_batch_loader(args, data_iterator):
         else:
             print("Info: Creating HunyuanOriginBatchLoader.")
             return HunyuanOriginBatchLoader(data_iterator)
-            
+    elif 'causal' in model_name_lower:
+        if is_distributed_vae:
+            print("Info: Creating CausalWanBatchLoader.")
+            return CausalDistBatchLoader(data_iterator)
+        else:
+            print("Info: Creating CausalWanOriginalBatchLoader.")
+            return CausalWanOriginalBatchLoader(data_iterator)
     else:
         raise ValueError(f"Unknown model name '{args.model_name}' for batch loader creation.")
