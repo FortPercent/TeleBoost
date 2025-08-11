@@ -5,8 +5,9 @@ import torch
 from teletron.train import parse_args
 from teletron.train.causal_trainer import CausalTrainer
 from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train.utils import get_batch, loss_func
+from teletron.train.utils import get_batch, loss_func, get_args
 from megatron.core import mpu
+from teletron.train.checkpoint import unwrap_model
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
@@ -138,6 +139,55 @@ def forward_step(data_iterator, model):
     # print("loss", loss)
     return [loss, loss_wo_w], loss_func
 
+def forward_step2(data_iterator, ddpmodel):
+    batch = next(data_iterator)
+    args = get_args()
+    device = torch.cuda.current_device()
+    dtype = torch.bfloat16 if args.mixed_precision else torch.float32
+    model = unwrap_model(ddpmodel)
+    accumulation_steps = getattr(model, "accumulation_steps", 1)
+
+    # Step 1: Get the next batch of text prompts
+    text_prompts = batch["prompt_emb"]
+    if not args.load_raw_video:  # precomputed latent
+        clean_latent = batch["latents"].to(device, dtype)
+    else:  # encode raw video to latent
+        frames = batch["frames"].to(device, dtype)
+        with torch.no_grad():
+            clean_latent = model.vae.encode_to_latent(frames).to(device, dtype)
+
+    clean_latent = clean_latent.permute(0, 2, 1, 3, 4)
+    image_latent = clean_latent[:, 0:1, ]
+
+    batch_size = len(text_prompts)
+    image_or_video_shape = clean_latent.shape
+    # Step 2: Extract the conditional infos
+    with torch.no_grad():
+        conditional_dict = model.text_encoder(text_prompts=text_prompts)
+
+        if not getattr(model, "unconditional_dict", None):
+            unconditional_dict = model.text_encoder(
+                text_prompts=[args.negative_prompt] * batch_size)
+            unconditional_dict = {k: v.detach() for k, v in unconditional_dict.items()}
+            model.unconditional_dict = unconditional_dict
+        else:
+            unconditional_dict = model.unconditional_dict
+
+    # Step 3: Train the generator
+    generator_loss, generator_loss_w, log_dict = model.generator_loss(
+        image_or_video_shape=image_or_video_shape,
+        conditional_dict=conditional_dict,
+        unconditional_dict=unconditional_dict,
+        clean_latent=clean_latent,
+        initial_latent=image_latent
+    )
+    generator_loss = generator_loss / accumulation_steps
+    generator_loss_w = generator_loss_w / accumulation_steps
+    
+    return [generator_loss, generator_loss_w], loss_func
+
+
+
 if __name__ == "__main__":
     # wait_for_debugger(0)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -146,4 +196,4 @@ if __name__ == "__main__":
     args = parse_args(extra_args=extra_args)
     # args.distributed_vae = None
     trainer = CausalTrainer(args)
-    trainer.pretrain(forward_step_func=forward_step)
+    trainer.pretrain(forward_step_func=forward_step2)
