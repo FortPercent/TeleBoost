@@ -1,7 +1,7 @@
 import random
 import torch
 import numpy as np
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, RandomSampler
 from megatron.core import mpu
 from teletron.utils import (
     get_args,

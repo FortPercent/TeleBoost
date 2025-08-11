@@ -4,6 +4,7 @@ from torchvision.transforms.functional import to_pil_image
 import numpy as np
 from einops import rearrange
 from collections import defaultdict
+from teletron.train.utils import get_args
 
 def forward_vae(images):
     images = images.to(self.vae.dtype)
@@ -29,7 +30,7 @@ def forward_vae(images):
     latents = (latents - latents_mean) * latents_std
     return latents
 
-def encode_prompt(prompter,prompt, positive=True):
+def encode_prompt(prompter, prompt, positive=True):
     prompt_emb = prompter.encode_prompt(
         prompt, positive=positive, device=torch.cuda.current_device()
     )
@@ -364,6 +365,17 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtyp
 @torch.no_grad
 def get_context(batch, prompter, dtype=torch.bfloat16):
     prompt_emb = encode_prompt(prompter, batch["struct_prompt"][0])
+    prompt_emb["context"] = prompt_emb["context"].to(
+            dtype=dtype, device=torch.cuda.current_device()
+    )
+    return prompt_emb["context"]
+
+
+@torch.no_grad
+def get_unprompt_emb(batch, prompter, dtype=torch.bfloat16):
+    args = get_args()
+    batch_size = args.micro_batch_size
+    prompt_emb = encode_prompt(prompter, [args.negative_prompt] * batch_size)
     prompt_emb["context"] = prompt_emb["context"].to(
             dtype=dtype, device=torch.cuda.current_device()
     )

@@ -214,19 +214,20 @@ def initialize_model_parallel_decorators(initialize_model_parallel):
         tensor_and_context_group_size: int = tensor_model_parallel_size * context_parallel_size
         num_tensor_and_context_groups: int = per_model_world_size  // tensor_and_context_group_size
 
-        for k in range(models_num):
-            this_start_rank = k* per_model_world_size
-            for i in range(num_tensor_and_context_groups):
-                start_rank  = i * tensor_and_context_group_size + this_start_rank
-                ranks = (start_rank, local_rank)
-                group = torch.distributed.new_group(
-                    ranks
-                )
-                if local_rank in ranks:
-                    if get_transformer_model_group() is not None:
-                        _DATA_TRANSMIT_GROUP = group 
-                    else:
-                        _DATA_TRANSMIT_GROUP.append(group)
+        # for k in range(models_num):
+        #     this_start_rank = k* per_model_world_size
+        #     for i in range(num_tensor_and_context_groups):
+        #         start_rank  = i * tensor_and_context_group_size + this_start_rank
+        #         ranks = (start_rank, local_rank)
+        #         print(ranks,'=========================')
+        #         group = torch.distributed.new_group(
+        #             ranks
+        #         )
+        #         if local_rank in ranks:
+        #             if get_transformer_model_group() is not None:
+        #                 _DATA_TRANSMIT_GROUP = group 
+        #             else:
+        #                 _DATA_TRANSMIT_GROUP.append(group)
 
         if get_transformer_model_group() is not None:
             print("**********start init MP**********************************")
