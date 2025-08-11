@@ -215,10 +215,15 @@ class CausalDiffusion(BaseModel):
             flow_pred.float(), training_target.float(), reduction='none'
         ).mean(dim=(2, 3, 4))
         loss = loss * self.scheduler.training_weight(timestep).unflatten(0, (batch_size, num_frame))
+        loss_w = loss
         loss = loss.mean()
+        loss_w = loss_w.mean()
 
         log_dict = {
             "x0": clean_latent.detach(),
             "x0_pred": x0_pred.detach()
         }
-        return loss, log_dict
+        return loss, loss_w, log_dict
+    
+    def set_input_tensor(self, x):
+        return None

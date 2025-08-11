@@ -198,7 +198,7 @@ class DiffusionTrainer:
                        f"checkpoint_model_{self.step:06d}", "model.pt"))
             print("Model saved to", os.path.join(self.output_path,
                   f"checkpoint_model_{self.step:06d}", "model.pt"))
-
+            
     def train_one_step(self, batch):
 
         if self.step % 20 == 0:
@@ -344,4 +344,168 @@ class CausalTrainer(Trainer):
     ):
         args = get_args()
         # cfg = core_transformer_config_from_args(args)
-        return build_model(args.model, args)
+        return CausalDiffusion(args, device=torch.cuda.current_device())
+    
+    # def get_model(self, model_type=ModelType.encoder_or_decoder, wrap_with_ddp=True):
+    #     args = get_args()
+    #     args.model_type = model_type
+    #     if mpu.get_pipeline_model_parallel_world_size() > 1 and \
+    #         args.virtual_pipeline_model_parallel_size is not None:
+    #         assert model_type != ModelType.encoder_and_decoder, \
+    #             "Interleaved schedule not supported for model with both encoder and decoder"
+    #         model = []
+    #         for i in range(args.virtual_pipeline_model_parallel_size):
+    #             mpu.set_virtual_pipeline_model_parallel_rank(i)
+    #             # Set pre_process and post_process only after virtual rank is set.
+    #             pre_process = mpu.is_pipeline_first_stage()
+    #             post_process = mpu.is_pipeline_last_stage()
+    #             this_model = self.model_provider(
+    #                 pre_process=pre_process,
+    #                 post_process=post_process
+    #             )
+    #             this_model.model_type = model_type
+    #             model.append(this_model)
+    #     else:
+    #         pre_process = mpu.is_pipeline_first_stage()
+    #         post_process = mpu.is_pipeline_last_stage()
+    #         add_encoder = True
+    #         add_decoder = True
+    #         if model_type == ModelType.encoder_and_decoder:
+    #             if mpu.get_pipeline_model_parallel_world_size() > 1:
+    #                 assert args.pipeline_model_parallel_split_rank is not None, \
+                        # "Split rank needs to be specified for model with both encoder and decoder"
+    #                 rank = mpu.get_pipeline_model_parallel_rank()
+    #                 split_rank = args.pipeline_model_parallel_split_rank
+    #                 world_size = mpu.get_pipeline_model_parallel_world_size()
+    #                 pre_process = rank == 0 or rank == split_rank
+    #                 post_process = (rank == (split_rank - 1)) or (
+    #                         rank == (world_size - 1))
+    #                 add_encoder = mpu.is_pipeline_stage_before_split()
+    #                 add_decoder = mpu.is_pipeline_stage_after_split()
+    #             model = self.model_provider(
+    #                 pre_process=pre_process,
+    #                 post_process=post_process,
+    #                 add_encoder=add_encoder,
+    #                 add_decoder=add_decoder)
+    #         else:
+    #             model = self.model_provider(
+    #                 pre_process=pre_process,
+    #                 post_process=post_process
+    #             )
+    #         model.model_type = model_type
+
+    #     if not isinstance(model, list):
+    #         model = [model]
+
+    #     # Set tensor model parallel attributes if not set.
+    #     # Only parameters that are already tensor model parallel have these
+    #     # attributes set for them. We should make sure the default attributes
+    #     # are set for all params so the optimizer can use them.
+    #     for model_module in model:
+    #         for param in model_module.parameters():
+    #             tensor_parallel.set_defaults_if_not_set_tensor_model_parallel_attributes(param)
+
+    #     # GPU allocation.
+    #     for model_module in model:
+    #         model_module.cuda(torch.cuda.current_device())
+
+    #     # Fp16 conversion.
+    #     if args.fp16 or args.bf16:
+    #         model = [Float16Module(module=model_module, config=model_module.config) for model_module in model]
+
+    #     if wrap_with_ddp:
+    #         config = get_model_config(model[0])
+    #         ddp_model = []
+    #         for model_chunk_idx, model_chunk in enumerate(model):
+    #             ddp_chunk = DDP(config,
+    #                             model_chunk,
+    #                             data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
+    #                             expert_data_parallel_group=mpu.get_data_modulo_expert_parallel_group(),
+    #                             accumulate_allreduce_grads_in_fp32=args.accumulate_allreduce_grads_in_fp32,
+    #                             overlap_grad_reduce=args.overlap_grad_reduce,
+    #                             use_distributed_optimizer=args.use_distributed_optimizer,
+    #                             # Turn off bucketing for model_chunk 2 onwards, since communication for these
+    #                             # model chunks is overlapped with compute anyway.
+    #                             disable_bucketing=(model_chunk_idx > 0),
+    #                             check_for_nan_in_grad=args.check_for_nan_in_loss_and_grad)
+    #             # 复制原模型的属性到 DDP 包装后的模型
+    #             for attr_name in dir(model_chunk):
+    #                 if not attr_name.startswith('__'):
+    #                     setattr(ddp_chunk, attr_name, getattr(model_chunk, attr_name))
+    #             ddp_model.append(ddp_chunk)
+    #         model = ddp_model
+
+    #         # Broadcast params from data parallel src rank to other data parallel ranks.
+    #         if args.data_parallel_random_init:
+    #             for model_module in model:
+    #                 model_module.broadcast_params()
+
+    #     return model
+    
+    
+    def setup_model_and_optimizer(self,  
+                                  model_type,
+                                  no_wd_decay_cond=None,
+                                  scale_lr_cond=None,
+                                  lr_mult=1.0):
+        args = get_args()
+        # timers = get_timers()
+        assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
+        # timers = get_timers()
+        if args.use_zero2:
+            model = self.get_model(model_type, wrap_with_ddp=False)
+        else:
+            model = self.get_model(model_type)
+        unwrapped_model = unwrap_model(model)
+        # kwargs = {}
+        # for f in dataclasses.fields(OptimizerConfig):
+        #     if hasattr(args, f.name):
+        #         kwargs[f.name] = getattr(args, f.name)
+        # config = OptimizerConfig(**kwargs)
+        # config.timers = None
+        print(len(model))
+        # optimizer = torch.optim.AdamW(
+        #     [param for param in model[0].generator.parameters()
+        #      if param.requires_grad],
+        #     lr=args.lr,
+        #     betas=(args.beta1, args.beta2),
+        #     weight_decay=args.weight_decay
+        # )
+        # 准备 AdamW 所需的参数
+        adamw_params = []
+        for model_module in model:
+            for param in model_module.parameters():
+                if param.requires_grad:
+                    # 这里可以根据 no_wd_decay_cond 和 scale_lr_cond 对参数进行分组
+                    # 为了简化，这里不做详细分组，直接将所有需要梯度的参数放入一个列表
+                    adamw_params.append(param)
+
+        # 创建 AdamW 优化器
+        optimizer = torch.optim.AdamW(
+            adamw_params,
+            lr=args.lr,  # 学习率
+            betas=(args.adam_beta1, args.adam_beta2),  # AdamW 的 beta1 和 beta2 参数
+            eps=args.adam_eps,  # AdamW 的 epsilon 参数
+            weight_decay=args.weight_decay  # 权重衰减
+        )
+
+
+        opt_param_scheduler = self.get_optimizer_param_scheduler(optimizer)
+        if args.load is not None or args.pretrained_checkpoint is not None:
+            args.iteration, args.num_floating_point_operations_so_far = self.load_checkpoint(
+                model, optimizer, opt_param_scheduler, strict=True)
+        else:
+            args.iteration = 0
+            args.num_floating_point_operations_so_far = 0
+            args.last_microbatch_size_index = None
+
+        # get model without FP16 and/or DDP wrappers
+        if args.iteration == 0 and len(unwrapped_model) == 1 \
+            and hasattr(unwrapped_model[0], 'init_state_dict_from_bert'):
+            print_rank_0("Initializing ICT from pretrained BERT model")
+            unwrapped_model[0].init_state_dict_from_bert()
+            if args.fp16:
+                optimizer.reload_model_params()
+
+        return model, optimizer, opt_param_scheduler
+    

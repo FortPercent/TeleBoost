@@ -229,7 +229,8 @@ class CausalWanSelfAttention(nn.Module):
         x = x.flatten(2)
         x = self.o(x)
         return x
-
+    def set_input_tensor(self, x):
+        return None
 
 class CausalWanAttentionBlock(nn.Module):
 
@@ -324,6 +325,9 @@ class CausalWanAttentionBlock(nn.Module):
 
         x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
         return x
+    
+    def set_input_tensor(self, x):
+        return None
 
 
 class CausalHead(nn.Module):
@@ -355,7 +359,9 @@ class CausalHead(nn.Module):
         e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
         x = (self.head(self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]))
         return x
-
+    
+    def set_input_tensor(self, x):
+        return None
 
 class CausalWanModel(ModelMixin, ConfigMixin):
     r"""
@@ -1017,3 +1023,5 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # init output layer
         nn.init.zeros_(self.head.head.weight)
+    def set_input_tensor(self, x):
+        return None
