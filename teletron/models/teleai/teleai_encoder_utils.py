@@ -501,7 +501,6 @@ def get_noise(batch, dtype=torch.bfloat16):
 
 @torch.no_grad
 def get_fake_latents(batch, vae, dtype=torch.bfloat16):
-    latents = batch["latents"]
     bsz, num_frames, video_channels, height, width = batch["images"].shape
     
     low_res_video = torch.nn.functional.interpolate(
@@ -519,7 +518,7 @@ def get_fake_latents(batch, vae, dtype=torch.bfloat16):
         tile_stride=(18, 16),
     ) # b c t h w
     
-    bsz, latent_channels, latent_frames, latent_height, latent_width = latents.shape
+    bsz, latent_channels, latent_frames, latent_height, latent_width = bsz, 16, (num_frames + 3) // 4, height // 8, width // 8
     fake_latents = torch.nn.functional.interpolate(
         rearrange(low_res_latent, "b c t h w -> (b t) c h w"),
         size=(latent_height, latent_width),
@@ -529,7 +528,7 @@ def get_fake_latents(batch, vae, dtype=torch.bfloat16):
     
     fake_latents = fake_latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
 
-    return fake_latents
+    return fake_latents # b, c, t, h, w
 
 @torch.no_grad
 def get_frame_interval(batch, dtype=torch.bfloat16):
