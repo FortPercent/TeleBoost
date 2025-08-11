@@ -1,13 +1,9 @@
-import argparse
 import os
-from omegaconf import OmegaConf
 import torch
 from teletron.train import parse_args
 from teletron.train.causal_trainer import CausalTrainer
-from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train.utils import get_batch, loss_func, get_args
-from megatron.core import mpu
-from teletron.train.checkpoint import unwrap_model
+from teletron.train.utils import loss_func, get_args
+import debugpy
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
@@ -18,6 +14,20 @@ def extra_args(parser):
     group.add_argument("--real-name", type=str, default="Wan2.1-T2V-14B")
     group.add_argument("--negative_prompt",type=str,
                        default="色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
+    group.add_argument("--timestep_shift",default=5.0)
+    group.add_argument("--model_kwargs",default={"timestep_shift": 5.0})
+    group.add_argument("--guidance_scale",default=5.0)
+    group.add_argument("--mixed_precision",default=True)
+    group.add_argument("--sink",default=False)
+    
+    group2 = parser.add_argument_group(title='encoder args')
+    group2.add_argument("--encoder_model_path", type=str, nargs = '+',default=
+                       ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
+                        '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
+                        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
+                       )
+    group2.add_argument("--encoder_tokenizer_path", type=str, default=
+                       "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
     # group.add_argument("--base_paths", type=str, nargs = '+',
     #                    default=['/nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents',]
     #                    )
@@ -27,37 +37,8 @@ def extra_args(parser):
     # group.add_argument("--logdir", type=str, default="wan_experiments_test", help="Path to the directory to save logs")
     # group.add_argument("--test_valid", type=str, default="")
     # group.add_argument("--moe-step-factor-list", type=float, action='append')
-    # group = parser.add_argument_group(title='encoder args')
-    # group.add_argument("--encoder_model_path", type=str, nargs = '+',default=
-    #                    ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
-    #                     '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
-    #                     '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
-    #                    )
-    # group.add_argument("--encoder_tokenizer_path", type=str, default=
-    #                    "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
-    
+
     return parser
-
-# def main():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--config_path", type=str, required=True)
-#     # parser.add_argument("--save", action="store_true")
-#     parser.add_argument("--save", type=str, default="wan_experiments_test", help="Path to the directory to save logs")
-
-#     args = parser.parse_args()
-
-#     config = OmegaConf.load(args.config_path)
-#     default_config = OmegaConf.load("/nvfile-heatstorage/teleai-infra/kaikai/dreamingforcing/WorldVideo/configs/default_config.yaml")
-#     config = OmegaConf.merge(default_config, config)
-#     trainer = DiffusionTrainer(config)
-#     # breakpoint()
-#     trainer.train()
-
-
-
-
-import torch.distributed as dist
-import debugpy
 
 def wait_for_debugger(rank_to_debug=0, port=5678):
     rank = int(os.environ.get("RANK", "0"))
@@ -68,132 +49,90 @@ def wait_for_debugger(rank_to_debug=0, port=5678):
         debugpy.wait_for_client()
         print(f"[Rank {rank}] Debugger attached.")
 
-def forward_step(data_iterator, model):
-    flow_scheduler = model.scheduler
-    prompt_emb = {}
+def forward_step(data_iterator, ddpmodel):
+    # print('start get next')
     batch = next(data_iterator)
-    clean_latent = batch["latents"]
-    
-    noise = torch.randn_like(clean_latent) if "noise" not in batch else batch["noise"]
-    batch_size, num_frame = clean_latent.shape[:2]
-    index = model._get_timestep(
-        0,
-        flow_scheduler.num_train_timesteps,
-        clean_latent.shape[0],
-        clean_latent.shape[1],
-        model.num_frame_per_block,
-        uniform_timestep=False
-    )
-    timestep = flow_scheduler.timesteps[index].to(dtype=model.dtype, device=model.device)
-    
-    def broadcast_timesteps(input: torch.Tensor):
-        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
-        if mpu.get_tensor_context_parallel_world_size() > 1:
-            dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
-
-    broadcast_timesteps(timestep)
-    broadcast_timesteps(noise)
-    prompt_emb["context"] = batch["context"]
-    prompt_emb["unconditional_dict"]= batch["unconditional_dict"] if "unconditional_dict"  in batch else None
-    training_target = flow_scheduler.training_target(clean_latent, noise, timestep)
-    
-    noisy_latents = flow_scheduler.add_noise(
-        clean_latent.flatten(0, 1),
-        noise.flatten(0, 1),
-        timestep.flatten(0, 1)
-    ).unflatten(0, (batch_size, num_frame))
-    
-    if model.noise_augmentation_max_timestep > 0:
-        index_clean_aug = model._get_timestep(
-            0,
-            model.noise_augmentation_max_timestep,
-            clean_latent.shape[0],
-            clean_latent.shape[1],
-            model.num_frame_per_block,
-            uniform_timestep=False
-        )
-        timestep_clean_aug = flow_scheduler.timesteps[index_clean_aug].to(dtype=model.dtype, device=model.device)
-        clean_latent_aug =flow_scheduler.add_noise(
-            clean_latent.flatten(0, 1),
-            noise.flatten(0, 1),
-            timestep_clean_aug.flatten(0, 1)
-        ).unflatten(0, (batch_size, num_frame))
-    else:
-        clean_latent_aug = clean_latent
-        timestep_clean_aug = None
-    
-    output_tensor_list = model(
-            noisy_latents=noisy_latents, 
-            timestep=timestep, 
-            conditional_dict=prompt_emb["context"],
-            unconditional_dict=prompt_emb["unconditional_dict"],
-            clean_latent_aug=clean_latent_aug,
-            timestep_clean_aug=timestep_clean_aug
-        )
-    
-    loss = torch.nn.functional.mse_loss(
-        output_tensor_list.float(), training_target.float()
-    )
-    loss_wo_w = loss
-    loss = loss * flow_scheduler.flow_scheduler.training_weight(timestep)
-    # print("loss", loss)
-    return [loss, loss_wo_w], loss_func
-
-def forward_step2(data_iterator, ddpmodel):
-    batch = next(data_iterator)
+    # print('suceed get next')
     args = get_args()
     device = torch.cuda.current_device()
     dtype = torch.bfloat16 if args.mixed_precision else torch.float32
-    model = unwrap_model(ddpmodel)
-    accumulation_steps = getattr(model, "accumulation_steps", 1)
-
-    # Step 1: Get the next batch of text prompts
-    text_prompts = batch["prompt_emb"]
-    if not args.load_raw_video:  # precomputed latent
-        clean_latent = batch["latents"].to(device, dtype)
-    else:  # encode raw video to latent
-        frames = batch["frames"].to(device, dtype)
-        with torch.no_grad():
-            clean_latent = model.vae.encode_to_latent(frames).to(device, dtype)
-
+    accumulation_steps = getattr(ddpmodel, "accumulation_steps", 1)
+    
+    clean_latent = batch["latents"].to(device, dtype)
     clean_latent = clean_latent.permute(0, 2, 1, 3, 4)
     image_latent = clean_latent[:, 0:1, ]
+    batch_size = args.micro_batch_size
+    image_or_video_shape = args.image_or_video_shape
 
-    batch_size = len(text_prompts)
-    image_or_video_shape = clean_latent.shape
-    # Step 2: Extract the conditional infos
+    from teletron.utils.aux_func import get_attr_wrapped_model
     with torch.no_grad():
-        conditional_dict = model.text_encoder(text_prompts=text_prompts)
-
-        if not getattr(model, "unconditional_dict", None):
-            unconditional_dict = model.text_encoder(
+        conditional_dict = {'prompt_embeds':batch["prompt_emb"][0]}
+        if not getattr(ddpmodel, "unconditional_dict", None):
+            text_encoder = get_attr_wrapped_model(ddpmodel,"text_encoder")
+            unconditional_dict = text_encoder(
                 text_prompts=[args.negative_prompt] * batch_size)
             unconditional_dict = {k: v.detach() for k, v in unconditional_dict.items()}
-            model.unconditional_dict = unconditional_dict
+            ddpmodel.unconditional_dict = unconditional_dict
         else:
-            unconditional_dict = model.unconditional_dict
-
-    # Step 3: Train the generator
-    generator_loss, generator_loss_w, log_dict = model.generator_loss(
+            unconditional_dict = ddpmodel.unconditional_dict
+    # print(f'conditional_dict:{conditional_dict["prompt_embeds"].shape}')
+    # print(f'unconditional_dict:{unconditional_dict["prompt_embeds"].shape}')
+    # print(f'clean_latent:{clean_latent.shape}')
+    generator_loss = get_attr_wrapped_model(ddpmodel,"generator_loss")
+    generator_loss, generator_loss_w, log_dict = generator_loss(
         image_or_video_shape=image_or_video_shape,
         conditional_dict=conditional_dict,
         unconditional_dict=unconditional_dict,
         clean_latent=clean_latent,
-        initial_latent=image_latent
+        initial_latent=image_latent,
     )
     generator_loss = generator_loss / accumulation_steps
     generator_loss_w = generator_loss_w / accumulation_steps
     
     return [generator_loss, generator_loss_w], loss_func
 
+# def forward_step2(data_iterator, ddpmodel):
+#     batch = next(data_iterator)
+#     args = get_args()
+#     device = torch.cuda.current_device()
+#     dtype = torch.bfloat16 if args.mixed_precision else torch.float32
+#     accumulation_steps = getattr(ddpmodel, "accumulation_steps", 1)
+    
+#     clean_latent = batch["latents"].to(device, dtype)
+#     clean_latent = clean_latent.permute(0, 2, 1, 3, 4)
+#     image_latent = clean_latent[:, 0:1, ]
+#     image_or_video_shape = args.image_or_video_shape
 
+#     from teletron.utils.aux_func import get_attr_wrapped_model
+#     with torch.no_grad():
+#         conditional_dict = {'prompt_embeds':batch["prompt_emb"][0]}
+#         if not getattr(ddpmodel, "unconditional_dict", None):
+#             unconditional_dict = {'prompt_embeds':batch["unprompt_emb"][0]}
+#             ddpmodel.unconditional_dict = unconditional_dict
+#         else:
+#             unconditional_dict = ddpmodel.unconditional_dict
+#     print(f'conditional_dict:{conditional_dict["prompt_embeds"].shape}')
+#     print(f'unconditional_dict:{unconditional_dict["prompt_embeds"].shape}')
+#     print(f'clean_latent:{clean_latent.shape}')
+#     generator_loss = get_attr_wrapped_model(ddpmodel,"generator_loss")
+#     generator_loss, generator_loss_w, log_dict = generator_loss(
+#         image_or_video_shape=image_or_video_shape,
+#         conditional_dict=conditional_dict,
+#         unconditional_dict=unconditional_dict,
+#         clean_latent=clean_latent,
+#         initial_latent=image_latent,
+#     )
+#     generator_loss = generator_loss / accumulation_steps
+#     generator_loss_w = generator_loss_w / accumulation_steps
+    
+#     return [generator_loss, generator_loss_w], loss_func
 
 if __name__ == "__main__":
-    # wait_for_debugger(0)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    # main()
     args = parse_args(extra_args=extra_args)
-    # args.distributed_vae = None
+    # if use ode_init：
+    # args.generator_ckpt = '/nvfile-heatstorage/teleai-infra/kaikai/checkpoints/ode_init.pt'
+    # args.distributed_vae = False
     trainer = CausalTrainer(args)
-    trainer.pretrain(forward_step_func=forward_step2)
+    trainer.pretrain(forward_step_func=forward_step)

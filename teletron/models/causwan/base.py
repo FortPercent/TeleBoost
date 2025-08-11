@@ -1,15 +1,17 @@
 from torch import nn
 import torch
 from teletron.models.causwan.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
-
+from teletron.utils import get_args, print_rank_0
 
 class BaseModel(nn.Module):
-    def __init__(self, args, device):
+    def __init__(self, config, device):
         super().__init__()
+        args = get_args()
         self._initialize_models(args, device)
 
-        self.device = device
+        self.device = torch.cuda.current_device()
         self.args = args
+        self.config = config
         self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
         if hasattr(args, "denoising_step_list"):
             self.denoising_step_list = torch.tensor(args.denoising_step_list, dtype=torch.long)
@@ -59,7 +61,7 @@ class BaseModel(nn.Module):
                 min_timestep,
                 max_timestep,
                 [batch_size, 1],
-                device=self.device,
+                device=torch.cuda.current_device(),
                 dtype=torch.long
             ).repeat(1, num_frame)
             return timestep
@@ -68,10 +70,11 @@ class BaseModel(nn.Module):
                 min_timestep,
                 max_timestep,
                 [batch_size, num_frame],
-                device=self.device,
+                device=torch.cuda.current_device(),
                 dtype=torch.long
             )
             # make the noise level the same within every block
+            # print_rank_0(f'timestep:{timestep}{timestep.shape}')
             if self.independent_first_frame:
                 # the first frame is always kept the same
                 timestep_from_second = timestep[:, 1:]
@@ -88,6 +91,46 @@ class BaseModel(nn.Module):
                 timestep = timestep.reshape(timestep.shape[0], -1)
             return timestep
 
+    def _get_dftimestep(
+            self,
+            min_timestep: int,
+            max_timestep: int,
+            batch_size: int,
+            num_frame: int,
+            num_frame_per_block: int,
+    ) -> torch.Tensor:
+        """
+        Randomly generate a timestep tensor based on the generator's task type. It uniformly samples a timestep
+        from the range [min_timestep, max_timestep], and returns a tensor of shape [batch_size, num_frame].
+        - If uniform_timestep, it will use the same timestep for all frames.
+        - If not uniform_timestep, it will use a different timestep for each block.
+        """
+        dftimestep = torch.randint(
+            min_timestep,
+            max_timestep,
+            [1,1],
+            device=torch.cuda.current_device(),
+            dtype=torch.long
+        )
+        # print_rank_0(f'timestep int:{dftimestep}')
+        timestep = dftimestep.repeat(batch_size, num_frame)
+        # print_rank_0(f'timestep:{timestep}{timestep.shape}')
+        # make the noise level the same within every block
+        if self.independent_first_frame:
+            # the first frame is always kept the same
+            timestep_from_second = timestep[:, 1:]
+            timestep_from_second = timestep_from_second.reshape(
+                timestep_from_second.shape[0], -1, num_frame_per_block)
+            timestep_from_second[:, :, 1:] = timestep_from_second[:, :, 0:1]
+            timestep_from_second = timestep_from_second.reshape(
+                timestep_from_second.shape[0], -1)
+            timestep = torch.cat([timestep[:, 0:1], timestep_from_second], dim=1)
+        else:
+            timestep = timestep.reshape(
+                timestep.shape[0], -1, num_frame_per_block)
+            timestep[:, :, 1:] = timestep[:, :, 0:1]
+            timestep = timestep.reshape(timestep.shape[0], -1)
+        return dftimestep[0,0] ,timestep
 
 # class SelfForcingModel(BaseModel):
 #     def __init__(self, args, device):

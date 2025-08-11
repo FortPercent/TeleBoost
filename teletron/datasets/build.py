@@ -8,7 +8,7 @@ from .clip_dataset import ClipDataset
 from .variable_clip_dataset import VariableClipDataset
 from .variable_image_dataset import VariableImageDataset
 from .variable_mix_dataset import VariableMixDataset
-from .tensor_dataset import TensorDataset
+from .tensor_dataset import TensorDataset #,CausalDataset
 import torch
 from megatron.core import mpu
 from .samplers import build_sampler 
@@ -37,6 +37,7 @@ DATASETS.register_module(VariableClipDataset)
 DATASETS.register_module(VariableImageDataset)
 DATASETS.register_module(VariableMixDataset)
 DATASETS.register_module(TensorDataset)
+# DATASETS.register_module(CausalDataset)
 
 
 def build_dataset(params_or_type, *args, **kwargs):
@@ -95,7 +96,13 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         valid_ds = None
         test_ds = None
         #     pass
-
+    elif args.dataset_type == "ClipDataset":
+        global_config = set_config()
+        train_ds_config = global_config.dataloaders.train
+        train_ds = build_dataset(train_ds_config.dataset)
+        valid_ds = None
+        test_ds = None
+        
     elif args.dataset_type == "BucketDataset": 
         global_config = set_config()
         assert global_config.sampler.type == "BucketVariableBatchSampler"

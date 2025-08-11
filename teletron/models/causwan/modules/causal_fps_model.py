@@ -1,5 +1,5 @@
-from teletron.models.causwan.modules.attention import attention
-from teletron.models.causwan.modules.model import (
+from .attention import attention
+from .model import (
     WanRMSNorm,
     rope_apply,
     WanLayerNorm,
@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch
 import math
 import torch.distributed as dist
+import gc
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
@@ -23,8 +24,7 @@ import torch.distributed as dist
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
-
-def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
+def causal_fps_rope_apply(x, grid_sizes, freqs, start_frame=0):
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -37,10 +37,10 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
         seq_len = f * h * w
 
         # precompute multipliers
-        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
+        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float32).reshape(
             seq_len, n, -1, 2))
         freqs_i = torch.cat([
-            freqs[0][start_frame:start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1),
+            freqs[0][start_frame].view(f, 1, 1, -1).expand(f, h, w, -1),
             freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
             freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
         ],
@@ -53,7 +53,6 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
         # append to collection
         output.append(x_i)
     return torch.stack(output).type_as(x)
-
 
 class CausalWanSelfAttention(nn.Module):
 
@@ -192,45 +191,43 @@ class CausalWanSelfAttention(nn.Module):
                 )[:, :, :-padded_length].transpose(2, 1)
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
-            current_start_frame = current_start // frame_seqlen
-            # print(x.shape, q.shape, k.shape)
-            # print(grid_sizes, current_start, cache_start, frame_seqlen, current_start_frame)
-            roped_query = causal_rope_apply(
+            current_start_frame = [i // 1560 for i in current_start]
+
+            roped_query = causal_fps_rope_apply(
                 q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
-            roped_key = causal_rope_apply(
+
+            roped_key = causal_fps_rope_apply(
                 k, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
 
-            current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
-            
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
-
-            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
-            local_start_index = local_end_index - num_new_tokens
-
-            # print('local_start_index, local_end_index: ', local_start_index, local_end_index)
-            # print('roped_query: ', roped_query.shape)
-
-            kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-            kv_cache["v"][:, local_start_index:local_end_index] = v
             
-            # print('kv_cache: ', kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index].shape)
+            frame_seqlen = 1560
+            current_start_list = current_start.tolist() if hasattr(current_start, 'tolist') else current_start
+
+            for i, start in enumerate(current_start_list):
+                s = i * frame_seqlen
+                end = start + frame_seqlen
+                s_end = s + frame_seqlen
+                
+                kv_cache["k"][:, start:end].copy_(roped_key[:, s:s_end])
+                kv_cache["v"][:, start:end].copy_(v[:, s:s_end])
+
+            kv_cache["attention_vis_index"] = list(set(kv_cache["attention_vis_index"] + current_start))
+            all_indices = [idx for start in kv_cache["attention_vis_index"] for idx in range(start, start + frame_seqlen)]
+
             x = attention(
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                kv_cache["k"][:, all_indices],
+                kv_cache["v"][:, all_indices]
             )
-            kv_cache["global_end_index"].fill_(current_end)
-            kv_cache["local_end_index"].fill_(local_end_index)
 
         # output
         x = x.flatten(2)
         x = self.o(x)
         return x
-    def set_input_tensor(self, x):
-        return None
+
 
 class CausalWanAttentionBlock(nn.Module):
 
@@ -325,9 +322,6 @@ class CausalWanAttentionBlock(nn.Module):
 
         x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
         return x
-    
-    def set_input_tensor(self, x):
-        return None
 
 
 class CausalHead(nn.Module):
@@ -359,11 +353,9 @@ class CausalHead(nn.Module):
         e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
         x = (self.head(self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]))
         return x
-    
-    def set_input_tensor(self, x):
-        return None
 
-class CausalWanModel(ModelMixin, ConfigMixin):
+
+class CausalFPSWanModel(ModelMixin, ConfigMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
     """
@@ -489,18 +481,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         # initialize weights
         self.init_weights()
 
-        self.gradient_checkpointing = False
+        self.gradient_checkpointing = True
 
         self.block_mask = None
 
         self.num_frame_per_block = 1
         self.independent_first_frame = False
 
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        self.gradient_checkpointing = value
-    # def _set_gradient_checkpointing(self, enable, gradient_checkpointing_func, module=None, value=False):
-    #     self.gradient_checkpointing = enable
+    def _set_gradient_checkpointing(self, enable, gradient_checkpointing_func, module=None, value=False):
+        self.gradient_checkpointing = enable
 
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
@@ -624,99 +613,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
 
         return block_mask
-    
-    @staticmethod
-    def _prepare_fps_forcing_mask(
-        device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1,
-        clean_frame_step_map: list[int] = None,
-        noise_frame_step_map: list[int] = None,
-        debug=False
-    ) -> "BlockMask":
-        """
-        Prepare attention mask for FPS-level frame generation with teacher forcing.
-        
-        Layout: [clean_0 ... clean_N] [noise_0 ... noise_N] [padding]
-        
-        Attention rules:
-        - clean tokens: can attend to clean tokens with step <= current_step
-        - noise tokens: can attend to noise tokens with step == current_step 
-                    OR clean tokens with step < current_step
-        """
-        
-        if clean_frame_step_map is None:
-            clean_frame_step_map = list(range(num_frames))
-        if noise_frame_step_map is None:
-            noise_frame_step_map = clean_frame_step_map[:]
 
-        assert len(clean_frame_step_map) == num_frames
-        assert len(noise_frame_step_map) == num_frames
-
-        total_length = num_frames * frame_seqlen * 2
-        padded_length = math.ceil(total_length / 128) * 128 - total_length
-
-        # Initialize step and region mappings for valid tokens only
-        step_id = torch.zeros(total_length + padded_length, device=device, dtype=torch.long) - 1
-        region_id = torch.zeros(total_length + padded_length, device=device, dtype=torch.long) - 1  # 0=clean, 1=noise
-
-        # Map clean frames: tokens [0, num_frames * frame_seqlen)
-        for f in range(num_frames):
-            start, end = f * frame_seqlen, (f + 1) * frame_seqlen
-            step_id[start:end] = clean_frame_step_map[f]
-            region_id[start:end] = 0
-
-        # Map noise frames: tokens [num_frames * frame_seqlen, 2 * num_frames * frame_seqlen)
-        offset = num_frames * frame_seqlen
-        for f in range(num_frames):
-            start, end = offset + f * frame_seqlen, offset + (f + 1) * frame_seqlen
-            step_id[start:end] = noise_frame_step_map[f]
-            region_id[start:end] = 1
-
-        def attention_mask(b, h, q_idx, kv_idx):
-            q_step, kv_step = step_id[q_idx], step_id[kv_idx]
-            q_reg, kv_reg = region_id[q_idx], region_id[kv_idx]
-
-            # Self-attention always allowed
-            eye = (q_idx == kv_idx)
-            
-            # 计算 kv token 是否来自最后一列 clean (frame 20)
-            # last_clean_frame_start = 20 * frame_seqlen
-            # last_clean_frame_end = 21 * frame_seqlen
-            # is_last_clean_frame = (kv_idx >= last_clean_frame_start) & (kv_idx < last_clean_frame_end)
-
-            last_two_clean_start = 19 * frame_seqlen
-            last_clean_end = 21 * frame_seqlen
-            is_last_two_clean = (kv_idx >= last_two_clean_start) & (kv_idx < last_clean_end)
-            
-            # Step 2 tokens 不能看到最后一列 clean
-            is_step2_query = (q_step == 2)
-            # step2_blocking_rule = is_step2_query & is_last_clean_frame
-            step2_blocking_rule = is_step2_query & is_last_two_clean
-            
-            # Original attention rules
-            clean_rule = (q_reg == 0) & (kv_reg == 0) & (kv_step <= q_step)
-            noise_rule = (q_reg == 1) & (
-                ((kv_reg == 1) & (kv_step == q_step)) |  # current step noise
-                ((kv_reg == 0) & (kv_step < q_step))     # previous step clean
-            )
-            
-            # Apply blocking rule: remove attention to last clean frame for step 2 queries
-            allowed_attention = (eye | clean_rule | noise_rule) & (~step2_blocking_rule)
-        
-            return allowed_attention
-
-        block_mask = create_block_mask(
-            attention_mask, B=None, H=None,
-            Q_LEN=total_length + padded_length,
-            KV_LEN=total_length + padded_length,
-            _compile=False, device=device
-        )
-
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            print(block_mask)
-
-        return block_mask
-    
     @staticmethod
     def _prepare_blockwise_causal_attn_mask_i2v(
         device: torch.device | str, num_frames: int = 21,
@@ -852,6 +749,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
+        #将需要的cond加到context里
         # arguments
         kwargs = dict(
             e=e0,
@@ -944,35 +842,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 if self.independent_first_frame:
                     raise NotImplementedError()
                 else:
-                    # # for casual next-block generation
-                    # self.block_mask = self._prepare_teacher_forcing_mask(
-                    #     device, num_frames=x.shape[2],
-                    #     frame_seqlen=x.shape[-2] * x.shape[-1] // (self.patch_size[1] * self.patch_size[2]),
-                    #     num_frame_per_block=self.num_frame_per_block
-                    # )
-                    
-                    # for casual next-fps generation
-                    # clean_steps = [0, 0, 0, 0, 0, 1, 4, 3, 4, 2, 4, 3, 4, 1, 4, 3, 4, 2, 4, 3, 1]
-                    # clean_steps = [0, 0, 0, 0, 1, 3, 3, 3, 2, 4, 4, 4, 1, 5, 5, 5, 2, 6, 6, 6, 1]
-                    # clean_steps = [0, 0, 1, 2, 2, 2, 2, 3, 3, 3, 3, 1, 4, 4, 4, 4, 5, 5, 5, 5, 1]
-                    # clean_steps = [0, 0, 1, 2, 2, 2, 2, 4, 4, 4, 4, 6, 5, 5, 5, 5, 3, 3, 3, 3, 1]
-                    # clean_steps = [0, 0, 1, 2, 3, 4, 5, 5, 4, 2, 1, 1, 2, 4, 5, 5, 4, 3, 2, 1, 1]
-                    # clean_steps = [0, 0, 1, 2, 2, 3, 3, 4, 3, 2, 1, 1, 2, 3, 4, 3, 3, 2, 2, 1, 1]
-                    # clean_steps = [0, 6, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 2, 2, 2]
-                    # clean_steps = [0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1]
-                    # clean_steps = [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1]
-                    # clean_steps = [0, 0, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 1]
-                    # clean_steps = [0, 0, 0, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 1, 1]
-                    clean_steps = [0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 3, 3, 3, 3, 3, 3, 1, 1]
-
-                    noise_steps = clean_steps.copy()
-
-                    self.block_mask = self._prepare_fps_forcing_mask(
+                    self.block_mask = self._prepare_teacher_forcing_mask(
                         device, num_frames=x.shape[2],
                         frame_seqlen=x.shape[-2] * x.shape[-1] // (self.patch_size[1] * self.patch_size[2]),
-                        num_frame_per_block=1,
-                        clean_frame_step_map=clean_steps,
-                        noise_frame_step_map=noise_steps,
+                        num_frame_per_block=self.num_frame_per_block
                     )
             else:
                 if self.independent_first_frame:
@@ -1140,5 +1013,3 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # init output layer
         nn.init.zeros_(self.head.head.weight)
-    def set_input_tensor(self, x):
-        return None

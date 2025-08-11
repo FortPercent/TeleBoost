@@ -72,17 +72,18 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
     ):
         self.initialize_megatron(args)
         set_jit_fusion_options()
-        # transformer_group = get_transformer_model_group()
-        # if transformer_group is None:            
-        #     producer_process(
-        #         rank=dist.get_rank(), 
-        #         world_size=dist.get_world_size(),
-        #         encoder_name=get_encoder_name(args.model),
-        #         device=torch.cuda.current_device(),
-        #         build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
-        #         train_ds=None,
-        #     )
-        #     exit()        
+        # if args.distributed_vae:
+        #     transformer_group = get_transformer_model_group()
+        #     if transformer_group is None:            
+        #         producer_process(
+        #             rank=dist.get_rank(), 
+        #             world_size=dist.get_world_size(),
+        #             encoder_name=get_encoder_name(args.model),
+        #             device=torch.cuda.current_device(),
+        #             build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+        #             train_ds=None,
+        #         )
+        #         exit()        
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
                                         dtype=torch.double,
@@ -104,7 +105,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             create_batch_loader(args, ds) if ds is not None else None 
                     for ds in dataiters
                 ]
-
         self.config = get_model_config(self.model[0])
 
     def setup_model_and_optimizer(self,  
@@ -143,6 +143,22 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             args.iteration = 0
             args.num_floating_point_operations_so_far = 0
             args.last_microbatch_size_index = None
+            print_rank_0("Not Any Loading pretrained generator")
+        if getattr(args, "generator_ckpt", False):
+            print_rank_0(f"Loading pretrained ode from {args.generator_ckpt}")
+            state_dict = torch.load(args.generator_ckpt, map_location="cpu",weights_only=False)
+            if "generator" in state_dict:
+                print_rank_0('load ode generator')
+                state_dict = state_dict["generator"]
+            elif "model" in state_dict:
+                print_rank_0('load ode model')
+                state_dict = state_dict["model"]
+
+            model[0].module.generator.load_state_dict(
+                state_dict, strict=False
+            )
+        else:
+            print_rank_0("Not Any Loading pretrained ode")
 
         # get model without FP16 and/or DDP wrappers
         if args.iteration == 0 and len(unwrapped_model) == 1 \
@@ -392,6 +408,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
     ):
         args = get_args()
         if args.distributed_vae:
+            print('dist')
             consumer_config = torch.zeros(
                 (3), dtype=torch.int64, device=torch.cuda.current_device()
             )
@@ -400,11 +417,16 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             consumer_config[2] = args.consumed_valid_samples
 
             from teletron.core.parallel_state import get_comm_pair
+            print('comm_pair out')
             comm_pair = get_comm_pair()
+            print('comm_pair get')
+            print(consumer_config)
 
             if comm_pair is not None:
+                print('req out', comm_pair.producer)
                 req = dist.isend(tensor=consumer_config, dst=comm_pair.producer, tag=0)
                 req.wait()
+                print('req get')
         print_rank_0('done with setup ...')
 
         if not args.skip_train:
@@ -504,7 +526,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         num_microbatches = get_num_microbatches()
         eval_duration = 0.0
         eval_iterations = 0
-
+        # print(1)
         if args.consumer_profile:
             prof_save_path = os.path.join(args.profile_path, f"consumer/rank_{dist.get_rank()}.json")
             ensure_directory_exists(prof_save_path)
@@ -517,7 +539,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 on_trace_ready=trace_handler,
                 record_shapes=True
             )
-
+        # print(2)
         while iteration < args.train_iters:
             if args.consumer_profile and iteration == args.profile_step_start:
                 prof.start()
@@ -580,8 +602,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             if args.log_params_norm:
                 params_norm = calc_params_l2_norm(model)
 
-            # # if iteration % args.log_interval == 0:
-            # #     track_e2e_metrics()
+            # if iteration % args.log_interval == 0:
+            #     track_e2e_metrics()
 
             learning_rate = None
             decoupled_learning_rate = None
@@ -676,7 +698,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
         # track_e2e_metrics()
 
-        # Flush TensorBoard and WandB writers.
+        # # Flush TensorBoard and WandB writers.
         # writer = get_tensorboard_writer()
         # if writer:
         #     writer.flush()
@@ -705,7 +727,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
     ):
         """Single training step."""
         args = get_args()
-
+        # print('in step')
         if not args.use_zero2:
             for model_chunk in model:
                 model_chunk.zero_grad_buffer()

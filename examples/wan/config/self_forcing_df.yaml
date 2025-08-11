@@ -28,8 +28,8 @@ image_or_video_shape:
 - 104
 gradient_checkpointing: true
 num_frame_per_block: 3
-# model_kwargs:
-#   timestep_shift: 5.0
+model_kwargs:
+  timestep_shift: 5.0
 
 base_paths: [
   /nvfile-heatstorage/teleai-infra/kaikai/HumanData_subset_500/merged_videos_latents,

@@ -69,6 +69,7 @@ def set_config():
         from config.wan_i2v_multimask import config
     elif args.task_type == "wan_autoregressive":
         from config.wan_autoregressive import config
+        # from config.prone10_lowerlr import config
     elif args.task_type == "vast":
         from config.vast import config
     elif args.task_type == "teleai_i2v":

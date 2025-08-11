@@ -281,10 +281,10 @@ class TensorDataset(torch.utils.data.Dataset):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base_path", type=str, default="/gemini/space/xxz/datasets/2-EnviromentData/merged_videos", help="Root path to video/image files")
-    parser.add_argument("--metadata_path", type=str, default="/gemini/space/xxz/datasets/2-EnviromentData/merged_videos.csv", help="File listing all video paths")
-    parser.add_argument("--text_encoder_path", type=str, default="/gemini/space/xxz/Self-Forcing/wan_models/Wan2.1-T2V-14B/models_t5_umt5-xxl-enc-bf16.pth")
-    parser.add_argument("--vae_path", type=str, default="/gemini/space/xxz/Self-Forcing/wan_models/Wan2.1-T2V-14B/Wan2.1_VAE.pth")
+    parser.add_argument("--base_path", type=str, default="/nvfile-heatstorage/Text2Video/data/huggingface/dataset/OpenVid-1M/OpenVidVideoData", help="Root path to video/image files")
+    parser.add_argument("--metadata_path", type=str, default="/nvfile-heatstorage/Text2Video/data/huggingface/dataset/OpenVid-1M/data/train/OpenVid-1M.csv", help="File listing all video paths")
+    parser.add_argument("--text_encoder_path", type=str, default="/nvfile-heatstorage/model_zoo/modelscope/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth")
+    parser.add_argument("--vae_path", type=str, default="/nvfile-heatstorage/model_zoo/modelscope/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth")
     parser.add_argument("--image_encoder_path", type=str, default=None)
     parser.add_argument("--tiled", action="store_true")
     parser.add_argument("--tile_size_height", type=int, default=34)
@@ -345,3 +345,4 @@ def data_process(args):
 if __name__ == '__main__':
     args = parse_args()
     data_process(args)
+
