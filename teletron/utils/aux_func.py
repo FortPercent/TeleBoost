@@ -139,8 +139,6 @@ def validate_yaml(args, defaults={}):
         print('using {} for parameters ...'.format(args.model_parallel.params_dtype),
               flush=True)
 
-    if args.dataloader_type is None:
-        args.dataloader_type = 'single'
 
     # Consumed tokens.
     args.consumed_train_samples = 0
@@ -497,10 +495,7 @@ def validate_args(args, defaults={}):
     if args.rank == 0:
         print('using {} for parameters ...'.format(args.params_dtype),
               flush=True)
-
-    if args.dataloader_type is None:
-        args.dataloader_type = 'single'
-
+        
     # Consumed tokens.
     args.consumed_train_samples = 0
     args.consumed_valid_samples = 0

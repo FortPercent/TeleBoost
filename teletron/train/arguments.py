@@ -31,10 +31,6 @@ class UnifiedArguments:
 
     timers: Optional[bool] = field(default=None)
 
-    dataset_type: str = field(
-        default="VastDataset",
-        metadata={"help": "Type of dataset to use"}
-    )
     data_path: str = field(
         default="./checkpoint",
         metadata={"help": "Path to the dataset"}
@@ -158,26 +154,19 @@ class UnifiedArguments:
         metadata={"help": "Type of task"}
     )
     split: str = field(default="")
-    dataloader_type: str = field(default="single")
     num_workers: int = field(default=1)
     num_frames: int = field(
         default=9,
         metadata={
             "help":"numbers of frames to train, must be of 4n+1."\
-                    "Overloads yaml if using koala dataset. Example:45"
+                    "Example:45"
         }
     )
     video_resolution: tuple[int, int] = field(
         default=(1280,720),
         metadata={
-            "help":"video resolution to train, overloads yaml if using koala dataset."\
+            "help":"video resolution to train."\
                    "Example: 1280,720 (comma-separated)"
-        }
-    )
-    koala_opt: str = field(
-        default="/teletron/datasets/koala_cfg/koala.yml",
-        metadata={
-            "help":"If DATASET_TYPE is KoalaDataset then need the koala dataset option file",
         }
     )
 

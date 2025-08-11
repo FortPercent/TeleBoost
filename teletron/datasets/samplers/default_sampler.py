@@ -1,46 +1,62 @@
+import torch
 import math
 
-import numpy as np
-import torch
-
-
 class DefaultSampler(torch.utils.data.Sampler):
-    def __init__(
-        self, dataset, batch_size=None, shuffle=False, infinite=True, seed=6666, *args, **kwargs
-    ):
+
+    def __init__(self, total_samples, consumed_samples, micro_batch_size,
+                 data_parallel_rank, data_parallel_size, seed=42, drop_last=True, shuffle=True, infinite=True):
+        # Keep a copy of input params for later use.
+        self.total_samples = total_samples
+        self.consumed_samples = consumed_samples
+        self.micro_batch_size = micro_batch_size
+        self.data_parallel_rank = data_parallel_rank
+        self.data_parallel_size = data_parallel_size
+        self.seed = seed
+        self.drop_last = drop_last
         self.shuffle = shuffle
         self.infinite = infinite
-        self.seed = seed
-        self.epoch = 0
-        self.data_size = len(dataset)
-        if batch_size is not None:
-            self.total_size = int(math.ceil(self.data_size / batch_size)) * batch_size
+
+        if self.drop_last:
+            self.num_samples = self.total_samples // self.micro_batch_size // self.data_parallel_size
         else:
-            self.total_size = self.data_size
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch
-
-    def state_dict(self,):
-        return {"seed": self.seed, "epoch": self.epoch}
-
-    def load_state_dict(self, state_dict: dict):
-        self.__dict__.update(state_dict)
+            self.num_samples = math.ceil(math.ceil(self.total_samples / self.micro_batch_size) / self.data_parallel_size)
+        
+        self.total_size = self.num_samples * self.data_parallel_size * self.micro_batch_size
+        self.epoch = self.consumed_samples // self.total_size
 
     def __len__(self):
-        return self.total_size
+        return self.num_samples
 
     def __iter__(self):
         while True:
-            np.random.seed(self.seed + self.epoch)
+            indices = list(range(self.total_samples))
+            if self.shuffle:
+                g = torch.Generator()
+                g.manual_seed(self.seed + self.epoch)
+                idx = torch.randperm(len(indices), generator=g).tolist()
+                indices = [indices[i] for i in idx]
+            
+            if not self.drop_last:
+                padding_size = self.total_size - len(indices)
+                if padding_size <= len(indices):
+                    indices += indices[:padding_size]
+                else:
+                    indices += (indices * math.ceil(padding_size / len(indices)))[
+                        :padding_size
+                    ]
+            else:
+                indices = indices[: self.total_size]
+
+            if self.consumed_samples % self.total_size != 0:
+                indices = indices[self.consumed_samples % self.total_size:]
+
+            for i in range(0, len(indices), self.micro_batch_size * self.data_parallel_size):
+                start_idx = i + self.data_parallel_rank * self.micro_batch_size
+                yield indices[start_idx: start_idx + self.micro_batch_size]
+
             self.epoch += 1
-            indices = np.zeros((0,), dtype=np.int64)
-            while len(indices) < self.total_size:
-                indices_i = np.arange(self.data_size)
-                if self.shuffle:
-                    indices_i = np.random.permutation(indices_i)
-                num_data = min(len(indices_i), self.total_size - len(indices))
-                indices = np.hstack((indices, indices_i[:num_data]))
-            yield from indices
+            self.consumed_samples += len(indices)
+
             if not self.infinite:
                 break
+
