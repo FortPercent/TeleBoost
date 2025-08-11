@@ -10,7 +10,9 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_img_clip_feature,
     get_img_emb_y,
     get_latents,
-    get_noise
+    get_noise,
+    get_prompt_emb,
+    get_unprompt_emb
 )
 from teletron.utils import get_args
 from functools import partial
@@ -18,7 +20,8 @@ from functools import partial
 ENCODER_SCHEMA = {
     'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
     'moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
-    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents']
+    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
+    'wan_autoregressive' : ['prompt_emb','unprompt_emb','latents']
 }
 
 WORK_FN = {
@@ -27,6 +30,8 @@ WORK_FN = {
     'img_emb_y': get_img_emb_y,
     'latents': get_latents,
     'noise': get_noise,
+    'prompt_emb': get_context,
+    'unprompt_emb': get_unprompt_emb
 }
 
 PROPERTY_DIMS = {
@@ -36,6 +41,8 @@ PROPERTY_DIMS = {
     'latents': 5,
     'nosie': 5,
     'fake_latents': 5,
+    'prompt_emb': 3,
+    'unprompt_emb': 3
 }
 
 
@@ -107,6 +114,12 @@ class TeleaiEncoder(BaseEncoder):
             return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
         elif target == 'noise':
             return partial(work_fn, dtype=torch.bfloat16)
+        elif target == 'prompt_emb':
+            return partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
+        elif target == 'unprompt_emb':
+            if not getattr(self, "self.unprompt_emb", None):
+                self.unprompt_emb = partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
+            return self.unprompt_emb
         else:
             return work_fn
 
@@ -115,16 +128,17 @@ class TeleaiEncoder(BaseEncoder):
         使用teleai模型对数据批次进行编码。
         """
         batch = dict(raw_batch)
-        
+        print('get batch')
         # produce data
         for data_to_produce in TeleaiEncoder.get_output_schema():
+            print('in for')
             batch[data_to_produce] = self.work_fn[data_to_produce](batch=batch)
-
+        print('produce data')
         # pack tensors
         tensors_to_send = []
         for data_to_produce in TeleaiEncoder.get_output_schema():
             tensors_to_send.append(batch[data_to_produce])
-
+        print('pack tensors')
         size_info_tensor = self._get_tensors_size(tensors_to_send, device=self.device)
 
         return tensors_to_send, size_info_tensor

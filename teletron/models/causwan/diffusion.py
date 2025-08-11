@@ -1,6 +1,6 @@
 from typing import Tuple
 import torch
-
+from teletron.utils import get_args
 from .base import BaseModel
 from teletron.models.causwan.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 import torch.distributed as dist
@@ -45,26 +45,29 @@ class CausalDiffusion(BaseModel):
         Initialize the Diffusion loss module.
         """
         super().__init__(config, device)
-        self.num_frame_per_block = getattr(config, "num_frame_per_block", 3)
-        self.dtype = torch.bfloat16 if config.mixed_precision else torch.float32
+        args = get_args()
+        self.num_frame_per_block = getattr(args, "num_frame_per_block", 3)
+        self.dtype = torch.bfloat16 if args.mixed_precision else torch.float32
         if self.num_frame_per_block > 1:
             self.generator.model.num_frame_per_block = self.num_frame_per_block
-        self.independent_first_frame = getattr(config, "independent_first_frame", False)
+        self.independent_first_frame = getattr(args, "independent_first_frame", False)
 
-        if hasattr(config, 'gradient_checkpointing'):
+        if hasattr(args, 'gradient_checkpointing'):
             self.generator.enable_gradient_checkpointing()
 
         # Step 2: Initialize all hyperparameters
-        self.num_train_timestep = config.num_train_timestep
+        self.num_train_timestep = args.num_train_timestep
         self.min_step = int(0.02 * self.num_train_timestep)
         self.max_step = int(0.98 * self.num_train_timestep)
-        self.guidance_scale = config.guidance_scale
-        self.timestep_shift = getattr(config, "timestep_shift", 5.0)
+        self.guidance_scale = args.guidance_scale
+        self.timestep_shift = getattr(args, "timestep_shift", 5.0)
         self.teacher_forcing = True
-
+        self.save_index = 0
+        self.global_rank = dist.get_rank() if dist.is_initialized() else 0
         # Noise augmentation in teacher forcing, we add small noise to clean context latents
-        self.noise_augmentation_max_timestep = getattr(config, "noise_augmentation_max_timestep", 0)
+        self.noise_augmentation_max_timestep = getattr(args, "noise_augmentation_max_timestep", 0)
         self.config = config
+        self.device = torch.cuda.current_device()
 
     def _initialize_models(self, args, device):
         self.generator = WanDiffusionWrapper(**getattr(args, "model_kwargs", {}), is_causal=True)
@@ -98,7 +101,7 @@ class CausalDiffusion(BaseModel):
         self.vae.requires_grad_(False)
 
         self.scheduler = self.generator.get_scheduler()
-        self.scheduler.timesteps = self.scheduler.timesteps.to(device)
+        self.scheduler.timesteps = self.scheduler.timesteps.to(torch.cuda.current_device())
         
     def forward(
         self,
@@ -162,6 +165,9 @@ class CausalDiffusion(BaseModel):
             self.num_frame_per_block,
             uniform_timestep=False
         )
+        # index = index.to('cpu')
+        # print(f'index on {torch.cuda.current_device()}::{index.device}')
+        # print(f'timestep on {torch.cuda.current_device()}::{self.scheduler.timesteps.device}')
         timestep = self.scheduler.timesteps[index].to(dtype=self.dtype, device=self.device)
         noisy_latents = self.scheduler.add_noise(
             clean_latent.flatten(0, 1),
@@ -214,10 +220,9 @@ class CausalDiffusion(BaseModel):
         loss = torch.nn.functional.mse_loss(
             flow_pred.float(), training_target.float(), reduction='none'
         ).mean(dim=(2, 3, 4))
-        loss = loss * self.scheduler.training_weight(timestep).unflatten(0, (batch_size, num_frame))
         loss_w = loss
-        loss = loss.mean()
-        loss_w = loss_w.mean()
+        loss = loss * self.scheduler.training_weight(timestep).unflatten(0, (batch_size, num_frame))
+        
 
         log_dict = {
             "x0": clean_latent.detach(),
@@ -227,3 +232,192 @@ class CausalDiffusion(BaseModel):
     
     def set_input_tensor(self, x):
         return None
+    
+    def state_dict_for_save_checkpoint(self, destination=None, prefix='', keep_vars=False):
+        state_dict = self.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        return state_dict
+    
+    def generator_test_loss(
+        self,
+        image_or_video_shape,
+        
+        save_dir=None,  # 新增参数，用于指定保存数据的目录
+        load_dir=None   # 新增参数，用于指定加载数据的目录
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Generate image/videos from noise and compute the DMD loss.
+        The noisy input to the generator is backward simulated.
+        This removes the need of any datasets during distillation.
+        See Sec 4.5 of the DMD2 paper (https://arxiv.org/abs/2405.14867) for details.
+        Input:
+            - image_or_video_shape: a list containing the shape of the image or video [B, F, C, H, W].
+            - conditional_dict: a dictionary containing the conditional information (e.g. text embeddings, image embeddings).
+            - unconditional_dict: a dictionary containing the unconditional information (e.g. null/negative text embeddings, null/negative image embeddings).
+            - clean_latent: a tensor containing the clean latents [B, F, C, H, W]. Need to be passed when no backward simulation is used.
+        Output:
+            - loss: a scalar tensor representing the generator loss.
+            - generator_log_dict: a dictionary containing the intermediate tensors for logging.
+        """
+        batch_size, num_frame = image_or_video_shape[:2]
+        if load_dir is not None:
+            load_path = os.path.join(load_dir, f"{self.global_rank}_{self.save_index}.pth")
+            if os.path.exists(load_path):
+                # 从文件中加载保存的值
+                saved_data = torch.load(load_path)
+                noise = saved_data['noise'].to(device=self.device)
+                timestep = saved_data['timestep'].to(device=self.device)
+                clean_latent = saved_data['clean_latent'].to(device=self.device)
+    
+        training_target = self.scheduler.training_target(clean_latent, noise, timestep)
+        self.save_index += 1 
+        del noise
+        if load_dir is not None:
+            if os.path.exists(load_path):
+                noisy_latents = saved_data['noisy_latents'].to(device=self.device)
+                clean_latent_aug = saved_data['clean_latent_aug'].to(device=self.device)
+                conditional_dict=saved_data['conditional_dict']
+                if self.noise_augmentation_max_timestep > 0:
+                    timestep_clean_aug = saved_data['timestep_clean_aug'].to(device=self.device)
+                else:
+                    timestep_clean_aug = None
+        # Compute loss
+        # breakpoint()
+        # watch_module_forward_backward(self.generator, use_megatron=True, use_deepspeed=False)
+        flow_pred, x0_pred = self.generator(
+            noisy_image_or_video=noisy_latents,
+            conditional_dict=conditional_dict,
+            timestep=timestep,
+            clean_x=clean_latent_aug if self.teacher_forcing else None,
+            aug_t=timestep_clean_aug if self.teacher_forcing else None
+        )
+        print(f'time:{timestep}')
+        # loss = torch.nn.functional.mse_loss(flow_pred.float(), training_target.float())
+        loss = torch.nn.functional.mse_loss(
+            flow_pred.float(), training_target.float(), reduction='none'
+        ).mean(dim=(2, 3, 4))
+        loss_w = loss
+        loss = loss * self.scheduler.training_weight(timestep).unflatten(0, (batch_size, num_frame))
+        print(f'loss:{loss},loss_w:{loss_w},delta:{loss/loss_w}')
+
+        log_dict = {
+            "x0": clean_latent.detach(),
+            "x0_pred": x0_pred.detach()
+        }
+        print(f"Step {self.save_index}_{self.global_rank} loss: {loss.mean().item()}")
+        return loss, loss_w, log_dict
+    
+    def get_idx(low,high):
+        return  torch.randint(low,high)
+
+    
+    def generator_dfloss(
+        self,
+        image_or_video_shape,
+        conditional_dict: dict,
+        unconditional_dict: dict,
+        clean_latent: torch.Tensor,
+        initial_latent: torch.Tensor = None
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Generate image/videos from noise and compute the DMD loss.
+        The noisy input to the generator is backward simulated.
+        This removes the need of any datasets during distillation.
+        See Sec 4.5 of the DMD2 paper (https://arxiv.org/abs/2405.14867) for details.
+        Input:
+            - image_or_video_shape: a list containing the shape of the image or video [B, F, C, H, W].
+            - conditional_dict: a dictionary containing the conditional information (e.g. text embeddings, image embeddings).
+            - unconditional_dict: a dictionary containing the unconditional information (e.g. null/negative text embeddings, null/negative image embeddings).
+            - clean_latent: a tensor containing the clean latents [B, F, C, H, W]. Need to be passed when no backward simulation is used.
+        Output:
+            - loss: a scalar tensor representing the generator loss.
+            - generator_log_dict: a dictionary containing the intermediate tensors for logging.
+        """
+        
+        noise = torch.randn_like(clean_latent)
+        batch_size, num_frame = image_or_video_shape[:2]
+
+        # Step 2: Randomly sample a timestep and add noise to denoiser inputs
+        dfidx, dfindex= self._get_dftimestep(
+            1,
+            self.scheduler.num_train_timesteps,
+            image_or_video_shape[0],
+            image_or_video_shape[1],
+            self.num_frame_per_block,
+        )
+
+        index = self._get_timestep(
+            0,
+            dfidx,
+            image_or_video_shape[0],
+            image_or_video_shape[1],
+            self.num_frame_per_block,
+            uniform_timestep=False
+        )
+
+        dftimestep = self.scheduler.timesteps[dfindex].to(dtype=self.dtype, device=self.device)
+        timestep = self.scheduler.timesteps[index].to(dtype=self.dtype, device=self.device)
+        noisy_latents = self.scheduler.add_noise(
+            clean_latent.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep.flatten(0, 1)
+        ).unflatten(0, (batch_size, num_frame))
+        training_target = self.scheduler.training_target(clean_latent, noise, timestep)
+        clean_latent = self.scheduler.add_noise(
+            clean_latent.flatten(0, 1),
+            noise.flatten(0, 1),
+            dftimestep.flatten(0, 1)
+        ).unflatten(0, (batch_size, num_frame))
+
+        # Step 3: Noise augmentation, also add small noise to clean context latents
+        if self.noise_augmentation_max_timestep > 0:
+            index_clean_aug = self._get_timestep(
+                0,
+                self.noise_augmentation_max_timestep,
+                image_or_video_shape[0],
+                image_or_video_shape[1],
+                self.num_frame_per_block,
+                uniform_timestep=False
+            )
+            timestep_clean_aug = self.scheduler.timesteps[index_clean_aug].to(dtype=self.dtype, device=self.device)
+            clean_latent_aug = self.scheduler.add_noise(
+                clean_latent.flatten(0, 1),
+                noise.flatten(0, 1),
+                timestep_clean_aug.flatten(0, 1)
+            ).unflatten(0, (batch_size, num_frame))
+        else:
+            clean_latent_aug = clean_latent
+            timestep_clean_aug = None
+
+        # Compute loss
+        guidance_drop_prob = 0.1
+        # watch_module_forward_backward(self.generator, use_megatron=True, use_deepspeed=False)
+        if torch.rand(1).item() > guidance_drop_prob:
+            flow_pred, x0_pred = self.generator(
+                noisy_image_or_video=noisy_latents,
+                conditional_dict=conditional_dict,
+                timestep=timestep,
+                clean_x=clean_latent_aug if self.teacher_forcing else None,
+                aug_t=timestep_clean_aug if self.teacher_forcing else None
+            )
+        else:
+            flow_pred, x0_pred = self.generator(
+                noisy_image_or_video=noisy_latents,
+                conditional_dict=unconditional_dict,
+                timestep=timestep,
+                clean_x=clean_latent_aug if self.teacher_forcing else None,
+                aug_t=timestep_clean_aug if self.teacher_forcing else None
+            )
+
+        # loss = torch.nn.functional.mse_loss(flow_pred.float(), training_target.float())
+        loss = torch.nn.functional.mse_loss(
+            flow_pred.float(), training_target.float(), reduction='none'
+        ).mean(dim=(2, 3, 4))
+        loss_w = loss
+        loss = loss * self.scheduler.training_weight(timestep).unflatten(0, (batch_size, num_frame))
+        
+
+        log_dict = {
+            "x0": clean_latent.detach(),
+            "x0_pred": x0_pred.detach()
+        }
+        return loss, loss_w, log_dict
