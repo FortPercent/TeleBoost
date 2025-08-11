@@ -50,9 +50,7 @@ def wait_for_debugger(rank_to_debug=0, port=5678):
         print(f"[Rank {rank}] Debugger attached.")
 
 def forward_step(data_iterator, ddpmodel):
-    # print('start get next')
     batch = next(data_iterator)
-    # print('suceed get next')
     args = get_args()
     device = torch.cuda.current_device()
     dtype = torch.bfloat16 if args.mixed_precision else torch.float32

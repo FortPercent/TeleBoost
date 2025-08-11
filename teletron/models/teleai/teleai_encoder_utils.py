@@ -2,7 +2,7 @@ import torch
 from einops import rearrange
 from torchvision.transforms.functional import to_pil_image
 import numpy as np
-from teletron.train.utils import loss_func, get_args
+from teletron.train.utils import get_args
 
 def forward_vae(images):
     images = images.to(self.vae.dtype)
@@ -362,23 +362,12 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtyp
 
 @torch.no_grad
 def get_context(batch, prompter, dtype=torch.bfloat16):
-    # print(batch["dense_prompt"][0])
     prompt_emb = encode_prompt(prompter, batch["dense_prompt"][0])
     prompt_emb["context"] = prompt_emb["context"].to(
             dtype=dtype, device=torch.cuda.current_device()
     )
-    print('prompt')
-    print(prompt_emb["context"].shape)
     return prompt_emb["context"]
 
-@torch.no_grad
-def get_prompt_emb(batch, text_encoder, dtype=torch.bfloat16):
-    print(batch["struct_prompt"])
-    prompt_emb = text_encoder(batch["struct_prompt"][0])
-    prompt_emb["prompt_embeds"] = prompt_emb["prompt_embeds"].to(
-            dtype=dtype, device=torch.cuda.current_device()
-    )
-    return prompt_emb["prompt_embeds"]
 
 @torch.no_grad
 def get_unprompt_emb(batch, prompter, dtype=torch.bfloat16):
@@ -388,8 +377,6 @@ def get_unprompt_emb(batch, prompter, dtype=torch.bfloat16):
     prompt_emb["context"] = prompt_emb["context"].to(
             dtype=dtype, device=torch.cuda.current_device()
     )
-    print('unprompt')
-    print(prompt_emb["context"].shape)
     return prompt_emb["context"]
 
 @torch.no_grad
@@ -475,7 +462,6 @@ def get_latents(batch, vae, dtype=torch.bfloat16):
             tile_stride=(18, 16),
         )[0]
     latents = latents.unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
-    print(latents.shape)
     return latents
 
 def get_noise(batch, dtype=torch.bfloat16):

@@ -8,7 +8,7 @@ from .clip_dataset import ClipDataset
 from .variable_clip_dataset import VariableClipDataset
 from .variable_image_dataset import VariableImageDataset
 from .variable_mix_dataset import VariableMixDataset
-from .tensor_dataset import TensorDataset #,CausalDataset
+from .tensor_dataset import TensorDataset
 import torch
 from megatron.core import mpu
 from .samplers import build_sampler 
@@ -37,7 +37,6 @@ DATASETS.register_module(VariableClipDataset)
 DATASETS.register_module(VariableImageDataset)
 DATASETS.register_module(VariableMixDataset)
 DATASETS.register_module(TensorDataset)
-# DATASETS.register_module(CausalDataset)
 
 
 def build_dataset(params_or_type, *args, **kwargs):

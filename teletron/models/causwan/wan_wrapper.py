@@ -231,7 +231,6 @@ class WanDiffusionWrapper(torch.nn.Module):
             sink_size=0
     ):
         super().__init__()
-        # print(f'timestep_shift{timestep_shift}')
         if is_causal:
             self.model = CausalWanModel.from_pretrained(
                 # f"wan_models/{model_name}/", local_attn_size=local_attn_size, sink_size=sink_size)
@@ -248,7 +247,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         )
         self.scheduler.set_timesteps(1000, training=True)
 
-        self.seq_len = 37440 #32760  # [1, 21, 16, 60, 104]
+        self.seq_len = 32760  # [1, 21, 16, 60, 104]
         self.post_init()
 
     def enable_gradient_checkpointing(self) -> None:

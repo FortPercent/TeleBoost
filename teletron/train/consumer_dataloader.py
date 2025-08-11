@@ -332,7 +332,6 @@ def create_batch_loader(args, data_iterator):
         if is_distributed_vae:
             print("Info: Creating CausalWanBatchLoader.")
             return CausalDistBatchLoader(data_iterator)
-            # raise NotImplementedError("A distributed VAE loader for CausalWanModel is not implemented.")
         else:
             print("Info: Creating CausalWanOriginalBatchLoader.")
             return CausalWanOriginalBatchLoader(data_iterator)

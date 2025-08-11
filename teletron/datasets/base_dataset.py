@@ -545,7 +545,7 @@ class BaseDataset(Dataset):
         except Exception as e:
             # Log error details and return None to trigger resampling
             import traceback
-            print(f"Error processing sample at index {idx}: {traceback.format_exc()}")
+            logger.error(f"Error processing sample at index {idx}: {traceback.format_exc()}")
             return None
 
     @force_full_init
