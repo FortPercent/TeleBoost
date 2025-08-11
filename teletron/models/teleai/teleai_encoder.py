@@ -11,7 +11,6 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_img_emb_y,
     get_latents,
     get_noise,
-    get_prompt_emb,
     get_unprompt_emb
 )
 from teletron.utils import get_args
@@ -117,7 +116,7 @@ class TeleaiEncoder(BaseEncoder):
         elif target == 'prompt_emb':
             return partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
         elif target == 'unprompt_emb':
-            if not getattr(self, "self.unprompt_emb", None):
+            if not getattr(self, "unprompt_emb", None):
                 self.unprompt_emb = partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
             return self.unprompt_emb
         else:
@@ -128,17 +127,13 @@ class TeleaiEncoder(BaseEncoder):
         使用teleai模型对数据批次进行编码。
         """
         batch = dict(raw_batch)
-        print('get batch')
         # produce data
         for data_to_produce in TeleaiEncoder.get_output_schema():
-            print('in for')
             batch[data_to_produce] = self.work_fn[data_to_produce](batch=batch)
-        print('produce data')
         # pack tensors
         tensors_to_send = []
         for data_to_produce in TeleaiEncoder.get_output_schema():
             tensors_to_send.append(batch[data_to_produce])
-        print('pack tensors')
         size_info_tensor = self._get_tensors_size(tensors_to_send, device=self.device)
 
         return tensors_to_send, size_info_tensor

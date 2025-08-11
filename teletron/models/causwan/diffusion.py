@@ -165,9 +165,7 @@ class CausalDiffusion(BaseModel):
             self.num_frame_per_block,
             uniform_timestep=False
         )
-        # index = index.to('cpu')
-        # print(f'index on {torch.cuda.current_device()}::{index.device}')
-        # print(f'timestep on {torch.cuda.current_device()}::{self.scheduler.timesteps.device}')
+
         timestep = self.scheduler.timesteps[index].to(dtype=self.dtype, device=self.device)
         noisy_latents = self.scheduler.add_noise(
             clean_latent.flatten(0, 1),

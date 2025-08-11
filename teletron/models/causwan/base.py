@@ -74,7 +74,6 @@ class BaseModel(nn.Module):
                 dtype=torch.long
             )
             # make the noise level the same within every block
-            # print_rank_0(f'timestep:{timestep}{timestep.shape}')
             if self.independent_first_frame:
                 # the first frame is always kept the same
                 timestep_from_second = timestep[:, 1:]
@@ -112,9 +111,7 @@ class BaseModel(nn.Module):
             device=torch.cuda.current_device(),
             dtype=torch.long
         )
-        # print_rank_0(f'timestep int:{dftimestep}')
         timestep = dftimestep.repeat(batch_size, num_frame)
-        # print_rank_0(f'timestep:{timestep}{timestep.shape}')
         # make the noise level the same within every block
         if self.independent_first_frame:
             # the first frame is always kept the same

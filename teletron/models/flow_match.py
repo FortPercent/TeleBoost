@@ -168,18 +168,3 @@ class CausalFlowMatchScheduler():
         weights = self.linear_timesteps_weights[timestep_id]
     
         return weights
-
-    # def training_weight(self, timestep):
-    #     """
-    #     Input:
-    #         - timestep: the timestep with shape [B*T]
-    #     Output: the corresponding weighting [B*T]
-    #     """
-    #     if timestep.ndim == 2:
-    #         timestep = timestep.flatten(0, 1)
-    #     self.linear_timesteps_weights = self.linear_timesteps_weights.to(timestep.device)
-    #     timestep_id = torch.argmin(
-    #         (self.timesteps.to(timestep.device).unsqueeze(1) - timestep.unsqueeze(0)).abs(), dim=0)
-    #     weights = self.linear_timesteps_weights[timestep_id]
-    #     return weights
-    
