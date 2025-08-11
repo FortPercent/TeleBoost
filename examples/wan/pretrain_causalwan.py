@@ -1,7 +1,7 @@
 import os
 import torch
 from teletron.train import parse_args
-from teletron.train.causal_trainer import CausalTrainer
+from teletron.train.trainer import Trainer
 from teletron.train.utils import loss_func, get_args
 import debugpy
 
@@ -132,5 +132,5 @@ if __name__ == "__main__":
     # if use ode_init：
     # args.generator_ckpt = '/nvfile-heatstorage/teleai-infra/kaikai/checkpoints/ode_init.pt'
     # args.distributed_vae = False
-    trainer = CausalTrainer(args)
+    trainer = Trainer(args)
     trainer.pretrain(forward_step_func=forward_step)
