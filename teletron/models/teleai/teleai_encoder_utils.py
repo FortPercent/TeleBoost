@@ -4,6 +4,7 @@ from torchvision.transforms.functional import to_pil_image
 import numpy as np
 from einops import rearrange
 from collections import defaultdict
+from teletron.utils import set_config
 
 def forward_vae(images):
     images = images.to(self.vae.dtype)
@@ -535,3 +536,12 @@ def get_frame_interval(batch, dtype=torch.bfloat16):
     return batch['frame_interval'].to(
         dtype=dtype, device=torch.cuda.current_device()
     )
+
+@torch.no_grad
+def get_depth(batch, depth_model, dtype=torch.bfloat16):
+    global_config = set_config()
+    target_fps = global_config.dataset.filter_cfg.dst_fps
+    frames = rearrange(batch["images"], "b t c h w -> b t h w c").squeeze(0).numpy()
+    depths, fps = depth_model.infer_video_depth(frames, target_fps, device='cuda', fp32=dtype==torch.float32)
+    depths = torch.from_numpy(depths).unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
+    return depths

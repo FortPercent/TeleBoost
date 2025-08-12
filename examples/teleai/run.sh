@@ -9,7 +9,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
-
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/qiuyang/Video-Depth-Anything
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
 CP=1
@@ -44,9 +44,11 @@ MODEL_ARGS=(
     --num-attention-heads 12
 ) # 1.3B I2V
 
-TASK=teleai_multimask
-
-CONFIG_PATH=config.${TASK}.config
+TASK=teleai_i2v_depth
+TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
+CONFIG_PATH=${2:-"config.teleai_i2v.config"}
+shift
+echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
@@ -134,10 +136,6 @@ EVAL_AND_LOGGING_ARGS=(
     --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20 # sample 20 video to eval
 )
-
-TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
-shift
-echo "Launching: $TRAIN_SCRIPT"
 
 torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
     ${MODEL_ARGS[@]} \

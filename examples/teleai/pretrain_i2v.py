@@ -20,6 +20,8 @@ def extra_args(parser):
                        )
     group.add_argument("--encoder_tokenizer_path", type=str, default=
                        "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
+    group.add_argument("--depth-model-path", type=str, default=
+                        "/nvfile-heatstorage/teleai-infra/qiuyang/ckpt/video_depth_anything_vitl.pth")
     group.add_argument("--test-with-pseudo-data", action="store_true")
     group.add_argument("--test-resolution", type=str, default="360")
     
