@@ -538,10 +538,20 @@ def get_frame_interval(batch, dtype=torch.bfloat16):
     )
 
 @torch.no_grad
-def get_depth(batch, depth_model, dtype=torch.bfloat16):
+def get_depth_latents(batch, depth_model, vae, dtype=torch.bfloat16):
     global_config = set_config()
     target_fps = global_config.dataset.filter_cfg.dst_fps
     frames = rearrange(batch["images"], "b t c h w -> b t h w c").squeeze(0).numpy()
     depths, fps = depth_model.infer_video_depth(frames, target_fps, device='cuda', fp32=dtype==torch.float32)
-    depths = torch.from_numpy(depths).unsqueeze(0).to(dtype=dtype, device=torch.cuda.current_device())
-    return depths
+    depths = torch.from_numpy(depths).unsqueeze(0).unsqueeze(2).repeat(1, 1, 3, 1, 1).to(dtype=dtype, device=torch.cuda.current_device())
+
+    depths_latents = encode_video(
+        vae,
+        rearrange(depths, "b t c h w -> b c t h w").to(
+            dtype=dtype, device=torch.cuda.current_device()
+        ),
+        tiled=False,
+        tile_size=(34, 34),
+        tile_stride=(18, 16),
+    )
+    return depths_latents.to(dtype=dtype, device=torch.cuda.current_device())
