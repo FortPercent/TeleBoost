@@ -97,7 +97,7 @@ class DataloaderMixin:
         print(sampler_config)
         if sampler_config is None:
             sampler_config = dict(type="DefaultSampler", shuffle=True, seed=42, drop_last=True,infinite=True)
-        batch_sampler = build_sampler(sampler_config, total_samples=len(dataset), consumed_samples=consumed_samples, micro_batch_size=args.micro_batch_size, data_parallel_rank=data_parallel_rank, data_parallel_size=data_parallel_size)
+        batch_sampler = build_sampler(sampler_config, total_samples=len(dataset), consumed_samples=consumed_samples * data_parallel_size // args.dit_world_size, micro_batch_size=args.micro_batch_size, data_parallel_rank=data_parallel_rank, data_parallel_size=data_parallel_size)
         
         return torch.utils.data.DataLoader(dataset,
                                         batch_sampler=batch_sampler,
