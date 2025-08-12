@@ -168,7 +168,7 @@ class DiffusionRollout(BaseRollout):
                 # 创建输出目录
                 os.makedirs("./videos", exist_ok=True)
                 os.makedirs("./images", exist_ok=True)
-                def save_video_and_prompt(video_frames, caption, index):
+                def save_video_and_prompt(video_frames, rank, index):
                     """
                     保存视频文件和对应的prompt文本
                     Args:
@@ -179,13 +179,11 @@ class DiffusionRollout(BaseRollout):
                         args: 配置参数
                     """
                     import time
-                    from datetime import datetime
                     import numpy as np
-                    import cv2
                     from PIL import Image
-
+                    import cv2
+                    from datetime import datetime
                     # 获取当前时间戳
-
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     
                     # 确保video_frames是正确的格式 (C, T, H, W)
@@ -209,24 +207,25 @@ class DiffusionRollout(BaseRollout):
                         else:
                             first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
                         
-                        image_filename = f"wan_frame_batch{index}.png"
-                        image_path = os.path.join("./images", image_filename)
+                        image_filename = f"wan_frame_rank{rank}_batch{index}_{batch_captions[0]}.png"
+                        image_path = os.path.join("./inference_demo/output", image_filename)
                         
                         try:
-                            first_frame_pil.save(image_path)
+                            # first_frame_pil.save(image_path)
                             # print(f"First frame saved: {image_path}")
+                            print("skip image save")
                         except Exception as e:
                             print(f"Error saving first frame {image_path}: {e}")
 
                         # 保存视频
-                        video_filename = f"wan_video__batch{index}.mp4"
-                        video_path = os.path.join("./videos", video_filename)
+                        video_filename = f"wan_video_rank{rank}_batch{index}_{batch_captions[0]}.mp4"
+                        video_path = os.path.join("./inference_demo/output", video_filename)
                         
                         try:
                             # 使用opencv保存视频
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                            fps = self.config.video_fps
-                            
+                            # fps = args.video_fps if hasattr(args, 'video_fps') else 8  # 默认8fps
+                            fps = 5
                             out = cv2.VideoWriter(video_path, fourcc, fps, (W, H))
                             
                             for t in range(T):
@@ -242,7 +241,7 @@ class DiffusionRollout(BaseRollout):
                             print(f"Video saved: {video_path}")
                             
                         except Exception as e:
-                            print(f"Error saving vid/eo {video_path}: {e}")
+                            print(f"Error saving video {video_path}: {e}")
                             # 如果视频保存失败，至少保存第一帧作为图像
                             first_frame = video_np[0]  # (H, W, C)
                             if C == 3:
@@ -250,21 +249,28 @@ class DiffusionRollout(BaseRollout):
                             else:
                                 first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
                             
-                            image_filename = f"wan_frame_batch{index}_{timestamp}.png"
+                            image_filename = f"wan_frame_rank{rank}_batch{index}_{timestamp}.png"
                             image_path = os.path.join("./images", image_filename)
                             first_frame_pil.save(image_path)
                             # print(f"First frame saved as image: {image_path}")
                     else:
                         print(f"Unexpected video_frames shape: {video_frames.shape}")
+                
+                #To see image
+                import torch.distributed as dist
+                save_video_and_prompt(video_frames, dist.get_rank(), index)
+                print(f"local rank: {dist.get_rank()}")
+                exit(0)
+                # print(f"batch_captions[{index}]: {batch_captions}")
 
-                # 保存视频
-                save_video_and_prompt(
-                    video_frames,
-                    batch_captions[0],
-                    index
-                )
+                # # 保存视频
+                # save_video_and_prompt(
+                #     video_frames,
+                #     batch_captions[0],
+                #     index
+                # )
                 video_frames = video_frames.unsqueeze(0)
-            print("video_frames",video_frames.shape)
+            # print("video_frames",video_frames.shape)
             all_video_frames.append(video_frames)
             torch.cuda.empty_cache()
             
@@ -344,7 +350,8 @@ class DiffusionRollout(BaseRollout):
 
                     #TODO!!!!
                     #管理!!!可能有hook!!!
-                    transformer.to(device)
+                    # transformer.to(device)
+                    
                     pred_cond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]
                         t=timestep_cond,
@@ -361,7 +368,7 @@ class DiffusionRollout(BaseRollout):
                         model_output_cond = pred_cond
 
                     # 为无条件预测准备输入
-                    transformer.to(device)
+                    # transformer.to(device)
                     pred_uncond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]
                         t=timestep_uncond,
