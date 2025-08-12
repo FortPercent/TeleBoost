@@ -13,7 +13,7 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_latents,
     get_noise,
     get_fake_latents,
-    get_depth,
+    get_depth_latents,
 )
 from teletron.utils import get_args
 from functools import partial
@@ -21,7 +21,7 @@ from functools import partial
 from video_depth_anything.video_depth import VideoDepthAnything
 
 ENCODER_SCHEMA = {
-    'teleai_i2v_depth': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'depth'],
+    'teleai_i2v_depth': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'depth_latents'],
     'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
     # 'teleai_moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
     'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
@@ -35,7 +35,7 @@ WORK_FN = {
     'latents': get_latents,
     'noise': get_noise,
     'fake_latents': get_fake_latents,
-    'depth': get_depth,
+    'depth_latents': get_depth_latents,
 }
 
 PROPERTY_DIMS = {
@@ -45,7 +45,7 @@ PROPERTY_DIMS = {
     'latents': 5,
     'noise': 5,
     'fake_latents': 5,
-    'depth': 4,
+    'depth_latents': 5,
 }
 
 
@@ -122,8 +122,8 @@ class TeleaiEncoder(BaseEncoder):
             return partial(work_fn, dtype=torch.bfloat16)
         elif target == 'fake_latents':
             return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
-        elif target == 'depth':
-            return partial(work_fn, depth_model=self.depth_model, dtype=torch.bfloat16)
+        elif target == 'depth_latents':
+            return partial(work_fn, depth_model=self.depth_model, vae=self.vae, dtype=torch.bfloat16)
         else:
             return work_fn
     
