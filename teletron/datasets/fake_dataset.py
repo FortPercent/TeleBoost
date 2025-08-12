@@ -10,7 +10,8 @@ class FakeDataset():
         self,
     ) -> None:
         self.args = get_args()
-        self.dst_num_frames = self.args.num_frames
+        # self.dst_num_frames = self.args.num_frames
+        self.dst_num_frames = 641
         self.dst_size = tuple(self.args.video_resolution)
 
     def __len__(self):

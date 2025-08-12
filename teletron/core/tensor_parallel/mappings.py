@@ -1,10 +1,20 @@
 import torch
-from .utils import divide
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
 )
+
+def divide(numerator, denominator):
+    """Ensure that numerator is divisible by the denominator and return
+    the division value."""
+
+    def ensure_divisibility(numerator, denominator):
+        """Ensure that numerator is divisible by the denominator."""
+        assert numerator % denominator == 0, "{} is not divisible by {}".format(numerator, denominator)
+
+    ensure_divisibility(numerator, denominator)
+    return numerator // denominator
 
 def _reduce_mean(input_):
     """All-reduce with mean operation on the input tensor across model parallel group."""
@@ -95,7 +105,7 @@ class _ScatterToModelParallelRegion(torch.autograd.Function):
     def backward(ctx, grad_output):
         return _gather_along_last_dim(grad_output)
 
-class _GatherFromColModelParallelRegion(torch.autograd.Function):
+class _GatherFromModelParallelRegion(torch.autograd.Function):
     
     @staticmethod
     def symbolic(graph, input_):
@@ -170,7 +180,7 @@ def scatter_to_tensor_model_parallel_region(input_):
     return _ScatterToModelParallelRegion.apply(input_)
 
 def gather_from_tensor_model_parallel_region(input_):
-    return _GatherFromColModelParallelRegion.apply(input_)
+    return _GatherFromModelParallelRegion.apply(input_)
 
 def tele_rmsnorm_cuisine(x, weight, eps):
     return _TeleParallelRMSNormFunction.apply(x, weight, eps)
