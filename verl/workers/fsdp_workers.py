@@ -610,7 +610,6 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 enable_activation_offload=self.config.model.get("enable_activation_offload", False),
             )
 
-
             # get the original unwrapped module
             if fsdp_version(self.actor_module_fsdp) == 1:
                 self.actor_module = self.actor_module_fsdp._fsdp_wrapped_module
