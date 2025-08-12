@@ -15,7 +15,7 @@ from verl.utils.ulysses import gather_outpus_and_unpad
 
 from verl.utils.debug import GPUMemoryLogger
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
-from tensorwatch import TensorWatch,watch_module_forward_backward
+# from tensorwatch import TensorWatch,watch_module_forward_backward
 __all__ = ["DiffusionDataParallelPPOActor"]
 
 logger = logging.getLogger(__file__)
@@ -135,14 +135,14 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     -adv_clip_max,
                     adv_clip_max,
                 )
-                print("adv_clip_max",adv_clip_max)
-                file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/debug_current_log_probs.pt"
-                # print(file_name)
-                batch = torch.load(file_name)
-                current_log_probs=batch["current_log_probs"]
-                advantages=batch["advantages"]
-                # ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
-                ratio = torch.exp(new_log_probs - current_log_probs)
+                # print("adv_clip_max",adv_clip_max)
+                # file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/debug_current_log_probs.pt"
+                # # print(file_name)
+                # batch = torch.load(file_name)
+                # current_log_probs=batch["current_log_probs"]
+                # advantages=batch["advantages"]
+                ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
+                # ratio = torch.exp(new_log_probs - current_log_probs)
                 
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
@@ -150,19 +150,19 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     1.0 - clip_range,
                     1.0 + clip_range,
                 )
-                print("current_log_probs",current_log_probs)
+                # print("current_log_probs",current_log_probs)
                 print("new_log_probs",new_log_probs)
                 print("ratio",ratio)
                 print("advantages",advantages)
                 print("Uncipped Loss:", unclipped_loss)
                 print("Clipped Loss:", clipped_loss)
                 print("Maximum Loss:", torch.maximum(unclipped_loss, clipped_loss))
-                print("args.gradient_accumulation_steps",self.gradient_accumulation)
-                print("train_timesteps",train_timesteps)
-                #loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-                loss = torch.mean(unclipped_loss)/(self.gradient_accumulation * train_timesteps)
-                print("-"*100)
-                print("loss",loss)
+                # print("args.gradient_accumulation_steps",self.gradient_accumulation)
+                # print("train_timesteps",train_timesteps)
+                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+                # loss = torch.mean(unclipped_loss)/(self.gradient_accumulation * train_timesteps)
+                # print("-"*100)
+                # print("loss",loss)
                 loss.backward()
                 # with FSDP.summon_full_params(self.actor_module,writeback=False,   # 不回写
                 #     with_grads=False,   # 关键：还原 grad
@@ -173,8 +173,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
                 # # torch.save(param, f"saved_params_for_check/{name}.pt")
                 # param=float(param.float().norm())
-                exit(0)
-                TensorWatch.step()
+                # exit(0)
+                # TensorWatch.step()
   
                 avg_loss = loss.detach().clone()
 
@@ -218,30 +218,30 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
             # 加载保存的 tensor 和数据
-            file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/0_latent_timestep_data.pt"
-            print(file_name)
-            data = torch.load(file_name)
+            # file_name = f"/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/0_latent_timestep_data.pt"
+            # print(file_name)
+            # data = torch.load(file_name)
 
-            latents = data["latents"]      # torch.Tensor
-            timesteps = data["timestep"]     # torch.Tensor
-            seq_len = data["seq_len"]          # int
-            context = data["context"]       # list of tensor 或 tensor
-            pre_latents = data["pre_latents"]
-            context_null = data["context_null"]
-            sigma_schedule = data["sigma_schedule"]
+            # latents = data["latents"]      # torch.Tensor
+            # timesteps = data["timestep"]     # torch.Tensor
+            # seq_len = data["seq_len"]          # int
+            # context = data["context"]       # list of tensor 或 tensor
+            # pre_latents = data["pre_latents"]
+            # context_null = data["context_null"]
+            # sigma_schedule = data["sigma_schedule"]
 
-            print("latents:", latents.shape)
-            print("timestep:", timesteps)
-            print("seq_len:", seq_len)
-            print(len(context))
+            # print("latents:", latents.shape)
+            # print("timestep:", timesteps)
+            # print("seq_len:", seq_len)
+            # print(len(context))
             latents.to(pre_latents.device)
 
-            torch.manual_seed(42)
+            # torch.manual_seed(42)
 
-            watch_module_forward_backward(transformer, use_megatron=False, use_deepspeed=False,use_fsdp=True)
+            # watch_module_forward_backward(transformer, use_megatron=False, use_deepspeed=False,use_fsdp=True)
 
-            print("come here!!!!")
-            register_all_hooks(transformer)
+            # print("come here!!!!")
+            # register_all_hooks(transformer)
             
             pred_cond = transformer(
                 x=[latents],
