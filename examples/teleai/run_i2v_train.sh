@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # TODO, change to your own path
@@ -26,9 +26,9 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/yxy/code/teleai_data_tool/
 
 # Parallel config 
 CP=1
-TP=1
+TP=8
 MBS=1
-N_LAYERS=20
+N_LAYERS=40
 
 # Multi-node config 
 # N_MOE=2
@@ -37,13 +37,13 @@ N_LAYERS=20
 
 # Single-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=1
+N_GPU_FOR_TRAIN=8
 N_GPU_FOR_DATA=1
 
 ####################################### 
 
 MASTER_ADDR=${MASTER_ADDR:-'127.0.0.1'}
-MASTER_PORT='11322'
+MASTER_PORT='11328'
 NODE_RANK=${RANK:-'0'}
 
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
@@ -54,11 +54,18 @@ GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
 TOTAL_MOE_NODES=$((NNODES - N_VAE / 8))
 NODES_PER_MOE=$((TOTAL_MOE_NODES / N_MOE))
 I_MOE=$((NODE_RANK / NODES_PER_MOE))
+
 if [ $NNODES -eq 1 ]; then
     N_PROC=$N_GPU
 else
-    N_PROC=8
+    last_node=$((NNODES-1))
+    if [ $NODE_RANK eq $last_node ]; then
+        N_PROC=$N_GPU_FOR_DATA
+    else
+        N_PROC=8
+    fi
 fi
+
 if [ $N_MOE -eq 1 ]; then
     MOE_ARGS=(
         --moe-step-factor-list 0.0 
@@ -121,7 +128,7 @@ TRAINING_ARGS=(
     --model ParallelTeleaiModel 
     --task-type teleai_i2v
     --micro-batch-size ${MBS}
-    --train-iters 10000
+    --train-iters 2
     --weight-decay 1e-3
     --init-method-std 0.006 
     --clip-grad 0.0
@@ -147,7 +154,7 @@ MODEL_PARALLEL_ARGS=(
     --consumer-models-num $N_MOE
 )
 DATA_ARGS=(
-    --dataset-type VastDataset
+    --dataset-type FakeDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
@@ -158,11 +165,11 @@ DATA_ARGS=(
 EVAL_AND_LOGGING_ARGS=(
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 100
-    --eval-interval 10000 
+    --save-interval 1
+    --eval-interval 1
     # --load $CHECKPOINT_PATH_LOAD 
     --save $CHECKPOINT_PATH_SAVE/node_$I_MOE
-    --eval-iters 10000
+    --eval-iters 1
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
 )
 

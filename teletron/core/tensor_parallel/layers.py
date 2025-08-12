@@ -4,8 +4,7 @@ from megatron.core.tensor_parallel import ColumnParallelLinear, RowParallelLinea
 from megatron.core.parallel_state import get_tensor_model_parallel_world_size
 
 
-from .mappings import tele_rmsnorm_cuisine
-from .utils import divide
+from .mappings import tele_rmsnorm_cuisine, divide
 
 __all__ = [
     "TeleColumnParallelLinear",

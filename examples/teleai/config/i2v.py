@@ -1,9 +1,9 @@
 import os
 import math
 
-dst_size = (1280, 720)
+dst_size = (640, 384)
 dst_fps = 16
-dst_num_frames = 81
+dst_num_frames = 10241
 
 # Temporary code for quick debugging
 debug = False # open
@@ -46,36 +46,36 @@ config = dict(
         serialize_data=False,
         data_path_list=[
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_2.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_3.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_4.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_5.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_6.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_7.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_8.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_9.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_10.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_11.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_12.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_13.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_14.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_15.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_16.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_17.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_18.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_19.json",             
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_0.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_1.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_2.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_3.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_4.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_5.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_6.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_7.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_8.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/zwzx/zwzx_0.json',
-            '/nvfile-heatstorage/cjf/share/data/0617/zwzx/zwzx_1.json',
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_2.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_3.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_4.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_5.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_6.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_7.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_8.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_9.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_10.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_11.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_12.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_13.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_14.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_15.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_16.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_17.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_18.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_19.json",             
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_0.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_1.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_2.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_3.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_4.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_5.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_6.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_7.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_8.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/zwzx/zwzx_0.json',
+            # '/nvfile-heatstorage/cjf/share/data/0617/zwzx/zwzx_1.json',
         ] if debug == False else ["/nvfile-heatstorage/cjf/share/data/0617/xhzx/xhzx_10.json"],
         filter_cfg=dict(
             dst_size=dst_size,
