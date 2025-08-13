@@ -71,18 +71,6 @@ def forward_step(data_iterator, model):
 
 
 if __name__ == "__main__":
-    
-    import time
-    import os
-    
-    torch.cuda.memory._record_memory_history(max_entries=100000)
-    
     args = parse_args(extra_args=extra_args)
     trainer = Trainer(args)
     trainer.pretrain(forward_step_func=forward_step)
-    
-    os.makedirs("frames", exist_ok=True)
-    save_dir = os.environ.get("frames", ".")  # 默认当前目录
-    file_name = os.path.join(save_dir, f"1001_memory_tp_8_rank{torch.distributed.get_rank()}.pt")
-    torch.cuda.memory._dump_snapshot(file_name)
-    torch.cuda.memory._record_memory_history(enabled=None)
