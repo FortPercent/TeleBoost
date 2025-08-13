@@ -304,8 +304,8 @@ class CausalWanBatchLoader(BaseBatchLoader):
 class CausalDistBatchLoader(BaseBatchLoader):
 
     def _prepare_batch_on_rank_zero(self):
-        if self.data_iterator is None:
-            return None
+        # if self.data_iterator is None:
+        #     return None
         
         # 1. 从数据迭代器获取原始数据（如果需要的话）
         # data = next(self.data_iterator)
@@ -313,7 +313,8 @@ class CausalDistBatchLoader(BaseBatchLoader):
         # 2. 从 producer rank 接收 Tensors
         comm_pair = get_comm_pair()
         args = get_args()
-        tensors_info = torch.ones((16), device=torch.cuda.current_device(), dtype=torch.int32)
+
+        tensors_info = torch.ones((11), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
 
@@ -322,30 +323,19 @@ class CausalDistBatchLoader(BaseBatchLoader):
         if args.distributed_vae:
             start_dim = 0
             intervals = [0]
-            print('start loder for')
             for data_to_get in TeleaiEncoder.get_output_schema():
-                print('up')
                 dims = PROPERTY_DIMS[data_to_get]
                 data_size = 1
-                print(1)
                 num = 0
-                print(dims)
-                x = tensors_info[start_dim:start_dim + dims].tolist()
-                print(x)
                 for dim in tensors_info[start_dim:start_dim + dims].tolist():
-                    print(num)
                     num+=1
                     data_size *= dim 
                 start_dim += dims
-                print(2)
                 intervals.append(intervals[-1] + data_size)
-                print('down')
-            print('start loder req')
             total_size = intervals[-1]
             recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
             req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
             req.wait()
-            print('scuceed loder req')
             unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
             start_dim = 0
             for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):

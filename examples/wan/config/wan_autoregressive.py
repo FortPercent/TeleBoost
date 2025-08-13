@@ -4,8 +4,6 @@ dst_num_frames = 81
 NUM_WORKERS = 1
 
 config = dict(
-    dataloaders=dict(
-        train=dict(
             dataset=dict(
                 type="TensorDataset",
                 pth_paths=[
@@ -41,8 +39,7 @@ config = dict(
             collator=dict(
                 is_equal=True,
             ),
-        ),
-    ),
+    
 )
 # import os
 # import math

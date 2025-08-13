@@ -2,7 +2,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=2,3
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export GPUS_PER_NODE=2
@@ -14,12 +14,13 @@ export MASTER_PORT=${MASTER_PORT:-'12345'}
 export NNODES=1
 export NODE_RANK=0
 # export WORLD_SIZE=$(($GPUS_PER_NODE * $NNODES))
-export WORLD_SIZE=1
+# export WORLD_SIZE=1
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/teleai-infra/litian/Megatron-LM
 CHECKPOINT_PATH_LOAD=None
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/teleai-infra/kaikai/examples
 # mkdir -p $CHECKPOINT_PATH_SAVE
+CONFIG_PATH=config.prone10_lowerlr.config #config.wan_autoregressive.config
 
 DISTRIBUTED_ARGS=(
     --nproc_per_node $GPUS_PER_NODE \
@@ -44,15 +45,16 @@ MODEL_PARALLEL_ARGS=(
     --model CausalDiffusion
     --tensor-model-parallel-size 1
     --consumer-models-num 1
-    # --distributed-vae
-    # --distributed-vae-world-size 1
+    --distributed-vae
+    --distributed-vae-world-size 1
 # 
 )
 
 DATA_ARGS=(
-    --dataset-type TensorDataset
+    # --dataset-type TensorDataset
     --dataloader-type causal
     --micro-batch-size 1
+    --config-path ${CONFIG_PATH}
 )
 
 

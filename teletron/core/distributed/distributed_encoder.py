@@ -205,13 +205,10 @@ class DistDataProducer:
         consumer_rank = cp.consumer
         
         outstanding_sends = sum(1 for _, c, _ in self.size_reqs[mode] if c == consumer_rank)
-        
         if self.size_queues[mode][consumer_rank] and outstanding_sends < MAX_OUTSTANDING_SENDS_PER_CONSUMER:
-            
             size_to_send = self.size_queues[mode][consumer_rank].popleft()
             req_size = dist.isend(tensor=size_to_send, dst=consumer_rank)
             self.size_reqs[mode].append((req_size, consumer_rank, size_to_send))
-
             tensor_to_send = self.data_queues[mode][consumer_rank].popleft()
             req_data = dist.isend(tensor=tensor_to_send, dst=consumer_rank)
             self.data_reqs[mode].append((req_data, consumer_rank, tensor_to_send))

@@ -193,8 +193,6 @@ class CausalWanSelfAttention(nn.Module):
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
-            # print(x.shape, q.shape, k.shape)
-            # print(grid_sizes, current_start, cache_start, frame_seqlen, current_start_frame)
             roped_query = causal_rope_apply(
                 q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
             roped_key = causal_rope_apply(
