@@ -48,7 +48,6 @@ def encode_image(
     image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
     msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
-    print("msk create shape:", 1, num_frames, height // 8, width // 8 ) # 1, 81, 56, 98
     msk[:, 1:] = 0 # 1, 1:81, 56, 98
     msk = torch.concat(
         [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
