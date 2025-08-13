@@ -166,4 +166,11 @@ config = dict(
             "/nvfile-heatstorage/Text2Video/annotations/200w/pack_zwzx_1.json",
         ],
     ),
+        sampler=dict(
+        type="DefaultSampler",
+        shuffle=False,
+        seed=42,
+        drop_last=True,
+        infinite=True,
+    ),
 )

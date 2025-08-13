@@ -94,11 +94,11 @@ class CausalDiffusion(BaseModel):
         # Load checkpoint with memory optimization - no distributed loading
         # load_sharded_generator_distributed(self.generator, "/gemini/space/xxz/Self-Forcing/tmp_shard")
 
-        self.text_encoder = WanTextEncoder()
-        self.text_encoder.requires_grad_(False)
+        # self.text_encoder = WanTextEncoder()
+        # self.text_encoder.requires_grad_(False)
 
-        self.vae = WanVAEWrapper()
-        self.vae.requires_grad_(False)
+        # self.vae = WanVAEWrapper()
+        # self.vae.requires_grad_(False)
 
         self.scheduler = self.generator.get_scheduler()
         self.scheduler.timesteps = self.scheduler.timesteps.to(torch.cuda.current_device())

@@ -11,26 +11,18 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_img_emb_y,
     get_latents,
     get_noise,
-<<<<<<< HEAD
-    get_fake_latents
-=======
+    get_fake_latents,
     get_unprompt_emb
->>>>>>> origin/kaikai
 )
 from teletron.utils import get_args
 from functools import partial
 
 ENCODER_SCHEMA = {
     'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
-<<<<<<< HEAD
     # 'teleai_moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
     'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
     'teleai_multimask': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
-=======
-    'moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
-    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
     'wan_autoregressive' : ['prompt_emb','unprompt_emb','latents']
->>>>>>> origin/kaikai
 }
 
 WORK_FN = {
@@ -39,12 +31,9 @@ WORK_FN = {
     'img_emb_y': get_img_emb_y,
     'latents': get_latents,
     'noise': get_noise,
-<<<<<<< HEAD
     'fake_latents': get_fake_latents,
-=======
     'prompt_emb': get_context,
-    'unprompt_emb': get_unprompt_emb
->>>>>>> origin/kaikai
+    'unprompt_emb': get_unprompt_emb,
 }
 
 PROPERTY_DIMS = {

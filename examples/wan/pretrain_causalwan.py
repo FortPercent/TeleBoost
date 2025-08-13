@@ -2,8 +2,20 @@ import os
 import torch
 from teletron.train import parse_args
 from teletron.train.trainer import Trainer
-from teletron.train.utils import loss_func, get_args
+from teletron.train.utils import average_losses_across_data_parallel_group, get_args
 import debugpy
+
+def causal_loss_func(output_tensor):
+    """Loss function."""
+    loss = output_tensor[0].mean()
+    averaged_loss = average_losses_across_data_parallel_group([loss])
+    loss = loss.unsqueeze(0)
+
+    loss_wo_w = output_tensor[1].mean()
+    averaged_loss_wo_w  = average_losses_across_data_parallel_group([loss_wo_w])
+    loss_wo_w = loss_wo_w.unsqueeze(0)
+
+    return loss, {"loss": averaged_loss[0], "loss_wo_w": averaged_loss_wo_w[0]}
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
@@ -64,18 +76,17 @@ def forward_step(data_iterator, ddpmodel):
 
     from teletron.utils.aux_func import get_attr_wrapped_model
     with torch.no_grad():
-        conditional_dict = {'prompt_embeds':batch["prompt_emb"][0]}
+        conditional_dict = {'prompt_embeds':batch["prompt_emb"]}
         if not getattr(ddpmodel, "unconditional_dict", None):
-            text_encoder = get_attr_wrapped_model(ddpmodel,"text_encoder")
-            unconditional_dict = text_encoder(
-                text_prompts=[args.negative_prompt] * batch_size)
-            unconditional_dict = {k: v.detach() for k, v in unconditional_dict.items()}
-            ddpmodel.unconditional_dict = unconditional_dict
+            unconditional_dict = {'prompt_embeds':batch["unprompt_emb"]}
+            # text_encoder = get_attr_wrapped_model(ddpmodel,"text_encoder")
+            # unconditional_dict = text_encoder(
+            #     text_prompts=[args.negative_prompt] * batch_size)
+            # unconditional_dict = {k: v.detach() for k, v in unconditional_dict.items()}
+            # ddpmodel.unconditional_dict = unconditional_dict
         else:
             unconditional_dict = ddpmodel.unconditional_dict
-    # print(f'conditional_dict:{conditional_dict["prompt_embeds"].shape}')
-    # print(f'unconditional_dict:{unconditional_dict["prompt_embeds"].shape}')
-    # print(f'clean_latent:{clean_latent.shape}')
+
     generator_loss = get_attr_wrapped_model(ddpmodel,"generator_loss")
     generator_loss, generator_loss_w, log_dict = generator_loss(
         image_or_video_shape=image_or_video_shape,
@@ -87,7 +98,7 @@ def forward_step(data_iterator, ddpmodel):
     generator_loss = generator_loss / accumulation_steps
     generator_loss_w = generator_loss_w / accumulation_steps
     
-    return [generator_loss, generator_loss_w], loss_func
+    return [generator_loss, generator_loss_w], causal_loss_func
 
 # def forward_step2(data_iterator, ddpmodel):
 #     batch = next(data_iterator)

@@ -12,7 +12,7 @@ class TensorDataset(torch.utils.data.Dataset):
         # assert len(pth_paths) == len(metadata_paths), "Mismatch between pth_paths and metadata_paths"
 
         self.path = []
-
+        print('tensordataset,tensordataset,tensordataset,tensordataset')
         # Load each dataset source
         for pth_path, metadata_path in zip(pth_paths, metadata_paths):
             metadata = pd.read_csv(metadata_path)
