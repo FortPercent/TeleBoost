@@ -48,7 +48,7 @@ class TensorParallelMixin:
                 )
     
     def enable_rms_norm_parallel(self, rmsnorm_module: nn.Module, dim):
-        """special cuisine on rms norm"""
+        """special cuisine on rmsnorm"""
         return TeleParallelRMSNorm( dim = dim, eps = rmsnorm_module.eps)
     
     def enable_ffn_tensor_parallel(self, ffn_module, config):
