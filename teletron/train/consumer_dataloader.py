@@ -141,7 +141,6 @@ class VastDistBatchLoader(BaseBatchLoader):
             # 例如，返回空的或默认的 tensors
             raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
 
-        
         return batch
 
 class WanDistBatchLoader(BaseBatchLoader):
