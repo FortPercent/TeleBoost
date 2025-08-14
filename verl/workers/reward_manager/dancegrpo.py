@@ -15,12 +15,13 @@
 from collections import defaultdict
 
 import torch
+from tensordict import TensorDict
 
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
-from verl.workers.reward_manager import register
 from verl.utils.reward_score.diffusion import compute_red_intensity_reward
-from tensordict import TensorDict
+from verl.workers.reward_manager import register
+
 
 @register("dancegrpo")
 class AIGCRewardManager:
@@ -62,6 +63,7 @@ class AIGCRewardManager:
             data_item = data[i]  # DataProtoItem
             reward = compute_red_intensity_reward(data_item.batch["video_frames"])
             all_rewards.append(reward)
+            # print(all_rewards)
 
             # score = self.compute_score(
             #     data_source=data_source,

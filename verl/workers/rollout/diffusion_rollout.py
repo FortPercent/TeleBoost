@@ -17,24 +17,24 @@ TODO: refactor this class. Currently, it will hang when using FSDP HybridShard. 
 Then, get full state_dict and bind the state_dict to the single GPU model. Then, use the single GPU model to perform generation.
 """
 import contextlib
+import math
+import os
+
 import torch
 import torch.distributed
+from diffusers.image_processor import VaeImageProcessor
 from tensordict import TensorDict
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from tqdm.auto import tqdm
+from transformers import GenerationConfig
 
 from verl import DataProto
-from verl.utils.torch_functional import get_response_mask
-from .base import BaseRollout
-
-from transformers import GenerationConfig
-from wan.modules.vae import WanVAE
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
-import math
-from tqdm.auto import tqdm
-from diffusers.image_processor import VaeImageProcessor
-from tensordict import TensorDict
-import os
+from verl.utils.torch_functional import get_response_mask
+from wan.modules.vae import WanVAE
+
+from .base import BaseRollout
 
 __all__ = ['DiffusionRollout']
 
@@ -52,22 +52,18 @@ class DiffusionRollout(BaseRollout):
         self.vae_module=vae
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
-        free, total = torch.cuda.mem_get_info()
-        print("begin rollout")
-        print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
-        print(f"总显存:   {total / (1024 ** 3):.2f} GB")
-        print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
+        
         num_frames = self.config.num_frames
         size = (self.config.w, self.config.h)
         sample_steps = self.config.sampling_steps
 
         sigma_schedule = torch.linspace(1, 0, self.config.sampling_steps + 1)
-
+        
         def sd3_time_shift(shift, num_frames):
             return (shift * num_frames) / (1 + (shift - 1) * num_frames)
-
+ 
         sigma_schedule = sd3_time_shift(self.config.shift, sigma_schedule)
-        
+               
         def assert_eq(x, y, msg=None):
             assert x == y, f"{msg or 'Assertion failed'}: {x} != {y}"
 
@@ -133,7 +129,6 @@ class DiffusionRollout(BaseRollout):
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
 
             with torch.no_grad(): 
-                print("before sample",self.module.dtype)     
                 _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
                     [input_latents],
                     progress_bar,
@@ -144,13 +139,13 @@ class DiffusionRollout(BaseRollout):
                     seq_len,
                     grpo_sample,
                 )
-                print("after sample",self.module.dtype)   
-            print("final_latents",final_latents.shape,"batch_latents",batch_latents.shape,"batch_log_probs",batch_log_probs.shape)
-            batch_latents = batch_latents.unsqueeze(0)
-            batch_log_probs = batch_log_probs.unsqueeze(0)
+                
+            #print("final_latents",final_latents.shape,"batch_latents",batch_latents.shape,"batch_log_probs",batch_log_probs.shape)
+            # batch_latents = batch_latents.unsqueeze(0)
+            # batch_log_probs = batch_log_probs.unsqueeze(0)
 
-            all_latents.append(batch_latents)
-            all_log_probs.append(batch_log_probs)
+            all_latents.append(batch_latents.unsqueeze(0))
+            all_log_probs.append(batch_log_probs.unsqueeze(0))
             all_sigma_schedule.append(sigma_schedule.unsqueeze(0))    
 
             autocast_dtype = torch.float16 #TODO
@@ -179,10 +174,12 @@ class DiffusionRollout(BaseRollout):
                         args: 配置参数
                     """
                     import time
+                    from datetime import datetime
+
+                    import cv2
                     import numpy as np
                     from PIL import Image
-                    import cv2
-                    from datetime import datetime
+
                     # 获取当前时间戳
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     
@@ -257,10 +254,10 @@ class DiffusionRollout(BaseRollout):
                         print(f"Unexpected video_frames shape: {video_frames.shape}")
                 
                 #To see image
-                import torch.distributed as dist
-                save_video_and_prompt(video_frames, dist.get_rank(), index)
-                print(f"local rank: {dist.get_rank()}")
-                exit(0)
+                # import torch.distributed as dist
+                # save_video_and_prompt(video_frames, dist.get_rank(), index)
+                # print(f"local rank: {dist.get_rank()}")
+                # exit(0)
                 # print(f"batch_captions[{index}]: {batch_captions}")
 
                 # # 保存视频
@@ -270,10 +267,11 @@ class DiffusionRollout(BaseRollout):
                 #     index
                 # )
                 video_frames = video_frames.unsqueeze(0)
+                # print("video_frames",video_frames.shape)
             # print("video_frames",video_frames.shape)
             all_video_frames.append(video_frames)
             torch.cuda.empty_cache()
-            
+
         if len(all_latents) > 1:
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
@@ -290,7 +288,8 @@ class DiffusionRollout(BaseRollout):
         timestep_values = [timestep_value[:] for _ in range(B)]
 
         timesteps =  torch.tensor(timestep_values, device=get_device_id(), dtype=torch.long)
-
+        # print("all_latents",all_latents.shape,"all_log_probs",all_log_probs.shape,"all_video_frames",all_video_frames.shape,"all_sigma_schedule",all_sigma_schedule.shape)
+        # exit(0)
         # timesteps = timesteps.unsqueeze(0).repeat(B, 1,1)
         latents=all_latents[:, :-1]
         next_latents=all_latents[:, 1:]
@@ -309,11 +308,7 @@ class DiffusionRollout(BaseRollout):
             batch_size=B
         )
         non_tensor_batch = prompts.non_tensor_batch
-        free, total = torch.cuda.mem_get_info()
 
-        print(f"before compute reward 剩余显存: {free / (1024 ** 3):.2f} GB")
-        print(f"before compute reward 总显存:   {total / (1024 ** 3):.2f} GB")
-        print(f"before compute reward 已用显存: {(total - free) / (1024 ** 3):.2f} GB")
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     def run_wan_sample_step(
@@ -345,20 +340,15 @@ class DiffusionRollout(BaseRollout):
                 timestep_cond = timestep
                 timestep_uncond = timestep
                 transformer.eval()
-                with torch.autocast("cuda", torch.float32):
+                with torch.autocast("cuda", torch.bfloat16):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
-
-                    #TODO!!!!
-                    #管理!!!可能有hook!!!
-                    # transformer.to(device)
-                    
                     pred_cond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]
                         t=timestep_cond,
                         context=context,
                         seq_len=seq_len
                     )
-                    
+
                     # 处理模型输出
                     if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
                         model_output_cond = pred_cond['rgb'][0]
@@ -402,19 +392,15 @@ class DiffusionRollout(BaseRollout):
                     sde_solver=True  # 启用SDE求解器
                 )
                 
-                latents = [next_latents.to(torch.float32)]  # [(16, 7, 64, 64)]
+                latents=[next_latents.to(torch.float32)]
                 all_latents.append(latents[0])  # 存储 (16, 7, 64, 64)
                 all_log_probs.append(log_prob)  # 存储 log概率
             
             final_latents = pred_original
-                    # all the tp ranks should contain the same data here. data in all ranks are valid
 
             # 修正：WAN的all_latents维度是 (num_steps+1, 16, 7, 64, 64)
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
-            
-            print(f"WAN after stack: all_latents={all_latents.shape}, all_log_probs={all_log_probs.shape}")
-            # (9, 16, 7, 64, 64), (8,)
             
             return latents, final_latents, all_latents, all_log_probs
 
