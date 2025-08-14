@@ -102,7 +102,7 @@ class VastDistBatchLoader(BaseBatchLoader):
         # breakpoint()
         comm_pair = get_comm_pair()
         args = get_args()
-        info_size  = sum([PROPERTY_DIMS[data_to_get] for data_to_get in WanVideoEncoder.get_output_schema()])
+        info_size  = sum([PROPERTY_DIMS[data_to_get] for data_to_get in TeleaiEncoder.get_output_schema()])
         tensors_info = torch.ones((info_size), device=torch.cuda.current_device(), dtype=torch.int32)
         req = dist.irecv(tensors_info, comm_pair.producer)
         req.wait()
@@ -141,7 +141,6 @@ class VastDistBatchLoader(BaseBatchLoader):
             # 例如，返回空的或默认的 tensors
             raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
 
-        
         return batch
 
 class WanDistBatchLoader(BaseBatchLoader):

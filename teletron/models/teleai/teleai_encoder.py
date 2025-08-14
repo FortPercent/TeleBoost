@@ -1,6 +1,7 @@
 
 import torch
 from typing import Dict, Any, Tuple, List,Union
+
 from teletron.core.distributed.base_encoder import BaseEncoder
 from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
 from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
@@ -11,12 +12,16 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_img_emb_y,
     get_latents,
     get_noise,
-    get_fake_latents
+    get_fake_latents,
+    get_depth_latents,
 )
 from teletron.utils import get_args
 from functools import partial
 
+from video_depth_anything.video_depth import VideoDepthAnything
+
 ENCODER_SCHEMA = {
+    'teleai_i2v_depth': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'depth_latents'],
     'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
     # 'teleai_moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
     'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
@@ -30,6 +35,7 @@ WORK_FN = {
     'latents': get_latents,
     'noise': get_noise,
     'fake_latents': get_fake_latents,
+    'depth_latents': get_depth_latents,
 }
 
 PROPERTY_DIMS = {
@@ -39,6 +45,7 @@ PROPERTY_DIMS = {
     'latents': 5,
     'noise': 5,
     'fake_latents': 5,
+    'depth_latents': 5,
 }
 
 
@@ -65,7 +72,7 @@ class TeleaiEncoder(BaseEncoder):
         self.model_paths = kwargs.get("model_paths")
         self.tokenizer_path = kwargs.get("tokenizer_path")
         self.tiler_kwargs = kwargs.get("tiler_kwargs", {})
-
+        self.depth_model_path = args.depth_model_path
         if not self.model_paths or not self.tokenizer_path:
             raise ValueError("TeleaiEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
 
@@ -74,6 +81,7 @@ class TeleaiEncoder(BaseEncoder):
         self.image_encoder = None
         self.vae = None
         self.prompter = None
+        self.depth_model = None
         self.work_fn = WORK_FN
 
     def setup(self) -> None:
@@ -93,6 +101,8 @@ class TeleaiEncoder(BaseEncoder):
         self.prompter = TeleaiPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
+        self.depth_model = VideoDepthAnything().to(device=self.device)
+        self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu'), strict=True)
 
         for key, val in self.work_fn.items():
             self.work_fn[key] = self.prepare_work_fn(key, val)
@@ -112,6 +122,8 @@ class TeleaiEncoder(BaseEncoder):
             return partial(work_fn, dtype=torch.bfloat16)
         elif target == 'fake_latents':
             return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+        elif target == 'depth_latents':
+            return partial(work_fn, depth_model=self.depth_model, vae=self.vae, dtype=torch.bfloat16)
         else:
             return work_fn
     
