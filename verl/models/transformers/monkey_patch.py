@@ -150,21 +150,16 @@ def patch_diffusion_for_ulysses_input_slicing(model: type):
     def _create_ulysses_wrapped_block_forward(original_forward):
         def ulysses_wrapped_block_forward(*args, **kwargs):
             x = kwargs.get("x")
-            # freqs = kwargs.get("freqs")
-            # print("[freqs],xxxx",freqs.float().norm().item(),freqs.shape)
-            print("[x],xxxx",x.float().norm().item(),x.shape)
             
             current_ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
-            # x = torch.load("/nvfile-heatstorage/teleai-infra/wxe/dancegrpo_aigc/output/0__fsdp_wrapped_module.blocks.0._checkpoint_wrapped_module._fsdp_wrapped_module.self_attn_input.pt")["input"][0]
             slice_now = x is not None and current_ulysses_sp_size > 1
             if slice_now:
                 x_sliced = diffusion_slice_input_tensor_pad(x, dim=1, padding=True)
                 print("x",x_sliced.shape)
-                # no need to split head
+                # no need to split freqs
                 # freqs_sliced = diffusion_slice_input_tensor_pad(freqs,dim=0,padding=True)
                 # print("freqs_sliced",freqs_sliced.shape)
                 kwargs["x"] = x_sliced
-                # kwargs["freqs"] = freqs_sliced
             try:
                 return original_forward(*args, **kwargs)
             finally:

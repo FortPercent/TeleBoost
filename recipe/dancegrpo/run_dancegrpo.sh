@@ -2,7 +2,7 @@
 set -xeuo pipefail
 
 project_name='Dancegrpo'
-exp_name='Dancegrpo-Wan-14B'
+exp_name='Dancegrpo_Wan_14B_720P_129'
 
 adv_estimator=grpo
 
@@ -22,9 +22,9 @@ loss_agg_mode="token-mean"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
-train_prompt_bsz=4
+train_prompt_bsz=4 # same with dp
 gen_prompt_bsz=$((train_prompt_bsz * 3))
-n_resp_per_prompt=12
+n_resp_per_prompt=4
 train_prompt_mini_bsz=1
 
 # Ray
@@ -35,8 +35,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/teleai-infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/wxe/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
@@ -63,17 +63,17 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/root/Wan2.1-T2V-1.3B' \
-    actor_rollout_ref.model.vae_model_path='/root/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.path='/root/Wan2___1-T2V-14B' \
+    actor_rollout_ref.model.vae_model_path='/root/Wan2___1-T2V-14B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=5.0 \
-    actor_rollout_ref.h=480 \
-    actor_rollout_ref.w=720 \
+    actor_rollout_ref.h=720 \
+    actor_rollout_ref.w=1280 \
     actor_rollout_ref.num_frames=81 \
     actor_rollout_ref.sampling_steps=16 \
     actor_rollout_ref.actor.eta=0.25 \
     actor_rollout_ref.lr_warmup_steps=0 \
     actor_rollout_ref.use_hpsv2=True \
-    actor_rollout_ref.shift=3 \
+    actor_rollout_ref.shift=5 \
     actor_rollout_ref.actor.timestep_fraction=0.6 \
     actor_rollout_ref.init_same_noise=True \
     actor_rollout_ref.actor.clip_range=1e-4 \
@@ -94,7 +94,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.optim.lr=2e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.optim.weight_decay=0.1 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=4 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=1 \
     actor_rollout_ref.actor.fsdp_config.param_offload=${offload} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${offload} \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -125,12 +125,12 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     trainer.logger=['tensorboard'] \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.total_training_steps=81 \
+    trainer.total_training_steps=1000 \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=5 \
-    trainer.save_freq=100 \
+    trainer.save_freq=200 \
     trainer.total_epochs=1 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto \

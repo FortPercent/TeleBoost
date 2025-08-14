@@ -23,22 +23,19 @@ from pprint import pprint
 
 import numpy as np
 import torch
+
+# from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
+from omegaconf import OmegaConf, open_dict
 from tqdm import tqdm
 
 from verl import DataProto
-from verl.trainer.ppo.core_algos import agg_loss
-from verl.trainer.ppo.metric_utils import (
-    compute_data_metrics,
-    compute_throughout_metrics,
-    compute_timing_metrics,
-    reduce_metrics,
-)
-from verl.utils.debug import marked_timer
-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_response_mask
-# from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
-from omegaconf import OmegaConf, open_dict
 from verl.single_controller.ray.base import create_colocated_worker_cls
+from verl.trainer.ppo.core_algos import agg_loss
+from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_response_mask
+from verl.utils.debug import marked_timer
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
+
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
     datas=data.pop(
@@ -165,10 +162,12 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             with torch.amp.autocast('cuda'):
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
                                 new_batch = gen_batch_output.union(reward_tensor)
+                                new_batch.pop(batch_keys=['video_frames'])
                                 del gen_batch_output
                         else:
                             reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
                             new_batch = gen_batch_output.union(reward_tensor)
+                            new_batch.pop(batch_keys=['video_frames'])
                             del gen_batch_output
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)

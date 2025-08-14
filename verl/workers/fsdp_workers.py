@@ -15,11 +15,13 @@
 The main entry point to run the PPO algorithm
 """
 
+import functools
 import json
 import logging
 import os
 import warnings
 from dataclasses import asdict
+from functools import partial
 from typing import Union
 
 import psutil
@@ -27,9 +29,11 @@ import torch
 import torch.distributed
 import torch.distributed as dist
 from codetiming import Timer
+from diffusers.image_processor import VaeImageProcessor
 from omegaconf import DictConfig, OmegaConf, open_dict
 from peft import LoraConfig, TaskType, get_peft_model
 from safetensors.torch import save_file
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
@@ -66,11 +70,6 @@ from verl.utils.model import compute_position_id_with_mask
 from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
-from diffusers.image_processor import VaeImageProcessor
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (CheckpointImpl, apply_activation_checkpointing,
-                                                                         checkpoint_wrapper)
-import functools
-from functools import partial
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
     checkpoint_impl=CheckpointImpl.NO_REENTRANT,
@@ -228,7 +227,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             return m in to_wrap
 
         def wrapper_fn(m):
-            print("[CKPT NON-REENTRANT]", m.__class__.__name__)
+            # print("[CKPT NON-REENTRANT]", m.__class__.__name__)
             return non_re_wrapper(m)
 
         # 3) 应用
@@ -251,7 +250,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
     ):
         from torch import optim
         from torch.distributed.fsdp import CPUOffload, MixedPrecision
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq,GPT2Config
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq, GPT2Config
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
         from verl.utils.torch_dtypes import PrecisionType
@@ -273,8 +272,12 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             torch_dtype = torch.float32 if self._is_actor else torch.bfloat16
         else:
             torch_dtype = PrecisionType.to_dtype(torch_dtype)
-        print("init",torch_dtype)
+
         torch_dtype=torch.bfloat16
+        
+        log_gpu_memory_usage(f"After {role} FSDP init", logger=logger)
+        
+        torch.cuda.memory._record_memory_history(max_entries=100000)
         # override model kwargs
         actor_model_config=GPT2Config.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
         # patch for kimi-vl
@@ -420,13 +423,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             
         if enable_activation_offload:
             enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
-        
-        free, total = torch.cuda.mem_get_info()
-        print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
-        print(f"总显存:   {total / (1024 ** 3):.2f} GB")
-        print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
-        log_gpu_memory_usage(f"After {role} FSDP init", logger=logger)
-
+            
         # TODO: add more optimizer args into config
         if role == "actor" and optim_config is not None:
             from verl.utils.torch_functional import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
@@ -1294,10 +1291,11 @@ class RewardModelWorker(Worker, WorkerProfilerExtension):
             self.tokenizer = hf_tokenizer(local_path, trust_remote_code=config.model.get("trust_remote_code", False))
 
         if config.type=="diffusion":
-            from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
             from typing import Union
+
             import huggingface_hub
-            from hpsv2.utils import root_path, hps_version_map
+            from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
+            from hpsv2.utils import hps_version_map, root_path
 
             def initialize_model():
                 model_dict = {}

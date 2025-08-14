@@ -17,13 +17,12 @@ DeepSpeed Ulysses Paper: https://arxiv.org/abs/2309.14509
 Inspired from: https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/sequence/layer.py
 """
 
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed import ProcessGroup
-from typing import Optional, List
 
 _ULYSSES_SEQUENCE_PARALLEL_GROUP = None
 
@@ -299,7 +298,7 @@ def register_cp_grad_reduce_hook(model):
     def cp_grad_reduce(grad):
         with torch.no_grad():
             # 使用 all_reduce 直接对梯度进行求和
-            print(f"Rank {torch.distributed.get_rank()}: before all_reduce, grad = {grad.type(),grad.float().norm().item()}")
+            # print(f"Rank {torch.distributed.get_rank()}: before all_reduce, grad = {grad.type(),grad.float().norm().item()}")
             # orig_dtype = grad.dtype
             # # 转成 fp32 做通信（可加 contiguous 以稳妥）
             # buf = grad.detach().to(torch.float32)
@@ -308,7 +307,7 @@ def register_cp_grad_reduce_hook(model):
             )
             # 写回到原 grad（不改计算图）
             # grad.copy_(buf.to(orig_dtype))
-            print(f"Rank {torch.distributed.get_rank()}: after all_reduce, grad = {grad.float().norm().item()}")
+            # print(f"Rank {torch.distributed.get_rank()}: after all_reduce, grad = {grad.float().norm().item()}")
             return grad
 
     for name, param in model.named_parameters():
@@ -317,7 +316,7 @@ def register_cp_grad_reduce_hook(model):
         #     "head" in name or
         #     "modulation" in name):
         if "blocks" in name:
-            print("in register cp",name)
+            # print("in register cp",name)
             param.register_hook(cp_grad_reduce)
 
        
