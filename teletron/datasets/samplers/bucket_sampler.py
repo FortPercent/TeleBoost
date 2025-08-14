@@ -67,6 +67,5 @@ class BucketSampler(torch.utils.data.Sampler):
 
         while True:
             which_bucket_idx = next(self.which_bucket_iter)
-            print(which_bucket_idx)
             self.consumed_samples += 1
             yield next(self.bucket_indices_iters[which_bucket_idx])
