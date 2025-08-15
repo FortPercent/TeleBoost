@@ -148,6 +148,12 @@ class VariableClipDataset(BaseDataset):
         shape_num_map = defaultdict(int)
         broken_clip = 0
 
+        # prepare bucket
+        self.buckets_size = self.filter_cfg.get("buckets_size", [(480, 272), (640, 368), (864, 480)])
+        self.buckets_size_ratio = self.filter_cfg.get("buckets_size_ratio", [0.3, 0.4, 0.3])
+        for shape in self.buckets_size:
+            shape_list.append(f"{shape[0]}__{shape[1]}")
+
         for clip in self.data_list:
             frame_interval = max(1, round(clip.fps / dst_fps))
             min_num_frames = frame_interval * dst_num_frames
@@ -222,8 +228,6 @@ class VariableClipDataset(BaseDataset):
                     continue
 
             if self.enable_bucket_index:
-                self.buckets_size = self.filter_cfg.get("buckets_size", [(480, 272), (640, 368), (864, 480)])
-                self.buckets_size_ratio = self.filter_cfg.get("buckets_size_ratio", [0.3, 0.4, 0.3])
                 sampler_size = random.choices(self.buckets_size, weights=self.buckets_size_ratio)[0]
                 dst_width, dst_height = image_utils.get_image_size(
                     (sampler_size[0], sampler_size[1]),
@@ -232,8 +236,6 @@ class VariableClipDataset(BaseDataset):
                     multiple=multiple,
                 )
                 video_info = f"{sampler_size[0]}__{sampler_size[1]}"
-                if video_info not in shape_list:
-                    shape_list.append(video_info)
                 setattr(clip, "bucket_index", shape_list.index(video_info))
                 shape_num_map[video_info] += 1
                 setattr(clip, "video_info", (dst_width, dst_height))
