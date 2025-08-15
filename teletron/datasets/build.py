@@ -3,6 +3,7 @@
 from .registry import Registry, build_module
 from .clip_dataset import ClipDataset
 from .fake_dataset import FakeDataset
+from .variable_dataset import VariableClipDataset
 import torch
 import random
 from teletron.datasets.collators import DefaultCollator
@@ -19,6 +20,7 @@ from teletron.core.parallel_state import get_transformer_model_group
 DATASETS = Registry()
 DATASETS.register_module(ClipDataset)
 DATASETS.register_module(FakeDataset)
+DATASETS.register_module(VariableClipDataset)
 
 def build_dataset(params_or_type, *args, **kwargs):
     return build_module(DATASETS, params_or_type, *args, **kwargs)
