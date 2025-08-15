@@ -2,17 +2,31 @@ from typing import Tuple, Optional
 import torch
 import torch.nn as nn
 from teletron.core.context_parallel import ContextParallelMixin
+from teletron.core.tensor_parallel import TensorParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
-from .teleai_model import TeleaiModel, DiTBlock, sinusoidal_embedding_1d
+from .teleai_model import TeleaiModel, DiTBlock, sinusoidal_embedding_1d, AttentionModule
 import logging
 
-
-class ContextParallelTeleaiDitBlock(ContextParallelMixin, DiTBlock):
-    def __init__(self, *args, **kwargs):
-        DiTBlock.__init__(self, *args, **kwargs)
+class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock):
+    def __init__(
+        self, 
+        config,
+        has_image_input: bool, 
+        dim: int,
+        num_heads: int,
+        ffn_dim: int,
+        eps: float = 1e-6,
+        **kwargs,
+        ):
+        DiTBlock.__init__(self, has_image_input, dim, num_heads, ffn_dim, eps, **kwargs)
         # from ContextParallelMixin
         self.enable_context_parallel(self.self_attn.attn)
-
+        
+        # from Tensor ParallelMixin
+        self.enable_ffn_tensor_parallel(self.ffn, config)
+        self.enable_self_attn_tensor_parallel(self.self_attn, config)
+        self.enable_cross_attn_tensor_parallel(self.cross_attn, config)
+        
     def forward(self, x, context, t_mod, freqs):
         modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)
         modulation = modulation + t_mod
@@ -42,14 +56,13 @@ def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0, devi
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
     return freqs_cis
 
-class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiModel):
+class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, TransformerGeneralMixin, TeleaiModel):
     def __init__(self, config):
         TeleaiModel.__init__(self, config)
         self.config = config
 
         self.blocks = nn.ModuleList([
-            ContextParallelTeleaiDitBlock(
-                self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
+            ParallelTeleaiDitBlock(self.config, self.has_image_input, self.dim, self.num_heads, self.ffn_dim, self.eps)
             for _ in range(self.num_layers)
         ])
 
@@ -117,6 +130,7 @@ class ParallelTeleaiModel(ContextParallelMixin, TransformerGeneralMixin, TeleaiM
 
         x = self.split_input(x, dim=1)
         freqs = self.split_input(freqs, dim=0)
+        # freqs = self.split_input(freqs, dim=-1)
         x = self.blocks(x, context_emb, t_mod, freqs)
         x = self.gather_output(x, dim=1)
 
