@@ -149,7 +149,7 @@ class VariableClipDataset(BaseDataset):
         broken_clip = 0
 
         # prepare bucket
-        self.buckets_size = self.filter_cfg.get("buckets_size", [(480, 272), (640, 368), (864, 480)])
+        self.buckets_size = self.filter_cfg.get("buckets_size", [(640, 368), (864, 480), (960, 528)])
         self.buckets_size_ratio = self.filter_cfg.get("buckets_size_ratio", [0.3, 0.4, 0.3])
         for shape in self.buckets_size:
             shape_list.append(f"{shape[0]}__{shape[1]}")
