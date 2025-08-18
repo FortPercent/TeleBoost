@@ -5,6 +5,7 @@ import numpy as np
 from einops import rearrange
 from collections import defaultdict
 from teletron.train.utils import get_args
+from teletron.utils import set_config
 
 def forward_vae(images):
     images = images.to(self.vae.dtype)
@@ -51,7 +52,6 @@ def encode_image(
     image = preprocess_image(image.resize((width, height))).to(torch.cuda.current_device())
     clip_context = image_encoder.encode_image([image])
     msk = torch.ones(1, num_frames, height // 8, width // 8, device=torch.cuda.current_device())
-    # print("msk create shape:", 1, num_frames, height // 8, width // 8 ) # 1, 81, 56, 98
     msk[:, 1:] = 0 # 1, 1:81, 56, 98
     msk = torch.concat(
         [torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1
@@ -547,3 +547,22 @@ def get_frame_interval(batch, dtype=torch.bfloat16):
     return batch['frame_interval'].to(
         dtype=dtype, device=torch.cuda.current_device()
     )
+
+@torch.no_grad
+def get_depth_latents(batch, depth_model, vae, dtype=torch.bfloat16):
+    global_config = set_config()
+    target_fps = global_config.dataset.filter_cfg.dst_fps
+    frames = rearrange(batch["images"], "b t c h w -> b t h w c").squeeze(0).numpy()
+    depths, fps = depth_model.infer_video_depth(frames, target_fps, device='cuda', fp32=dtype==torch.float32)
+    depths = torch.from_numpy(depths).unsqueeze(0).unsqueeze(2).repeat(1, 1, 3, 1, 1).to(dtype=dtype, device=torch.cuda.current_device())
+
+    depths_latents = encode_video(
+        vae,
+        rearrange(depths, "b t c h w -> b c t h w").to(
+            dtype=dtype, device=torch.cuda.current_device()
+        ),
+        tiled=False,
+        tile_size=(34, 34),
+        tile_stride=(18, 16),
+    )
+    return depths_latents.to(dtype=dtype, device=torch.cuda.current_device())

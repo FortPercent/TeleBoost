@@ -4,13 +4,10 @@ import torch.distributed as dist
 import collections
 import time
 import copy
-from typing import Callable, Any, Dict, List, Tuple,Literal
+import random
+import numpy as np 
+from typing import Callable, Any, Dict
 import json
-from teletron.train.checkpoint.utils import (
-    # read_metadata, # 移除未使用的导入
-    get_checkpoint_name,
-    get_checkpoint_tracker_filename,
-)
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import get_args
 from teletron.train.checkpoint import ensure_directory_exists
@@ -53,6 +50,19 @@ def merge_commpairs(commpairs: list) -> Dict[int, CommPair]:
     return merged_list
 
 
+def _set_random_seed_by_rank(seed_=1234):
+    """Set random seed for reproducability."""
+    if seed_ is not None and seed_ > 0:
+        # Ensure that different producer get different seeds.
+        seed = seed_ + (10 * torch.distributed.get_rank())
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        # if torch.cuda.device_count() > 0:
+        #     tensor_parallel.model_parallel_cuda_manual_seed(seed)
+    else:
+        raise ValueError("Seed ({}) should be a positive integer.".format(seed))
+
 class DistDataProducer:
     def __init__(
         self,
@@ -64,6 +74,7 @@ class DistDataProducer:
         valid_ds: Any = None,
     ):
         self.args = get_args()
+        _set_random_seed_by_rank(self.args.seed)
         self.rank = rank
         self.device = device
         self.encoder = get_encoder(name=encoder_name, device=self.device)

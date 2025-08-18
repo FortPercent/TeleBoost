@@ -34,6 +34,7 @@ class PackInputs:
         input_dict["struct_prompt"] = data_dict["struct_prompt"]
         input_dict["short_prompt"] = data_dict["short_prompt"]
         input_dict["dense_prompt"] = data_dict["dense_prompt"]
+        input_dict["frame_interval"] = data_dict["frame_interval"]
         for image_key in self.image_keys:
             input_dict[image_key] = (
                 (data_dict[image_key] / 255.0) - self.mean

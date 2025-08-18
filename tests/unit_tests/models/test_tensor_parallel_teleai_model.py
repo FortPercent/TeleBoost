@@ -4,17 +4,15 @@ from typing import Tuple
 from unittest import TestCase
 from unittest.mock import patch, Mock
 from unit_tests.test_utils import spawn
+from megatron.core import mpu
 import logging
-from tensorwatch import watch_module_forward_backward
-from tensorwatch import TensorWatch
-# uv pip install --index-url http://pypi.chinatelecom.ai/simple/ -e .
 
-# TensorWatch.is_save_tensor = True
-# TensorWatch.save_dir = './tensorwatch_data_origin'
+TELEAI_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
+TELEAI_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
+TELEAI_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
+TELEAI_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 
-# Configure logging
-# logging.basicConfig(level=logging.DEBUG,
-# format='%(asctime)s - %(levelname)s - %(message)s')
+CUDA_DEVICES = [0, 1, 2, 3]
 
 class TeleaiParams:
     hidden_size: int = 5120
@@ -30,18 +28,10 @@ class TeleaiParams:
     has_image_input: bool = True
     has_image_pos_emb: bool = False
 
-
-TELEAI_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
-TELEAI_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
-TELEAI_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
-TELEAI_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
-
-
 @patch("teletron.utils.get_args")
 def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
-    
     from teletron.models.teleai import ParallelTeleaiModel,TeleaiModel
-    from teletron.core.parallel_state import initialize_model_parallel_base 
+    
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
@@ -53,7 +43,6 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
     args.consumer_models_num = 1
     mock_teletron.return_value = args
 
-    # For Tensor Parallelism
     from megatron.core.transformer import TransformerConfig
     cfg = Mock(spec=TransformerConfig)
     cfg._cpu_offloading_context = None
@@ -68,22 +57,21 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
     cfg.num_layers = args.num_layers
     cfg.sequence_parallel = False
     
-    tp_size = 2
-    cp_size = world_size // tp_size
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
     
-    # Set your device here
-    cuda_offset = 2
-    cuda_rank = cuda_offset+rank
+    global CUDA_DEVICES
+    assert len(CUDA_DEVICES) >= world_size, f"GPU number is not enough"
+    cuda_rank = CUDA_DEVICES[rank]
     torch.cuda.set_device(cuda_rank)
     
+    from teletron.core.parallel_state import initialize_model_parallel_base
     initialize_model_parallel_base(
-            tensor_model_parallel_size = tp_size,
+            tensor_model_parallel_size = world_size,
             pipeline_model_parallel_size = 1,
             virtual_pipeline_model_parallel_size = None,
             pipeline_model_parallel_split_rank = None,
             use_sharp = False,
-            context_parallel_size = cp_size,
+            context_parallel_size = 1,
             expert_model_parallel_size = 1,
             nccl_communicator_config_path = None,
             distributed_timeout_minutes = 30,
@@ -95,28 +83,29 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
     torch.manual_seed(1234)
     parallel_teleai_model = ParallelTeleaiModel(cfg).cuda(cuda_rank).to(torch.bfloat16)
     
-    if tp_size > 1:
-        parallel_teleai_model.load_state_dict(tp_load_state_dict(rank, tp_size, teleai_model))
-    else:
-        parallel_teleai_model.load_state_dict(teleai_model.state_dict())
+    parallel_teleai_model.load_state_dict(tp_load_state_dict(teleai_model))
     
-    # watch_module_forward_backward(teleai_model)
+    input_dict = torch.load("/nvfile-heatstorage/ai_infra/data/lit117/teletron-testing/test_data/saved_inputs_360/input_dict_iter0_rank0.pt", map_location=f"cuda:{cuda_rank}")
     
-    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{cuda_rank}")
-    teleai_model_output = teleai_model(**input_dict)
-    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{cuda_rank}")
+    teleai_model_output = teleai_model(x=input_dict['noisy_latents'],
+                                    timestep=input_dict['timestep'],
+                                    context=input_dict['prompt_emb']['context'],
+                                    clip_feature = input_dict['image_emb']['clip_feature'],
+                                    y=input_dict['image_emb']['y'])  
     
-    parallel_teleai_model_output = parallel_teleai_model(**input_dict)
+    parallel_teleai_model_output = parallel_teleai_model(x=input_dict['noisy_latents'],
+                                    timestep=input_dict['timestep'],
+                                    context=input_dict['prompt_emb']['context'],
+                                    clip_feature = input_dict['image_emb']['clip_feature'],
+                                    y=input_dict['image_emb']['y'])  
         
     if is_close_by_normalized_euclid_dist(teleai_model_output, parallel_teleai_model_output):
         q.put(f"{TELEAI_MODEL_FWD_SUCCESS} rank{rank}")
     else:
         q.put(f"{TELEAI_MODEL_FWD_FAIL} rank{rank}")
-    #TODO: test backward
-    # test backward
+
     teleai_model_output.backward(torch.ones_like(teleai_model_output))
     parallel_teleai_model_output.backward(torch.ones_like(parallel_teleai_model_output))
-    # TensorWatch.step()
     model_grads = {name: param.grad for name, param in teleai_model.named_parameters() if param.grad is not None}
     parallel_model_grads = {name: param.grad for name, param in parallel_teleai_model.named_parameters() if param.grad is not None}
     grad_allclose = True
@@ -132,13 +121,6 @@ def parallel_teleai_model_testing(rank, world_size, q, mock_teletron):
     else:
         q.put(f"{TELEAI_MODEL_BWD_FAIL} rank{rank}")
 
-def normalized_euclid_dist(rank, name, output, parallel_output):
-    teleai_norm = output.norm().item()
-    parallel_norm = parallel_output.norm().item()
-    euclid_dist = torch.norm(output - parallel_output)
-    normalized_euclid_dist = 0.5 * euclid_dist / (teleai_norm + parallel_norm)
-    logging.info(f"{name}: {normalized_euclid_dist} {output.norm().item()} {parallel_output.norm().item()} rank{rank}")
-    return normalized_euclid_dist
 
 def tp_normalized_euclid_dist(rank, name, output, parallel_output):    
     col_w = ["self_attn.query.weight", "self_attn.key.weight", "self_attn.value.weight","ffn.0.weight",
@@ -155,6 +137,14 @@ def tp_normalized_euclid_dist(rank, name, output, parallel_output):
     norm_w = ["self_attn.norm_query.weight", "self_attn.norm_key.weight",
               "cross_attn.norm_query.weight", "cross_attn.norm_key.weight",
               "cross_attn.norm_image_key.weight"]
+    
+    def normalized_euclid_dist(rank, name, output, parallel_output):
+        teleai_norm = output.norm().item()
+        parallel_norm = parallel_output.norm().item()
+        euclid_dist = torch.norm(output - parallel_output)
+        normalized_euclid_dist = 0.5 * euclid_dist / (teleai_norm + parallel_norm)
+        logging.info(f"{name}: {normalized_euclid_dist} {output.norm().item()} {parallel_output.norm().item()} rank{rank}")
+        return normalized_euclid_dist
             
     if any(cw in name for cw in col_w):
         size = parallel_output.shape[0]
@@ -182,7 +172,8 @@ def is_close_by_normalized_euclid_dist(output, parallel_output):
     else:
         return False 
     
-def tp_load_state_dict(rank, tp_size, base_model):
+def tp_load_state_dict(base_model):
+    
     base_dict = base_model.state_dict()
     tp_dict = {}
     
@@ -201,58 +192,62 @@ def tp_load_state_dict(rank, tp_size, base_model):
               "cross_attn.norm_query.weight", "cross_attn.norm_key.weight",
               "cross_attn.norm_image_key.weight"]
     
+    def tp_col_weight_load(tp_dict, name, param):
+        rank = mpu.get_tensor_model_parallel_rank()
+        tp_size = mpu.get_tensor_model_parallel_world_size()
+        
+        size = param.shape[0] // tp_size
+        tp_dict[name] = param[rank*size:(rank+1)*size,:]
+
+    def tp_col_bias_load(tp_dict, name, param):
+        rank = mpu.get_tensor_model_parallel_rank()
+        tp_size = mpu.get_tensor_model_parallel_world_size()
+        
+        size = param.shape[0] // tp_size
+        tp_dict[name] = param[rank*size:(rank+1)*size]
+
+    def tp_row_weight_load(tp_dict, name, param):
+        rank = mpu.get_tensor_model_parallel_rank()
+        tp_size = mpu.get_tensor_model_parallel_world_size()
+        
+        size = param.shape[1] // tp_size
+        tp_dict[name] = param[:, rank*size:(rank+1)*size]
+
+    def tp_row_bias_load(tp_dict, name, param):
+        tp_dict[name] = param
+        
+    def tp_norm_weight_load(tp_dict, name, param):
+        rank = mpu.get_tensor_model_parallel_rank()
+        tp_size = mpu.get_tensor_model_parallel_world_size()
+        size = param.shape[0] // tp_size
+        tp_dict[name] = param[rank*size:(rank+1)*size]
+    
     for name, param in base_dict.items():
         if any(cw in name for cw in col_w):
-            tp_col_weight_load(rank, tp_dict, tp_size, name, param)
+            tp_col_weight_load(tp_dict, name, param)
         elif any(cb in name for cb in col_b):
-            tp_col_bias_load(rank, tp_dict, tp_size, name, param)
+            tp_col_bias_load(tp_dict, name, param)
         elif any(rw in name for rw in row_w):
-            tp_row_weight_load(rank, tp_dict, tp_size, name, param)
+            tp_row_weight_load(tp_dict, name, param)
         elif any(nw in name for nw in norm_w):
-            tp_norm_weight_load(rank, tp_dict, tp_size, name, param)
+            tp_norm_weight_load(tp_dict, name, param)
         else:
             tp_dict[name] = param
     return tp_dict
 
-def tp_col_weight_load(rank, tp_dict, tp_size, name, param):
-    size = param.shape[0] // tp_size
-    tp_dict[name] = param[rank*size:(rank+1)*size,:]
-
-def tp_col_bias_load(rank, tp_dict, tp_size, name, param):
-    size = param.shape[0] // tp_size
-    tp_dict[name] = param[rank*size:(rank+1)*size]
-
-def tp_row_weight_load(rank, tp_dict, tp_size, name, param):
-    size = param.shape[1] // tp_size
-    tp_dict[name] = param[:, rank*size:(rank+1)*size]
-
-def tp_row_bias_load(rank, tp_dict, tp_size, name, param):
-    tp_dict[name] = param
-    
-def tp_norm_weight_load(rank, tp_dict, tp_size, name, param):
-    size = param.shape[0] // tp_size
-    tp_dict[name] = param[rank*size:(rank+1)*size]
 
 class testParallelWanModel(TestCase):
     def test_forward_backward(self):
-        world_size = 2
-        os.environ['WORLD_SIZE'] = str(world_size)
+        tensor_model_parallel_world_size = 2
+        os.environ['WORLD_SIZE'] = str(tensor_model_parallel_world_size )
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '12445'
-        q = spawn(world_size, parallel_teleai_model_testing)
+        q = spawn(tensor_model_parallel_world_size , parallel_teleai_model_testing)
 
-
-        correct_responses = [f"{TELEAI_MODEL_BWD_SUCCESS} rank{rank}" for rank in range(world_size)]
-        correct_responses += [f"{TELEAI_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(world_size)]
+        correct_responses = [f"{TELEAI_MODEL_BWD_SUCCESS} rank{rank}" for rank in range(tensor_model_parallel_world_size )]
+        correct_responses += [f"{TELEAI_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(tensor_model_parallel_world_size )]
         responses = []
         while not q.empty():
             res = q.get()
             responses.append(res)
         self.assertEqual(sorted(responses), correct_responses)
-        #TODO: test backward
-
-
-
-# if __name__ == '__main__':
-#     import unittest
-#     unittest.main()

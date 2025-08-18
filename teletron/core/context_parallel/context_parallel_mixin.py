@@ -84,7 +84,7 @@ class ContextParallelMixin:
     def forward_attn(self, q, k, v):
         cp_group = mpu.get_context_parallel_group()
         args = get_args()
-        num_heads = args.num_attention_heads
+        num_heads = args.num_attention_heads // mpu.get_tensor_model_parallel_world_size()
         
         q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
         k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)

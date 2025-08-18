@@ -223,6 +223,140 @@ class SampleImages:
         return sample_indexes
     
 
+class SampleDynamicFPSVideo:
+    def __init__(
+        self,
+        num_frames=1,
+        max_frames=201,
+        fps_config={"24": 1.0},
+        default_fps=24,
+    ):
+        self.num_frames = num_frames
+        self.fps_config = {}
+        self.default_fps = default_fps
+        self.max_frames = max_frames
+
+        for k, v in fps_config.items():
+            self.fps_config[int(k)] = v
+
+        assert all(
+            fps_ratio >= 0 for fps_ratio in self.fps_config.values()
+        ), f"mask_ratio should be greater than or equal to 0, got {self.fps_config.values()}"
+        assert all(
+            fps_ratio <= 1 for fps_ratio in self.fps_config.values()
+        ), f"mask_ratio should be less than or equal to 1, got {self.fps_config.values()}"
+        # sum of mask_ratios should be 1
+        assert math.isclose(
+            sum(self.fps_config.values()), 1.0, abs_tol=1e-6
+        ), f"sum of mask_ratios should be 1, got {sum(self.fps_config.values())}"
+
+    def __call__(self, data_dict):
+        video = data_dict["video"]
+
+        sample_indexes = self.get_sample_indexes(data_dict, self.num_frames)
+        images = video.get_frames_at(sample_indexes.tolist()).data
+
+        data_dict["images"] = images
+        return data_dict
+
+    def get_sample_indexes(self, data_dict, num_frames):
+        if "video_valid_range" in data_dict:
+            valid_range = data_dict["video_valid_range"]
+            valid_range = [int(idx) for idx in valid_range]
+        else:
+            valid_range = (0, data_dict["video_length"])
+        
+        fps_type = random.random()
+        prob_acc = 0.
+        dst_fps = self.default_fps
+        for fps, ratio in self.fps_config.items():
+            prob_acc = prob_acc + ratio
+            if fps_type < prob_acc:
+                dst_fps = fps
+                break
+        
+        
+        data_dict["dst_fps"] = dst_fps # inject fps
+        data_dict["frame_interval"] = int(self.default_fps // dst_fps) # inject frame interval
+        
+        native_fps = data_dict['fps']
+        extract_frame_interval = native_fps / dst_fps
+        this_video_length = valid_range[1] - valid_range[0]
+        
+        data_dict["dst_fps"] = dst_fps # inject fps
+
+        num_frames = int(1 + (this_video_length - 1) / extract_frame_interval)
+        num_frames = max(1, (num_frames // 4 * 4) - 3)
+
+        start_idx = valid_range[0]
+
+        indexes = [start_idx + round(i * extract_frame_interval) for i in range(num_frames)]
+        if len(indexes) > self.max_frames:
+            start = random.randint(0, len(indexes) - self.max_frames)
+            indexes = indexes[start: start + self.max_frames]
+        sample_indexes = np.array(indexes, dtype=int)        
+
+        return sample_indexes
+    
+
+class SampleWholeVideo:
+    def __init__(
+        self,
+        max_frames=145,
+        base_fps=24,
+        fps_list=[24, 12, 6]
+    ):
+        self.max_frames = max_frames
+        self.base_fps = base_fps
+        self.fps_list = sorted(fps_list, reverse=True)
+        
+    def __call__(self, data_dict):
+        video = data_dict["video"]
+
+        sample_indexes, frame_interval = self.get_sample_indexes(data_dict)
+        images = video.get_frames_at(sample_indexes.tolist()).data
+        
+        data_dict["images"] = images
+        data_dict["frame_interval"] = frame_interval
+        return data_dict
+
+    def get_sample_indexes(self, data_dict):
+        if "video_valid_range" in data_dict:
+            valid_range = data_dict["video_valid_range"]
+            valid_range = [int(idx) for idx in valid_range]
+        else:
+            valid_range = (0, data_dict["video_length"])
+        
+        length = valid_range[1] - valid_range[0]
+        
+        native_fps = data_dict['fps']
+        native_seconds = length / native_fps
+        
+        dst_fps = self.fps_list[-1]
+        for fps in self.fps_list:
+            if (self.max_frames / fps) > native_seconds:
+                dst_fps = fps
+                break
+
+        if dst_fps > self.base_fps:
+            dst_fps = self.base_fps
+        
+        frame_interval = native_fps / dst_fps
+        
+        data_dict["dst_fps"] = dst_fps # inject fps
+
+        num_frames = int(1 + (length - 1) / frame_interval)
+        num_frames = max(1, (num_frames // 4 * 4) - 3)
+
+        start_idx = valid_range[0]
+
+        indexes = [start_idx + round(i * frame_interval) for i in range(num_frames)]
+        sample_indexes = np.array(indexes, dtype=int)        
+
+        return sample_indexes, max(1, int(self.base_fps // dst_fps))
+    
+    
+
 class SampleImageVideo:
     def __call__(self, data_dict):
         video = data_dict["video"]
