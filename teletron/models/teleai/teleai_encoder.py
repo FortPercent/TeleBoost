@@ -13,7 +13,7 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_latents,
     get_noise,
     get_fake_latents,
-    get_unprompt_emb，
+    get_unprompt_emb,
     get_depth_latents,
 )
 from teletron.utils import get_args
@@ -50,7 +50,7 @@ PROPERTY_DIMS = {
     'noise': 5,
     'fake_latents': 5,
     'prompt_emb': 3,
-    'unprompt_emb': 3
+    'unprompt_emb': 3,
     'depth_latents': 5,
 }
 

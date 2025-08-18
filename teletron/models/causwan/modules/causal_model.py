@@ -432,7 +432,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         assert model_type in ['t2v', 'i2v']
         self.model_type = model_type
-
+        self.current_shape = None
         self.patch_size = patch_size
         self.text_len = text_len
         self.in_dim = in_dim
@@ -937,7 +937,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             self.freqs = self.freqs.to(device)
 
         # Construct blockwise causal attn mask
-        if self.block_mask is None:
+        if self.block_mask is None or self.current_shape != x.shape[-2:]:
             if clean_x is not None:
                 if self.independent_first_frame:
                     raise NotImplementedError()
@@ -987,7 +987,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         num_frame_per_block=self.num_frame_per_block,
                         local_attn_size=self.local_attn_size
                     )
-
+        self.current_shape = x.shape[-2:]
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
 
