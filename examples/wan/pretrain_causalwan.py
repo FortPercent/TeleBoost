@@ -20,6 +20,9 @@ def causal_loss_func(output_tensor):
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
     # follow this format to add
+    group.add_argument("--no_save", action="store_false")
+    group.add_argument("--load_raw_video", action="store_false")
+    group.add_argument("--gradient-checkpointing", action="store_false")
     group.add_argument("--real-name", type=str, default="Wan2.1-T2V")
     group.add_argument("--negative_prompt",type=str,
                        default="色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
@@ -39,6 +42,8 @@ def extra_args(parser):
                        )
     group2.add_argument("--encoder_tokenizer_path", type=str, default=
                        "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
+    group.add_argument("--depth-model-path", type=str, default=
+                        "/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth")
 
     return parser
 

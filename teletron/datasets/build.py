@@ -40,7 +40,6 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         import os
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         global_rank = int(os.environ.get("RANK", 0))
-        # global_rank = torch.distributed.get_rank() + args.dit_world_size
         world_size = int(os.environ.get("WORLD_SIZE", 1))
         all_data_paths = global_config.dataset.data_path_list
         # shuffle
