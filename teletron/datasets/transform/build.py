@@ -13,10 +13,14 @@ from .video_transform import (
     GenerateRawFirstRefImage,
     GenerateRawFirstLastRefImage,
     GenerateRefImagesWithTimeMask,
+    SampleDynamicFPSVideo,
+    SampleWholeVideo
 )
 from .formatting import PackInputs
 
 TRANSFORMS = Registry()
+TRANSFORMS.register_module(SampleDynamicFPSVideo)
+TRANSFORMS.register_module(SampleWholeVideo)
 TRANSFORMS.register_module(PromptToClipEmbedding)
 TRANSFORMS.register_module(PromptToTransformerEmbedding)
 TRANSFORMS.register_module(PromptGenerator)
