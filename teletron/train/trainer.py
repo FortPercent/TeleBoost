@@ -92,10 +92,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         _TRAIN_START_TIME = start_time_tensor.item()
         print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
             time.time() - _TRAIN_START_TIME))
+        print_datetime('after megatron is initialized')
 
         self.model, self.optimizer, self.scheduler, self.ema_models = \
                                 self.setup_model_and_optimizer(args.model_type)
-        # print_rank_0('model load')
+
         self.train_itrt, self.valid_itrt, self.test_itrt = \
                                 self.get_iterator(len(self.model), dataset_provide_func)
         
@@ -109,6 +110,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                   no_wd_decay_cond=None,
                                   scale_lr_cond=None,
                                   lr_mult=1.0):
+
         args = get_args()
         # timers = get_timers()
         assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
@@ -141,22 +143,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             args.iteration = 0
             args.num_floating_point_operations_so_far = 0
             args.last_microbatch_size_index = None
-            print_rank_0("Not Any Loading pretrained generator")
-        if getattr(args, "generator_ckpt", False):
-            print_rank_0(f"Loading pretrained ode from {args.generator_ckpt}")
-            state_dict = torch.load(args.generator_ckpt, map_location="cpu",weights_only=False)
-            if "generator" in state_dict:
-                print_rank_0('load ode generator')
-                state_dict = state_dict["generator"]
-            elif "model" in state_dict:
-                print_rank_0('load ode model')
-                state_dict = state_dict["model"]
-
-            model[0].module.generator.load_state_dict(
-                state_dict, strict=False
-            )
-        else:
-            print_rank_0("Not Any Loading pretrained ode")
 
         # get model without FP16 and/or DDP wrappers
         if args.iteration == 0 and len(unwrapped_model) == 1 \
@@ -313,9 +299,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         self, is_tp_first=None, dp_rank=None, dp_size=None, train_ds_prev=None, valid_ds_prev=None, return_ds=False
     ):
         """Build pretraining data iterators."""
+
         args = get_args()
 
         # Build loaders.
+        print("Building loaders.")
         
         if return_ds is True:
             train_dataloader, valid_dataloader, test_dataloader, train_ds, valid_ds = \
@@ -350,7 +338,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             return train_data_iterator, valid_data_iterator, test_data_iterator
 
     def initialize_megatron(self, args):
-        # breakpoint()
 
         if args.distributed_vae:
             args.world_size = (args.world_size - args.distributed_vae_world_size)  //args.consumer_models_num
@@ -402,6 +389,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         process_non_loss_data_func=None,
     ):
         args = get_args()
+
         if args.distributed_vae:
             consumer_config = torch.zeros(
                 (3), dtype=torch.int64, device=torch.cuda.current_device()
@@ -412,11 +400,11 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
             from teletron.core.parallel_state import get_comm_pair
             comm_pair = get_comm_pair()
-            print(consumer_config)
 
             if comm_pair is not None:
                 req = dist.isend(tensor=consumer_config, dst=comm_pair.producer, tag=0)
                 req.wait()
+        print_datetime('after dataloaders are built')
         print_rank_0('done with setup ...')
 
         if not args.skip_train:
@@ -430,6 +418,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                     self.train_itrt, self.valid_itrt,
                     process_non_loss_data_func, self.config, self.ema_models)
 
+
+            print_datetime('after training is done')
 
             if args.save and iteration != 0 and iteration % args.save_interval != 0:
                 self.save_checkpoint(iteration, self.model, self.optimizer, self.scheduler,
@@ -592,8 +582,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             if args.log_params_norm:
                 params_norm = calc_params_l2_norm(model)
 
-            # if iteration % args.log_interval == 0:
-            #     track_e2e_metrics()
+            # # if iteration % args.log_interval == 0:
+            # #     track_e2e_metrics()
 
             learning_rate = None
             decoupled_learning_rate = None
@@ -726,7 +716,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             for model_chunk in model:
                 model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
-        # breakpoint()
+
         if args.use_zero2:
             losses_reduced = deepspeed_forward_backward(
                 forward_step_func=forward_step_func,
