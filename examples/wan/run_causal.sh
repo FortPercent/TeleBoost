@@ -51,8 +51,6 @@ MODEL_PARALLEL_ARGS=(
 )
 
 DATA_ARGS=(
-    # --dataset-type TensorDataset
-    --dataloader-type causal
     --micro-batch-size 1
     --config-path ${CONFIG_PATH}
 )
