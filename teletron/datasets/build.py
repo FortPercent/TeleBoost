@@ -3,7 +3,6 @@
 from .registry import Registry, build_module
 from .clip_dataset import ClipDataset
 from .fake_dataset import FakeDataset
-from .tensor_dataset import TensorDataset
 from .variable_dataset import VariableClipDataset
 import torch
 import random
@@ -21,7 +20,6 @@ from teletron.core.parallel_state import get_transformer_model_group
 DATASETS = Registry()
 DATASETS.register_module(ClipDataset)
 DATASETS.register_module(FakeDataset)
-DATASETS.register_module(TensorDataset)
 DATASETS.register_module(VariableClipDataset)
 
 def build_dataset(params_or_type, *args, **kwargs):
