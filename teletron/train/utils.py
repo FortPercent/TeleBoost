@@ -1736,7 +1736,7 @@ def _add_training_args(parser):
                        choices=['adam', 'sgd'],
                        help='Optimizer function')
     group.add_argument('--dataloader-type', type=str, default=None,
-                       choices=['common', 'single', 'cyclic', 'external','causal'],
+                       choices=['common', 'single', 'cyclic', 'external'],
                        help='Single pass vs multiple pass data loader')
     group.add_argument('--no-async-tensor-model-parallel-allreduce',
                        action='store_false',

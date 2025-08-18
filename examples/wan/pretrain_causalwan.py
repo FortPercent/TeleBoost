@@ -27,6 +27,9 @@ def extra_args(parser):
     group.add_argument("--model_kwargs",default={"timestep_shift": 5.0})
     group.add_argument("--guidance_scale",default=5.0)
     group.add_argument("--mixed_precision",default=True)
+    group.add_argument("--image_or_video_shape",default=[1,21,16,60,104])
+    group.add_argument("--num_frame_per_block",default=3)
+    group.add_argument("--num_train_timestep",default=1000)
     
     group2 = parser.add_argument_group(title='encoder args')
     group2.add_argument("--encoder_model_path", type=str, nargs = '+',default=

@@ -34,15 +34,8 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
     global_config = set_config()
     transformer_group = get_transformer_model_group()
 
-    if False and transformer_group is not None:
+    if transformer_group is not None:
         return  None, None, None
-    # else:
-    #     global_config = set_config()
-    #     train_ds_config = global_config
-    #     train_ds = build_dataset(train_ds_config.dataset)
-    #     valid_ds = None
-    #     test_ds = None
-    #     return train_ds, valid_ds, test_ds
     else:
         import os
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -67,7 +60,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
             local_data_paths = all_data_paths[start_idx: end_idx]
             local_data_paths.append(random.choice(all_data_paths[0:big_producer_count * base_samples]))
             
-        global_config.dataset.data_path_list = all_data_paths
+        global_config.dataset.data_path_list = local_data_paths
         print(f"rank:{global_rank}: {local_data_paths}")
 
     train_ds_config = global_config
