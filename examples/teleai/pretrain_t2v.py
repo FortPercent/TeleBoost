@@ -3,16 +3,13 @@ from teletron.train import Trainer, parse_args
 import torch.distributed as dist
 from megatron.core import mpu
 from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train.utils import get_batch, loss_func, flow_loss_func
+from teletron.train.utils import flow_loss_func
 
 
 
 def extra_args(parser):
     group = parser.add_argument_group(title='customized args')
-    # follow this format to add
-    # group.add_argument("--test_valid", type=str, default="")
-    group.add_argument("--moe-step-factor-list", type=float, action='append')
-    
+
     return parser
 
 def forward_step(data_iterator, model):
@@ -39,18 +36,19 @@ def forward_step(data_iterator, model):
 
     training_target = flow_scheduler.training_target(latents, noise, timestep)    
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
+    loss_weight = flow_scheduler.training_weight(timestep)
+
     output_tensor_list = model(x=noisy_latents, 
-                               timestep=timestep, 
-                               context=batch['context'],
-                               clip_feature=batch['img_clip_feature'],
-                               y=batch['img_emb_y'])
+                            timestep=timestep, 
+                            context=batch['context'])
 
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
     )
     loss_wo_w = loss
-    loss = loss * flow_scheduler.training_weight(timestep)
+    loss = loss * loss_weight
 
+    # print("loss", loss)
     return [loss, loss_wo_w], flow_loss_func
 
 

@@ -27,34 +27,6 @@ except ModuleNotFoundError:
 
 T5_CONTEXT_TOKEN_NUMBER = 512
 
-from .converter import TeleaiModelStateDictConverter
-
-def get_config_param(config: Union[Dict[str, Any], object, None], 
-                    param_name: str, 
-    ) -> Any:
-    if isinstance(config, dict) and param_name in config:
-        return config[param_name]
-    elif hasattr(config, param_name):
-        return getattr(config, param_name)
-    return getattr(TeleaiDefaultParams, param_name)
-
-@dataclass
-class TeleaiDefaultParams:
-    """TeleAI模型参数配置 (使用dataclass自动生成__init__等特殊方法)"""
-    hidden_size: int = 1536
-    in_channels: int = 36
-    out_channels: int = 16
-    text_dim: int = 4096
-    freq_dim: int = 256
-    ffn_hidden_size: int = 8960
-    eps: float = 1e-6
-    patch_size: Tuple[int, int, int] = (1, 2, 2)
-    num_attention_heads: int = 12
-    num_layers: int = 30
-    has_image_input: bool = True
-    has_image_pos_emb: bool = False
-
-
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False):
     if compatibility_mode:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
@@ -318,26 +290,34 @@ class Head(nn.Module):
 
 
 class TeleaiModel(torch.nn.Module):
-    def __init__(self, config):
+    def __init__(
+        self, 
+        dim: int,
+        in_dim: int,
+        ffn_dim: int,
+        out_dim: int,
+        text_dim: int,
+        freq_dim: int,
+        eps: float,
+        patch_size: Tuple[int, int, int],
+        num_heads: int,
+        num_layers: int,
+        has_image_input: bool,
+        has_image_pos_emb: bool
+    ):
         super().__init__()
-        # teleai_config
-        self.in_dim = get_config_param(config, 'in_channels')
-        self.ffn_dim = get_config_param(config, 'ffn_hidden_size')
-        self.out_dim = get_config_param(config, 'out_channels')
-        self.text_dim = get_config_param(config, 'text_dim')
-        self.freq_dim = get_config_param(config, 'freq_dim')
-        self.eps = get_config_param(config, 'eps')
-        self.patch_size = get_config_param(config, 'patch_size')
-        # self.has_image_input = get_config_param(config, 'has_image_input')
-        self.has_image_pos_emb = get_config_param(config, 'has_image_pos_emb')
-        self.dim = get_config_param(config, 'hidden_size')
-        self.num_heads = get_config_param(config, 'num_attention_heads')
-        self.num_layers = get_config_param(config, 'num_layers')
-
-        #args
-        from teletron.utils import get_args
-        args = get_args()
-        self.has_image_input = args.has_image_input
+        self.dim = dim
+        self.in_dim = in_dim
+        self.ffn_dim = ffn_dim
+        self.out_dim = out_dim
+        self.text_dim = text_dim
+        self.freq_dim = freq_dim
+        self.eps = eps
+        self.patch_size = patch_size
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.has_image_input = has_image_input
+        self.has_image_pos_emb = has_image_pos_emb
 
         self.patch_emb = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
@@ -449,6 +429,3 @@ class TeleaiModel(torch.nn.Module):
         x = self.unpatchify(x, (f, h, w))
         return x
     
-    @staticmethod
-    def state_dict_converter():
-        return TeleaiModelStateDictConverter()

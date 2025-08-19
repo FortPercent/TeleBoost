@@ -1,9 +1,8 @@
-# Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
+from einops import rearrange, repeat
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
 from tqdm import tqdm
 
 CACHE_T = 2
@@ -597,7 +596,7 @@ class VideoVAE_(nn.Module):
         self._enc_feat_map = [None] * self._enc_conv_num
 
 
-class WanVideoVAE(nn.Module):
+class TeleaiVideoVAE(nn.Module):
 
     def __init__(self, z_dim=16):
         super().__init__()

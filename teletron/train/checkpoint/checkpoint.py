@@ -232,7 +232,7 @@ class CheckPointMixin:
         # Check arguments.
         assert args.consumed_train_samples == 0
         assert args.consumed_valid_samples == 0
-        if 'args' in state_dict and not args.finetune:
+        if 'args' in state_dict and not args.finetune and not release:
             checkpoint_args = state_dict['args']
             # check_checkpoint_args(checkpoint_args)
             args.consumed_train_samples = getattr(checkpoint_args,

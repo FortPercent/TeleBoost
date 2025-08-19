@@ -12,16 +12,6 @@ def extra_args(parser):
     # follow this format to add
     # group.add_argument("--test_valid", type=str, default="")
     group.add_argument("--moe-step-factor-list", type=float, action='append')
-    group = parser.add_argument_group(title='encoder args')
-    group.add_argument("--encoder_model_path", type=str, nargs = '+',default=
-                       ['/workspace/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth', 
-                        '/workspace/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth', 
-                        '/workspace/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth']
-                       )
-    group.add_argument("--encoder_tokenizer_path", type=str, default=
-                       "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
-    group.add_argument("--depth-model-path", type=str, default=
-                        "/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth")
     group.add_argument("--test-with-pseudo-data", action="store_true")
     group.add_argument("--test-resolution", type=str, default="360")
     

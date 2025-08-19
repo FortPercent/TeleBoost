@@ -205,18 +205,6 @@ def init_weights(m):
         nn.init.normal_(
             m.embedding.weight, std=(2 * m.num_buckets * m.num_heads)**-0.5)
 
-
-class TeleaiTextEncoderStateDictConverter:
-    def __init__(self):
-        pass
-
-    def from_diffusers(self, state_dict):
-        return state_dict
-
-    def from_civitai(self, state_dict):
-        return state_dict
-
-
 class TeleaiTextEncoder(nn.Module):
     def __init__(self,
                  vocab=256384,
@@ -266,7 +254,7 @@ class TeleaiTextEncoder(nn.Module):
         self.norm = T5LayerNorm(dim)
 
         # 权重初始化
-        self.apply(init_weights)
+        # self.apply(init_weights)
 
     def forward(self, ids, mask=None):
         x = self.token_embedding(ids)
@@ -283,7 +271,3 @@ class TeleaiTextEncoder(nn.Module):
         x = self.norm(x)
         x = self.dropout(x)
         return x
-
-    @staticmethod
-    def state_dict_converter():
-        return TeleaiTextEncoderStateDictConverter()

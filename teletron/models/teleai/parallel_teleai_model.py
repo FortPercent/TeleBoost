@@ -6,6 +6,7 @@ from teletron.core.tensor_parallel import TensorParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from .teleai_model import TeleaiModel, DiTBlock, sinusoidal_embedding_1d, AttentionModule
 import logging
+from teletron.utils import set_config
 
 class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock):
     def __init__(
@@ -58,7 +59,8 @@ def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0, devi
 
 class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, TransformerGeneralMixin, TeleaiModel):
     def __init__(self, config):
-        TeleaiModel.__init__(self, config)
+        dit_model_config = set_config().get('model_config', None).get('dit', None).get('config', None)
+        TeleaiModel.__init__(self, **dit_model_config)
         self.config = config
 
         self.blocks = nn.ModuleList([

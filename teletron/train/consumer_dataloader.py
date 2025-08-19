@@ -6,6 +6,7 @@ from teletron.utils import (get_args,)
 from teletron.core.parallel_state import get_comm_pair
 from teletron.models.wan.encoder.wan_encoder import WanVideoEncoder
 from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTY_DIMS
+from teletron.utils import set_config
 
 def unpack_tensors(packed_tensor, intervals, producer_tensors=None):
     features = [packed_tensor[intervals[i-1]:intervals[i]] for i in range(1, len(intervals))]
@@ -352,7 +353,7 @@ class CausalDistBatchLoader(BaseBatchLoader):
         return batch
     
 def create_batch_loader(args, data_iterator):
-    model_name_lower = args.model.lower()
+    model_name_lower = set_config().model_config.dit.type.lower()
     is_distributed_vae = args.distributed_vae
 
     if 'teleai' in model_name_lower:

@@ -2,7 +2,6 @@ import os
 
 import safetensors
 import torch
-from diffusers.utils import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
 
 from contextlib import contextmanager
 import hashlib
@@ -77,28 +76,6 @@ def get_device():
     else:
         device = torch.device("cpu")
     return device
-
-
-def load_state_dict(weight_path):
-    if os.path.isdir(weight_path):
-        if os.path.exists(os.path.join(weight_path, WEIGHTS_NAME)):
-            return torch.load(
-                os.path.join(weight_path, WEIGHTS_NAME), map_location="cpu", weights_only=False
-            )
-        elif os.path.exists(os.path.join(weight_path, SAFETENSORS_WEIGHTS_NAME)):
-            return safetensors.torch.load_file(
-                os.path.join(weight_path, SAFETENSORS_WEIGHTS_NAME), device="cpu", weights_only=False
-            )
-        else:
-            assert False
-    elif os.path.isfile(weight_path):
-        if weight_path.endswith(".safetensors"):
-            return safetensors.torch.load_file(weight_path, device="cpu", weights_only=False)
-        else:
-            return torch.load(weight_path, map_location="cpu", weights_only=False)
-    else:
-        assert False
-
 
 def save_state_dict(state_dict, save_path):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

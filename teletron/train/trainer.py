@@ -26,6 +26,7 @@ from teletron.utils import (
     validate_args,
     set_args,
     get_args,
+    set_config,
     update_num_microbatches,
     get_num_microbatches,
 )
@@ -50,7 +51,6 @@ from teletron.train.telelogger import TeleLoggerMixin
 from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import DistDataProducer
-from teletron.models.encoder_registry import get_encoder_name
 from teletron.train.consumer_dataloader import create_batch_loader
 
 
@@ -76,7 +76,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         if transformer_group is None:            
             producer = DistDataProducer(
                 rank= int(os.environ.get("RANK", 0)), 
-                encoder_name=get_encoder_name(args.model),
+                encoder_name=set_config().get('model_config', None).get('encoder', None).type,
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
                 train_ds=None,
@@ -175,9 +175,14 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         add_decoder=True,
         parallel_output=True,
     ):
+        dit_model_config = set_config().get('model_config', None).get('dit', None)
         args = get_args()
-        cfg = core_transformer_config_from_args(args)
-        return build_model(args.model, cfg)
+        args.num_layers = dit_model_config.config.num_layers
+        args.hidden_size = dit_model_config.config.dim
+        args.ffn_hidden_size = dit_model_config.config.ffn_dim
+        args.num_attention_heads = dit_model_config.config.num_heads
+        megatron_cfg = core_transformer_config_from_args(args)
+        return build_model(dit_model_config.type, megatron_cfg)
 
     def get_model(self, model_type=ModelType.encoder_or_decoder, wrap_with_ddp=True):
         args = get_args()

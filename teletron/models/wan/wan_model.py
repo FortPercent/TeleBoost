@@ -26,20 +26,6 @@ except ModuleNotFoundError:
     
 T5_CONTEXT_TOKEN_NUMBER = 512   
 
-class WanParams:
-    hidden_size: int = 5120
-    in_channels: int = 36
-    out_channels: int = 16
-    text_dim: int = 4096
-    freq_dim: int = 256
-    ffn_dim: int = 13824
-    eps: float = 1e-6
-    patch_size: Tuple[int, int, int] = (1,2,2)
-    num_attention_heads: int = 40
-    num_layers: int = 3
-    has_image_input: bool = True
-    has_image_pos_emb: bool = False
-
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False):
     if compatibility_mode:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
@@ -279,29 +265,35 @@ class Head(nn.Module):
 
 
 class WanModel(torch.nn.Module):
-    def __init__(self, config):
+    def __init__(
+        self, 
+        dim: int,
+        in_dim: int,
+        ffn_dim: int,
+        out_dim: int,
+        text_dim: int,
+        freq_dim: int,
+        eps: float,
+        patch_size: Tuple[int, int, int],
+        num_heads: int,
+        num_layers: int,
+        has_image_input: bool,
+        has_image_pos_emb: bool
+    ):
         super().__init__()
-        # wan_config
-        wan_config = WanParams()
-        self.in_dim = wan_config.in_channels
-        self.ffn_dim = wan_config.ffn_dim
-        self.out_dim = wan_config.out_channels
-        self.text_dim = wan_config.text_dim
-        self.freq_dim = wan_config.freq_dim
-        self.eps = wan_config.eps
-        self.patch_size = wan_config.patch_size
-        self.has_image_pos_emb = wan_config.has_image_pos_emb
-
-        # config
-        self.dim = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.num_layers = config.num_layers
-
-        #args
-        from teletron.utils import get_args
-        args = get_args()
-        self.has_image_input = args.has_image_input
-
+        self.dim = dim
+        self.in_dim = in_dim
+        self.ffn_dim = ffn_dim
+        self.out_dim = out_dim
+        self.text_dim = text_dim
+        self.freq_dim = freq_dim
+        self.eps = eps
+        self.patch_size = patch_size
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.has_image_input = has_image_input
+        self.has_image_pos_emb = has_image_pos_emb
+        
         self.patch_embedding = nn.Conv3d(
             self.in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size)
         self.text_embedding = nn.Sequential(
