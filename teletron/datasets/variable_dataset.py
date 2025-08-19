@@ -114,10 +114,6 @@ class VariableClipDataset(BaseDataset):
             f"Cannot find valid image after {self.max_refetch}! "
             "Please check your image path and pipeline"
         )
-
-    def load_data_list(self) -> List[dict]:
-        data_list = []
-        return data_list
     
     def filter_data(self):
         dst_size = self.filter_cfg.get("dst_size", (720, 480))
@@ -230,8 +226,8 @@ class VariableClipDataset(BaseDataset):
             if self.enable_bucket_index:
                 sampler_size = random.choices(self.buckets_size, weights=self.buckets_size_ratio)[0]
                 dst_width, dst_height = image_utils.get_image_size(
+                    (clip.width, clip.height),
                     (sampler_size[0], sampler_size[1]),
-                    dst_size,
                     mode="area",
                     multiple=multiple,
                 )
