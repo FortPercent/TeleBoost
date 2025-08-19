@@ -3,10 +3,10 @@ import math
 
 class DefaultSampler(torch.utils.data.Sampler):
 
-    def __init__(self, total_samples, consumed_samples, micro_batch_size,
+    def __init__(self, dataset, consumed_samples, micro_batch_size,
                  data_parallel_rank, data_parallel_size, seed=42, drop_last=True, shuffle=True, infinite=True):
         # Keep a copy of input params for later use.
-        self.total_samples = total_samples
+        self.total_samples = len(dataset)
         self.consumed_samples = consumed_samples
         self.micro_batch_size = micro_batch_size
         self.data_parallel_rank = data_parallel_rank
