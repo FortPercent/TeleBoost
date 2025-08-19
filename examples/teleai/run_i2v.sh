@@ -117,8 +117,6 @@ GPT_MODEL_ARGS=(
 )
 
 TRAINING_ARGS=(
-    --model ParallelTeleaiModel 
-    --task-type teleai_i2v
     --micro-batch-size ${MBS}
     --train-iters 100000
     --weight-decay 1e-3

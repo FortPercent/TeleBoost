@@ -3,9 +3,12 @@ import torch
 from typing import Dict, Any, Tuple, List,Union
 
 from teletron.core.distributed.base_encoder import BaseEncoder
-from teletron.models.teleai.models.dit.teleai_dit import TeleaiPrompter
-from teletron.models.teleai.pipelines.teleai.teleai_video import TeleaiVideoPipeline
-from teletron.models.teleai.models.dit.teleai_dit import ModelManager
+from teletron.models.teleai.models.dit import TeleaiPrompter
+from teletron.models.teleai.models.dit import TeleaiTextEncoder
+from teletron.models.teleai.models.dit import TeleaiVideoVAE
+from teletron.models.teleai.models.dit import TeleaiVideoVAE_2_2
+from teletron.models.teleai.models.dit import TeleaiImageEncoder
+from video_depth_anything.video_depth import VideoDepthAnything
 from teletron.models.teleai.teleai_encoder_utils import (
     get_context,
     get_img_clip_feature,
@@ -16,19 +19,9 @@ from teletron.models.teleai.teleai_encoder_utils import (
     get_unprompt_emb,
     get_depth_latents,
 )
-from teletron.utils import get_args
+from teletron.utils import get_args, set_config
+
 from functools import partial
-
-from video_depth_anything.video_depth import VideoDepthAnything
-
-ENCODER_SCHEMA = {
-    'teleai_i2v_depth': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'depth_latents'],
-    'teleai_i2v': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
-    # 'teleai_moe': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'noise'],
-    'teleai_sr': ['context', 'img_clip_feature', 'img_emb_y', 'latents', 'fake_latents'],
-    'teleai_multimask': ['context', 'img_clip_feature', 'img_emb_y', 'latents'],
-    'wan_autoregressive' : ['prompt_emb','unprompt_emb','latents']
-}
 
 WORK_FN = {
     'context': get_context,
@@ -61,26 +54,38 @@ class TeleaiEncoder(BaseEncoder):
     @staticmethod
     def get_output_schema() -> List[str]:
         """返回此编码器输出张量的固定名称和顺序。"""
-        args = get_args()
-        return ENCODER_SCHEMA[args.task_type]
+        return set_config().get("model_config", None).get("encoder", None).get("encoder_schema", ['context', 'latents'])
 
-    def __init__(self, device: torch.device, **kwargs: Any):
+    def __init__(self, device: torch.device):
         super().__init__(device)
-        args = get_args()
-        kwargs['model_paths'] = args.encoder_model_path
-        kwargs['tokenizer_path'] = args.encoder_tokenizer_path
+        encoder_model_config = set_config().get("model_config", None).get("encoder", None)
+        if encoder_model_config is None:
+            raise ValueError("未找到encoder模型配置。")
 
-        kwargs['tiler_kwargs'] = {
-            "tiled": True, 
-            "tile_size":  (34, 34), 
-            "tile_stride": (18, 16)
-        }
-        self.model_paths = kwargs.get("model_paths")
-        self.tokenizer_path = kwargs.get("tokenizer_path")
-        self.tiler_kwargs = kwargs.get("tiler_kwargs", {})
-        self.depth_model_path = args.depth_model_path
-        if not self.model_paths or not self.tokenizer_path:
-            raise ValueError("TeleaiEncoder需要 'model_paths' 和 'tokenizer_path' 参数。")
+        self.vae_path = encoder_model_config.get("vae", None).get("path", None)
+        self.vae_type = encoder_model_config.get("vae", None).get("type", "TeleaiVideoVAE_2_1")
+        self.tiler_kwargs = encoder_model_config.get("vae", None).get("tiler_kwargs", {})
+        if self.tiler_kwargs is None:
+            self.tiler_kwargs = dict(
+                tiled=False,
+                tile_size=(34, 34),
+                tile_stride=(18, 16),
+            )
+        self.text_encoder_path = encoder_model_config.get("text_encoder", None).get("path", None)
+        self.tokenizer_path = encoder_model_config.get("text_encoder", None).get("tokenizer_path", None)
+        
+        if encoder_model_config.get("image_encoder", None) is not None:
+            self.image_encoder_path = encoder_model_config.get("image_encoder", None).get("path", None)
+        else:
+            self.image_encoder_path = None
+        
+        if encoder_model_config.get("depth_model", None) is not None:
+            self.depth_model_path = encoder_model_config.get("depth_model", None).get("path", None)
+        else:
+            self.depth_model_path = None
+
+        if not self.vae_path or not self.text_encoder_path or not self.tokenizer_path:
+            raise ValueError("TeleaiEncoder需要 'text_encoder_path' 和 'tokenizer_path' 参数。")
 
         # 将模型组件初始化为None，它们将在setup()中被加载
         self.text_encoder = None
@@ -93,22 +98,32 @@ class TeleaiEncoder(BaseEncoder):
     def setup(self) -> None:
         """加载所有必需的teleai模型组件到指定设备。"""
         print(f"在设备 {self.device} 上设置 TeleaiEncoder...")
-        
-        model_manager = ModelManager(torch_dtype=torch.float32, device="cpu")
-        model_manager.load_models(self.model_paths)
-        
-        pipe = TeleaiVideoPipeline.from_model_manager(model_manager)
-        
-        self.text_encoder = pipe.text_encoder.to(device=self.device, dtype=torch.bfloat16)
-        self.image_encoder = pipe.image_encoder.to(device=self.device)
-        self.vae = pipe.vae.to(device=self.device, dtype=torch.bfloat16)
-        del pipe # 释放不再需要的内存
+        print(f"加载 VAE 模型... {self.vae_path}")
+        if self.vae_type == "TeleaiVideoVAE_2_1":
+            self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            self.compression = (4,8,8)
+        else:
+            self.vae = TeleaiVideoVAE_2_2().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            self.compression = (4,16,16)
+        self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True)
 
+        print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
+        self.text_encoder = TeleaiTextEncoder().to(device=self.device, dtype=torch.bfloat16)
+        self.text_encoder.load_state_dict(torch.load(self.text_encoder_path, map_location='cpu', weights_only=False), strict=True)
         self.prompter = TeleaiPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
-        self.depth_model = VideoDepthAnything().to(device=self.device)
-        self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu'), strict=True)
+
+        if self.image_encoder_path is not None:
+            print(f"加载 Image Encoder 模型... {self.image_encoder_path}")
+            self.image_encoder = TeleaiImageEncoder().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            self.image_encoder.model.load_state_dict(torch.load(self.image_encoder_path, map_location='cpu', weights_only=False), strict=False)
+
+        if self.depth_model_path is not None:
+            print(f"加载 Depth Model 模型... {self.depth_model_path}")
+            self.depth_model = VideoDepthAnything().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu', weights_only=False), strict=True)
+
 
         for key, val in self.work_fn.items():
             self.work_fn[key] = self.prepare_work_fn(key, val)
@@ -121,13 +136,13 @@ class TeleaiEncoder(BaseEncoder):
         elif target == 'img_clip_feature':
             return partial(work_fn, image_encoder=self.image_encoder, dtype=torch.bfloat16)
         elif target == 'img_emb_y':
-            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16, compression=self.compression, tiler_kwargs=self.tiler_kwargs)
         elif target == 'latents':
-            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16, tiler_kwargs=self.tiler_kwargs)
         elif target == 'noise':
-            return partial(work_fn, dtype=torch.bfloat16)
+            return partial(work_fn, dtype=torch.bfloat16, compression=self.compression)
         elif target == 'fake_latents':
-            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16)
+            return partial(work_fn, vae=self.vae, dtype=torch.bfloat16, tiler_kwargs=self.tiler_kwargs)
         elif target == 'prompt_emb':
             return partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
         elif target == 'unprompt_emb':
@@ -135,7 +150,7 @@ class TeleaiEncoder(BaseEncoder):
                 self.unprompt_emb = partial(work_fn, prompter=self.prompter, dtype=torch.bfloat16)
             return self.unprompt_emb
         elif target == 'depth_latents':
-            return partial(work_fn, depth_model=self.depth_model, vae=self.vae, dtype=torch.bfloat16)
+            return partial(work_fn, depth_model=self.depth_model, vae=self.vae, dtype=torch.bfloat16, tiler_kwargs=self.tiler_kwargs)
         else:
             return work_fn
     

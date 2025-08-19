@@ -7,7 +7,7 @@ import torch.nn as nn
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from .wan_model import WanModel, DiTBlock, sinusoidal_embedding_1d
-
+from teletron.utils import set_config
 
 class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
     def __init__(self, *args, **kwargs):
@@ -39,7 +39,8 @@ class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
 
 class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
     def __init__(self, config):
-        WanModel.__init__(self, config)
+        dit_model_config = set_config().get('model_config', None).get('dit', None).get('config', None)
+        WanModel.__init__(self, **dit_model_config)
         self.config = config
         
         self.blocks = nn.ModuleList([

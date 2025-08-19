@@ -173,4 +173,40 @@ config = dict(
         drop_last=True,
         infinite=True,
     ),
+    model_config=dict(
+        dit=dict(
+            type="CausalDiffusion", # ParallelWanModel
+            config=dict(
+                has_image_input=False, # t2v:False i2v:True i2v Wan2.2:False
+                patch_size=[1, 2, 2],
+                in_dim=16, # t2v:16 i2v:36 # 5B 48
+                dim=5120, # 1.3B:1536 10B:5120 14B:5120 5B:3072
+                ffn_dim=13824, # 1.3B:8960 10B:13824 14B:13824
+                freq_dim=256,
+                text_dim=4096,
+                out_dim=16, # 5B:48
+                num_heads=40, # 1.3B:12 10B:40 14B:40 5B:24
+                num_layers=40, # 1.3B:30 10B:30 14B:40
+                eps=1e-6,
+                has_image_pos_emb=False, 
+            ),
+        ),
+        encoder=dict(
+            type="teleai_encoder", # wan_encoder
+            encoder_schema=['prompt_emb','unprompt_emb','latents'],
+            vae=dict(
+                type="TeleaiVideoVAE_2_1",
+                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                tiler_kwargs=dict(
+                    tiled=False,
+                    tile_size=(34, 34),
+                    tile_stride=(18, 16),
+                ),
+            ),
+            text_encoder=dict(
+                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+                tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
+            )
+        ),
+    ),
 )

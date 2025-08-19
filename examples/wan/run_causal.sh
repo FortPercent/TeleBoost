@@ -43,7 +43,6 @@ TRAINING_ARGS=(
 )
 
 MODEL_PARALLEL_ARGS=(
-    --model CausalDiffusion
     --tensor-model-parallel-size 1
     --consumer-models-num 1
     --distributed-vae

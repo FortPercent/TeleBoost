@@ -9,7 +9,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
-export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
 CP=1
@@ -28,21 +28,6 @@ N_GPU_FOR_DATA=8
 # EXPR_NAME=sr_720p
 EXPR_NAME=f1fn2v_1.3B
 # EXPR_NAME=expr_480p_bf16
-
-# MODEL_ARGS=(
-#     --num-layers 30
-#     --hidden-size 5120
-#     --ffn-hidden-size 13824
-#     --num-attention-heads 40
-# ) # 10B I2V
-
-MODEL_ARGS=(
-    --has-image-input
-    --num-layers 30
-    --hidden-size 1536
-    --ffn-hidden-size 8960
-    --num-attention-heads 12
-) # 1.3B I2V
 
 TASK=teleai_i2v_depth
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
@@ -64,7 +49,7 @@ NODE_RANK=${RANK:-'0'}
 MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
 NNODES=$((($N_GPU-1)/8+1))
-WORLD_SIZE=$N_GPU_FOR_TRAIN/expr_480p_bf16
+WORLD_SIZE=$N_GPU_FOR_TRAIN
 
 N_VAE=$N_GPU_FOR_DATA
 GBS=$(($WORLD_SIZE*$MBS/$CP/$TP))
@@ -89,9 +74,7 @@ DISTRIBUTED_ARGS=(
 )
 
 
-TRAINING_ARGS=(
-    --model ParallelTeleaiModel 
-    --task-type ${TASK}
+TRAINING_ARGS=( 
     --micro-batch-size ${MBS}
     --train-iters 200000
     --weight-decay 1e-4
@@ -138,7 +121,6 @@ EVAL_AND_LOGGING_ARGS=(
 )
 
 torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
-    ${MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
     ${MOE_ARGS[@]} \
