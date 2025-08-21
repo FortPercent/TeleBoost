@@ -29,7 +29,6 @@ N_GPU_FOR_DATA=8
 EXPR_NAME=f1fn2v_1.3B
 # EXPR_NAME=expr_480p_bf16
 
-TASK=teleai_i2v_depth
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
 CONFIG_PATH=${2:-"config.teleai_i2v.config"}
 shift
