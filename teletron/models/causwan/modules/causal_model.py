@@ -617,8 +617,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
                                        KV_LEN=total_length + padded_length, _compile=False, device=device)
 
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            print(block_mask)
+        # if not dist.is_initialized() or dist.get_rank() == 0:
+        #     print(block_mask)
 
 
         return block_mask
