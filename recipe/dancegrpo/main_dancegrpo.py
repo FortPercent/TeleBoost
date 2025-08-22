@@ -14,7 +14,7 @@ def run_ppo(config) -> None:
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(
-            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN", "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True"}},
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
@@ -46,6 +46,7 @@ class TaskRunner:
 
         # processor =None
         tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
+
         tokenizer = hf_tokenizer(tokenizer_path)
         processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
         # define worker classes
