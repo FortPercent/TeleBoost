@@ -277,7 +277,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         
         log_gpu_memory_usage(f"After {role} FSDP init", logger=logger)
         
-        torch.cuda.memory._record_memory_history(max_entries=100000)
+        # torch.cuda.memory._record_memory_history(max_entries=100000)
         # override model kwargs
         actor_model_config=GPT2Config.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
         # patch for kimi-vl
@@ -361,7 +361,9 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             param_dtype = torch.bfloat16
             reduce_dtype = torch.float32
             buffer_dtype = torch.float32
-
+            
+        # reduce_dtype = torch.bfloat16
+        # buffer_dtype=torch.bfloat16
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
 
         auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get("wrap_policy", None), is_lora=self.config.model.get("lora_rank", 0) > 0)
