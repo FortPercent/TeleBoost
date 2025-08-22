@@ -1,4 +1,6 @@
 import hydra
+import os
+# os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
 
 from verl.trainer.ppo.reward import get_custom_reward_fn
@@ -14,7 +16,7 @@ def run_ppo(config) -> None:
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(
-            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN", "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True"}},
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}},
             num_cpus=config.ray_init.num_cpus,
         )
 
@@ -46,6 +48,7 @@ class TaskRunner:
 
         # processor =None
         tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
+
         tokenizer = hf_tokenizer(tokenizer_path)
         processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
         # define worker classes
@@ -86,13 +89,19 @@ class TaskRunner:
         # - for code related prompt, we send to a sandbox if there are test cases
         # - finally, we combine all the rewards together
         # - The reward type depends on the tag of the data
+        print(f"enable参数被设置为：{config.reward_model.enable}")
+        print(f"strategy参数设置为{config.reward_model.strategy}")
+        print("="*40)
         if config.reward_model.enable:
             if config.reward_model.strategy == "fsdp":
-                from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
+                from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
             elif config.reward_model.strategy == "megatron":
                 from verl.workers.megatron_workers import RewardModelWorker
+            # elif config.reward_model.strategy == "qwen":
+            #     from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
             else:
                 raise NotImplementedError
+            print(f"Mapping type{Role.RewardModel} to be the reward model")
             role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
             mapping[Role.RewardModel] = global_pool_id
 

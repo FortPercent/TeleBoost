@@ -682,10 +682,10 @@ reward_model:
   # In GSM8K and Math examples, we disable reward model.
   # For RLHF alignment example using full_hh_rlhf, we utilize reward model to assess the responses.
   # If False, the following parameters are not effective
-  enable: False
+  enable: True
 
   # FSDP strategy: "fsdp" or "fsdp2"
-  strategy: fsdp
+  # strategy: fsdp
 
   # model config for reward scoring
   model:

@@ -52,7 +52,7 @@ class DiffusionRollout(BaseRollout):
         self.vae_module=vae
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
-        
+        self.pid = os.getpid()
         num_frames = self.config.num_frames
         size = (self.config.w, self.config.h)
         sample_steps = self.config.sampling_steps
@@ -85,6 +85,7 @@ class DiffusionRollout(BaseRollout):
         all_log_probs = []
         all_video_frames = []
         all_sigma_schedule = []
+        all_video_paths = []
         # VAE参数
         vae_stride = [4, 8, 8]
         patch_size = [1, 2, 2]
@@ -126,7 +127,7 @@ class DiffusionRollout(BaseRollout):
             )
 
             grpo_sample = True
-            progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
+            progress_bar = tqdm(range(0, self.config.sampling_steps), desc=f"WAN Sampling Progress on pid{self.pid}")
 
             with torch.no_grad(): 
                 _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
@@ -215,9 +216,11 @@ class DiffusionRollout(BaseRollout):
                             print(f"Error saving first frame {image_path}: {e}")
 
                         # 保存视频
-                        video_filename = f"wan_video_rank{rank}_batch{index}_{batch_captions[0]}.mp4"
-                        video_path = os.path.join("./inference_demo/output", video_filename)
-                        
+                        video_filename = f"wan_video_rank{rank}_batch{index}_{timestamp}_{batch_captions[0]}.mp4"
+                        video_path = os.path.join("./videos/output", video_filename)
+                        print(video_path)
+                        # exit(0)
+                        # video_paths = []
                         try:
                             # 使用opencv保存视频
                             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -236,9 +239,11 @@ class DiffusionRollout(BaseRollout):
                             
                             out.release()
                             print(f"Video saved: {video_path}")
+                            # video_paths.append(video_path)
                             
                         except Exception as e:
                             print(f"Error saving video {video_path}: {e}")
+                            # exit(0)
                             # 如果视频保存失败，至少保存第一帧作为图像
                             first_frame = video_np[0]  # (H, W, C)
                             if C == 3:
@@ -250,28 +255,27 @@ class DiffusionRollout(BaseRollout):
                             image_path = os.path.join("./images", image_filename)
                             first_frame_pil.save(image_path)
                             # print(f"First frame saved as image: {image_path}")
+                        return video_path  # 返回所有video_path构成的列表 video_paths                    
                     else:
                         print(f"Unexpected video_frames shape: {video_frames.shape}")
-                
-                #To see image
-                # import torch.distributed as dist
-                # save_video_and_prompt(video_frames, dist.get_rank(), index)
-                # print(f"local rank: {dist.get_rank()}")
-                # exit(0)
-                # print(f"batch_captions[{index}]: {batch_captions}")
-
-                # # 保存视频
-                # save_video_and_prompt(
-                #     video_frames,
-                #     batch_captions[0],
-                #     index
-                # )
+            
+                local_rank = int(os.environ["LOCAL_RANK"])
+                # 保存视频
+                video_path = save_video_and_prompt(
+                    video_frames = video_frames, 
+                    rank=self.pid,
+                    # batch_captions[0],
+                    index = index,
+                )
                 video_frames = video_frames.unsqueeze(0)
-                # print("video_frames",video_frames.shape)
+                
+            
             # print("video_frames",video_frames.shape)
             all_video_frames.append(video_frames)
+            all_video_paths.append(video_path)  # 添加path
             torch.cuda.empty_cache()
-
+        
+        # 除了all_video_paths返回的都是一个张量
         if len(all_latents) > 1:
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
@@ -282,7 +286,13 @@ class DiffusionRollout(BaseRollout):
             all_log_probs = all_log_probs[0]
             all_video_frames = all_video_frames[0]
             all_sigma_schedule = all_sigma_schedule[0]
-
+            all_video_paths = all_video_paths
+        print(f"The length of all_video_paths is {len(all_video_paths)}")
+        print(f"all_video_frames的形状为:{all_video_frames.shape}")
+        
+        print("="*40)
+        
+        # exit(0)
         timestep_value = [int(sigma * 1000) for sigma in all_sigma_schedule[0].squeeze()][:self.config.sampling_steps]
         
         timestep_values = [timestep_value[:] for _ in range(B)]
@@ -308,6 +318,9 @@ class DiffusionRollout(BaseRollout):
             batch_size=B
         )
         non_tensor_batch = prompts.non_tensor_batch
+        import numpy as np
+        non_tensor_batch["video_paths"] = np.array(all_video_paths) 
+        # all_video_paths是本台gpu上本轮所有视频路径的集合，顺序与tensor拼接顺序一致
 
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
