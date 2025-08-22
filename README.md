@@ -135,18 +135,18 @@ config = dict(
 #### 模型规格对比
 
 | 模型          | 参数量 | 输入维度 | 隐藏维度 | 注意力头数 | 层数 |
-|-------------|--------|----------|----------|------------|------|
+|-------------|--------|----------|----------|------------|----|
 | Teleai-1.3B | 1.3B | 36/16 | 1536 | 12 | 30 |
 | Teleai-5B   | 5B | 48 | 3072 | 24 | 30 |
 | Teleai-10B  | 10B | - | 5120 | 40 | 30 |
 | Teleai-14B  | 14B | - | 5120 | 40 | 40 |
-| Wan2.1-14B  | 14B | - | 5120 | 40 | 20 |
+| Wan2.1-14B  | 14B | - | 5120 | 40 | 40 |
 
 ### 训练效率和最优配置一览
 
 <!-- 待补充 -->
 
-## 核心特性
+## 常用特性
 
 ### 分布式多模态编码器
 
@@ -244,7 +244,10 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
 ```
 
 4. 在DiT上应用反向hook。由于input sequence做了切分，大部分层是与切分的sequence做计算，因此他们的权重梯度也是部分结果，
-需要在cp group做reduce sum。而部分层（如patch_emg和modulation)
+需要在cp group做reduce sum。而部分层（如patch_emb、head）是对完全序列做的计算，不需要cp grad reduce，所以必须要在这里做特殊处理（不能合并到DP reduce）。
+
+另外，modulation和time 相关的权重梯度，已经在modulate和gate中做了处理，所以这里也不需要额外reduce。适配新模型时需要注意。
+（TODO：补充使用tensorwatch工具观测梯度以指导实现grad reduce的方法和案例，联系李天催更）
 
 ```python
     def register_cp_grad_reduce_hook(self):
@@ -262,6 +265,47 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
             param.register_hook(self.cp_grad_reduce)
 
 ```
+
+
+### zero2分布式优化器
+
+基于ZeRO-2的分布式优化器，将优化器状态分片以节省内存。
+
+#### 使用方法
+
+启用分布式优化器：
+```bash
+--use-zero2
+```
+
+### EMA
+
+EMA用于模型权重的平滑更新，提高最终模型质量。在每次保存模型权重时额外保存一份ema权重，断点续训时也会加载。
+基本不影响训练速度，但是会额外占用一点显存。目前的实现是把ema权重在所有训练的GPU上切分，所以训练GPU越多显存影响越小。
+
+使用方法：
+```bash
+--with-ema
+--ema-decay 0.999 # 一般设置0.999到0.9999
+```
+
+### 断点续训
+
+支持训练中断后的恢复。
+
+使用方法：
+```bash
+--save-interval 500          # 每500步保存一次
+--save $CHECKPOINT_PATH_SAVE # 保存路径
+--load $CHECKPOINT_PATH_LOAD # 加载路径
+```
+
+支持使用--override-opt_param-scheduler来用当前指定的超参（如lr、wd）覆盖上一次训练的优化器超参，
+也可以使用--no-load-optim和--no-load-rng来跳过加载优化器状态或者rng state。
+
+推荐使用--data-parallel-random-init训练，因为这样可以让不同rank随机采样的timestep不同，有利于稳定训练。
+（开启后模型checkpoint中会额外存每份dp的rng state）
+
 
 ### TensorParallel（张量并行）
 
@@ -283,67 +327,21 @@ Note：现在CausalWan和Hunyuan还没有实现TP
 #### 适配方法
 
 1. **模型张量并行改造：**
-```python
-from teletron.core.tensor_parallel import tensor_parallel_mixin
+使用TensorParallelMixin中的enable_tensor_parallel系列方法来将模型中的线性层改为列并行线性层或行并行线性层。
+关于这些接口的使用方式详见(TensorParallelMixin)[TODO:TensorParallelMixin接口文档]
 
-class MyModel(tensor_parallel_mixin.TensorParallelMixin):
-    def __init__(self):
-        super().__init__()
-        # 使用并行层替换标准层
-        self.linear1 = ColumnParallelLinear(1024, 4096)
-        self.linear2 = RowParallelLinear(4096, 1024)
+```python
+class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock):
+    def __init__(...):
+        DiTBlock.__init__(...)
+        ...
+        # from TensorParallelMixin
+        self.enable_ffn_tensor_parallel(self.ffn, config)
+        self.enable_self_attn_tensor_parallel(self.self_attn, config)
+        self.enable_cross_attn_tensor_parallel(self.cross_attn, config)
 ```
 
 2. 检查其他层是否受TP影响
 我们给Wan适配TP时发现Wan的qk norm是在整个hidden dim上取平均（而不是在head dim上取平均），
 这意味着TP情况下，qknorm层收到的hidden dim是切分后的，必须要做一次reduce同步TP group内的rms。 
-qk norm的反向也要做处理且更复杂，详见teletron/core/tensor_parallel/layers.py。
-
-
-### zero2分布式优化器
-
-基于ZeRO-2的分布式优化器，将优化器状态分片以节省内存。
-
-#### 使用方法
-
-启用分布式优化器：
-```bash
---use-zero2
-```
-
-## 其他特性
-
-### EMA
-
-EMA用于模型权重的平滑更新，提高最终模型质量。在每次保存模型权重时额外保存一份ema权重，断点续训时也会加载。
-基本不影响训练速度，但是会额外占用一点显存。目前的实现是把ema权重在所有训练的GPU上切分，所以训练GPU越多显存影响越小。
-
-使用方法：
-```bash
---with-ema
---ema-decay 0.999 # 一般设置0.999到0.9999
-```
-
-### 断点续训
-
-完善的检查点系统，支持训练中断后的无缝恢复。
-
-使用方法：
-```bash
---save-interval 500          # 每500步保存一次
---save $CHECKPOINT_PATH_SAVE # 保存路径
---load $CHECKPOINT_PATH_LOAD # 加载路径
-```
-
-检查点包含：
-- 模型参数状态
-- 优化器状态  
-- 学习率调度器状态
-- 随机数生成器状态
-- 训练元信息（iteration, epoch等）
-- EMA模型状态（如果启用）
-
-支持使用--override-opt_param-scheduler来用当前指定的超参（如lr、wd）覆盖上一次训练的优化器超参，
-也可以使用--no-load-optim和--no-load-rng来避免加载优化器状态或者rng state。
-
-推荐使用--data-parallel-random-init训练，因为这样可以让不同rank随机采样的timestep不同，有利于稳定训练。
+qk norm的反向也要做处理且更复杂，详见(TensorParallelMixin.TeleParallelRMSNorm)[TODO:TensorParallelMixin接口文档.RMSNorm]。
