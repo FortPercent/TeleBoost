@@ -100,7 +100,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
 
         # 合并到 data 中（假设 DataProto 接收一个包含 batch 的 dict）
-        # data.batch=batch
         self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
@@ -108,93 +107,150 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
         
         device = torch.device(f"cuda:{get_device_id()}")
-        print(self.gradient_accumulation)
+        torch.cuda.memory._record_memory_history(max_entries=800000)
+        print("self.gradient_accumulation",self.gradient_accumulation)
+        move_keys = ["latents", "next_latents", "timesteps", "log_probs", "advantages", "sigma_schedule"]
+        perms=perms.to(device)
+        # log_file = f"/gemini/space/wuxuaner/Dancegrpo/recipe/dancegrpo/log/rank{get_device_id()}"
         for batch_idx, data in enumerate(dataloader):
-            data.to(device)
-            print("batch_idx",batch_idx)
-            print("+"*100)
-            # mini_batch = data
-            # # split batch into micro_batches
-            # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
 
-            self.actor_optimizer.zero_grad()
-            batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
-            batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
-
-            for i in range(len(data)):
-                orig_lengths =int(data.batch['context_orig_lengths'][i])
-                assert batch_contexts[i].shape[0] >= orig_lengths, \
-                    f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
-                batch_contexts[i] = batch_contexts[i][:orig_lengths]
+            try:
+                td = data.batch
+                ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
+                # 裁剪后的 CPU 列表（短生命周期）
+                ctxs_cpu  = [td["contexts"][i][:int(ctx_lens[i])]   for i in range(len(data))]
+                nctx_cpu  = [td["null_context"][i]                  for i in range(len(data))]
                 
-            for step_idx in range(train_timesteps):
-                clip_range = self.config.clip_range
-                adv_clip_max = self.config.adv_clip_max
-                
-                latent_shape = data.batch["latents"][:, step_idx].shape
-                seq_len = math.ceil(
-                    (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
-                )
-    
+                td = data.pop(batch_keys=move_keys).to(device)
+                # for k in move_keys:
+                    # print(k,device)
+                    # td[k] = td[k].to(device)
+                    # print("after",k,td[k].device)
+                    
+                ctxs  = [c.to(device) for c in ctxs_cpu]
+                nctxs = [c.to(device) for c in nctx_cpu]
+                del ctxs_cpu, nctx_cpu   # CPU 中间产物可丢
+                # mini_batch = data
+                # # split batch into micro_batches
+                # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
 
-                new_log_probs = self.grpo_wan_one_step(
-                    data.batch["latents"][:, step_idx],
-                    data.batch["next_latents"][:, step_idx],
-                    batch_contexts,  # List[Tensor]格式
-                    batch_null_contexts,
-                    seq_len,
-                    self.actor_module,
-                    data.batch["timesteps"][:, step_idx],
-                    perms[batch_idx][step_idx],
-                    data.batch["sigma_schedule"][0], 
-                )
-
-                # print(new_log_probs)
-                # exit(0)
-                # 其余训练逻辑保持不变...
-                advantages = torch.clamp(
-                    data.batch["advantages"],
-                    -adv_clip_max,
-                    adv_clip_max,
-                )
- 
-                ratio = torch.exp(new_log_probs - data.batch["log_probs"][:, step_idx])
-                # ratio = torch.exp(new_log_probs - current_log_probs)
-                
-                unclipped_loss = -advantages * ratio
-                clipped_loss = -advantages * torch.clamp(
-                    ratio,
-                    1.0 - clip_range,
-                    1.0 + clip_range,
-                )
-                
-                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-
-                loss.backward()
-  
-                avg_loss = loss.detach().clone()
- 
-                torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
-                # total_loss += avg_loss.item()
-                # if batch_idx==3:
-                #     from datetime import datetime
-
-                #     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-                #     file_name = f"{torch.distributed.get_rank()}_visual_mem_{timestamp}.pickle"
-                #     print("========================================================")
-                #     print(f"save snapshot: {file_name}")
-                #     print("========================================================")
-                #     # save record:
-                #     torch.cuda.memory._dump_snapshot(file_name)
-                #     torch.cuda.memory._record_memory_history(enabled=None)
-                #     torch.cuda.synchronize()
-                #     exit(0)
-                
-            if (batch_idx + 1) % self.gradient_accumulation == 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
-                self.actor_optimizer.step()
                 self.actor_optimizer.zero_grad()
-                #self.actor_lr_scheduler.step() constant
+                # batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
+                # batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
+
+                # for i in range(len(data)):
+                #     orig_lengths =int(data.batch['context_orig_lengths'][i])
+                #     assert batch_contexts[i].shape[0] >= orig_lengths, \
+                #         f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
+                #     batch_contexts[i] = batch_contexts[i][:orig_lengths]
+                    
+                for step_idx in range(train_timesteps):
+                    clip_range = self.config.clip_range
+                    adv_clip_max = self.config.adv_clip_max
+                    latent_t  = td.batch["latents"][:, step_idx]
+                    nlatent_t = td.batch["next_latents"][:, step_idx]
+                    t_t       = td.batch["timesteps"][:, step_idx]
+                    sigma_0   = td.batch["sigma_schedule"][0]  # 若每样本不同 schedule，这里改成按样本取
+          
+                    latent_shape = td.batch["latents"][:, step_idx].shape
+                    seq_len = math.ceil(
+                        (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
+                    )
+        
+        
+                    new_log_probs = self.grpo_wan_one_step(
+                        latent_t,
+                        nlatent_t,
+                        ctxs, 
+                        nctxs,
+                        seq_len,
+                        self.actor_module,
+                        t_t,
+                        perms[batch_idx][step_idx],
+                        sigma_0, 
+                    )
+                    # if step_idx==2:
+                    #     from datetime import datetime
+                    #     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+                    #     file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}_{batch_idx}_step_idx_{step_idx}.pickle"
+                    #     # save record:
+                    #     torch.cuda.memory._dump_snapshot(file_name)
+                    #     # Stop recording memory snapshot history:
+                    #     torch.cuda.memory._record_memory_history(enabled=None)
+
+                    # print(new_log_probs)
+                    # exit(0)
+                    # 其余训练逻辑保持不变...
+                    advantages = torch.clamp(
+                        td.batch["advantages"],
+                        -adv_clip_max,
+                        adv_clip_max,
+                    )
+    
+                    ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
+                    # ratio = torch.exp(new_log_probs - current_log_probs)
+                    
+                    unclipped_loss = -advantages * ratio
+                    clipped_loss = -advantages * torch.clamp(
+                        ratio,
+                        1.0 - clip_range,
+                        1.0 + clip_range,
+                    )
+                    
+                    loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+
+                    loss.backward()
+    
+                    avg_loss = loss.detach()
+    
+                    torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+                    
+                    # # 查看显存占用
+                    # import gc
+
+                    # # 遍历当前存活的所有 Tensor
+                    # for obj in gc.get_objects():
+                    #     try:
+                    #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    #             print(f"Tensor shape: {tuple(obj.shape)}, dtype: {obj.dtype}, device: {obj.device}, size: {obj.numel() * obj.element_size() / 1024**2:.2f} MB")
+                    #     except Exception as e:
+                    #         pass
+   
+                    print("batch_idx",batch_idx)
+                    print("+"*100)
+                    print(f"Allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+                    print(f"Reserved:  {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+                    print(f"Max Allocated: {torch.cuda.max_memory_allocated(0) / 1024**3:.2f} GB")
+
+                    # with open
+                    # if batch_idx==3:
+                    #     exit(0)
+                if (batch_idx + 1) % self.gradient_accumulation == 0:
+                    # grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                    self.actor_optimizer.step()
+                    self.actor_optimizer.zero_grad()
+                    
+                del ctxs, nctxs
+                for k in move_keys:
+                    if k in td: 
+                        del td[k]
+                del td, data
+                torch.cuda.empty_cache()
+                
+            except Exception as e:
+                print(f"[RANK].Error:{e}")
+                # record
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+                file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}.pickle"
+                # save record:
+                torch.cuda.memory._dump_snapshot(file_name)
+                # Stop recording memory snapshot history:
+                torch.cuda.memory._record_memory_history(enabled=None)
+                import traceback
+                traceback.print_exc()
+                exit(0)
+
 
     def grpo_wan_one_step(
         self,
@@ -228,7 +284,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         with torch.autocast("cuda", dtype=autocast_dtype):
 
             # latents.to(pre_latents.device)
-            
             pred_cond = transformer(
                 x=[latents],
                 t=timesteps,
@@ -245,8 +300,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 model_output_cond = pred_cond
                 
             # 立即清理
-            del pred_cond
-            torch.cuda.empty_cache()
+            # del pred_cond
+            # torch.cuda.empty_cache()
                 
             #再计算无条件预测
             with torch.no_grad(): 
@@ -266,12 +321,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 else:
                     model_output_uncond = pred_uncond
                     
-                del pred_uncond
-                torch.cuda.empty_cache()
+                # del pred_uncond
+                # torch.cuda.empty_cache()
             
             # CFG组合
             model_output = model_output_uncond + guide_scale * (model_output_cond - model_output_uncond)
-            del model_output_cond, model_output_uncond
+            # del model_output_cond, model_output_uncond
             # model_output = model_output_cond
 
         # 确保数据类型一致性
@@ -304,10 +359,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
         sigma = sigmas[index]
         dsigma = sigmas[index + 1] - sigma  # sigma差分
-        
-        # 确定性更新部分
         prev_sample_mean = latents + dsigma * model_output
-        
         # 预测的原始样本
         pred_original_sample = latents - sigma * model_output
         
