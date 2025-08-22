@@ -107,6 +107,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 num_gen_batches += 1
                 
                 # pop those keys for generation TODO!!!
+                # trainer的类型是diffusion
                 if self.config.trainer.type=="diffusion":
                     # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
                     gen_batch = new_batch.pop(
@@ -130,8 +131,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw):
+                        # gen_batch_output的数据类型是DataProto
+                        # 具体见DiffusionActorRolloutWorker.generate_sequences方法
+                        # 得到的gen_batch_output是聚合所有gpu的结果
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-       
+                        # print(f"gen_batch_output的形状为：{gen_batch_output.batch['video_frames'].shape}")
+                        # print(f"video_paths的内容是：{gen_batch_output.non_tensor_batch['video_paths'].tolist()}")
+                        # print("="*40)
+                        # exit(0)
+                    # 目前用的是gae，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
@@ -157,9 +165,12 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
+                        print(f"是否使用奖励模型: {str(self.use_rm)}")
+                        print("="*40)
                         if self.use_rm:
-                            # Calculate the HPS
+                            # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
+                                # TODO:关键要修改这里！
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
                                 new_batch = gen_batch_output.union(reward_tensor)
                                 new_batch.pop(batch_keys=['video_frames'])

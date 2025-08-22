@@ -2,7 +2,7 @@
 set -xeuo pipefail
 
 project_name='Dancegrpo'
-exp_name='Dancegrpo_Wan_14B_720P_129'
+exp_name='Dancegrpo_Wan_1__3B_720P_129'
 
 adv_estimator=grpo
 
@@ -24,7 +24,7 @@ filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=4 # same with dp
 gen_prompt_bsz=$((train_prompt_bsz * 3))
-n_resp_per_prompt=12
+n_resp_per_prompt=4
 train_prompt_mini_bsz=1
 
 # Ray
@@ -35,8 +35,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/gemini/space/ljm/Dancegrpo/data/1__3B/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/gemini/space/ljm/Dancegrpo/data/1__3B/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
@@ -50,7 +50,7 @@ sp_size=2
 use_dynamic_bsz=False
 actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
 infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
-offload=False
+offload=True
 gen_tp=1
 
 HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
@@ -63,13 +63,13 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/root/Wan2___1-T2V-14B' \
-    actor_rollout_ref.model.vae_model_path='/root/Wan2___1-T2V-14B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.path='/gemini/space/Wan2___1-T2V-14B' \
+    actor_rollout_ref.model.vae_model_path='/gemini/space/Wan2___1-T2V-1___3B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=5.0 \
-    actor_rollout_ref.h=720 \
-    actor_rollout_ref.w=1280 \
-    actor_rollout_ref.num_frames=5 \
-    actor_rollout_ref.sampling_steps=16 \
+    actor_rollout_ref.h=480 \
+    actor_rollout_ref.w=832 \
+    actor_rollout_ref.num_frames=81 \
+    actor_rollout_ref.sampling_steps=3 \
     actor_rollout_ref.actor.eta=0.25 \
     actor_rollout_ref.lr_warmup_steps=0 \
     actor_rollout_ref.use_hpsv2=True \
@@ -94,7 +94,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.optim.lr=2e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.optim.weight_decay=0.1 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=4 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=1 \
     actor_rollout_ref.actor.fsdp_config.param_offload=${offload} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${offload} \
     actor_rollout_ref.actor.entropy_coeff=0 \
@@ -118,7 +118,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
-    reward_model.enable=False \
+    reward_model.enable=True \
     reward_model.model.path='./model/HPS_v2.1_compressed.pt' \
     reward_model.micro_batch_size_per_gpu=1 \
     reward_model.model.input_tokenizer=null \
