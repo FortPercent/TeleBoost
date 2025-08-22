@@ -112,9 +112,6 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                   lr_mult=1.0):
 
         args = get_args()
-        # timers = get_timers()
-        assert args.global_batch_size == args.micro_batch_size * mpu.get_data_parallel_world_size()
-        # timers = get_timers()
         if args.use_zero2:
             model = self.get_model(model_type, wrap_with_ddp=False)
         else:
