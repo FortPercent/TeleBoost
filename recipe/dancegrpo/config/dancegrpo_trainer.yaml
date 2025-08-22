@@ -8,6 +8,7 @@ defaults:
 
 trainer:
   type: diffusion
+  use_rm: True
 
 data:
   type: diffusion
@@ -38,5 +39,9 @@ actor_rollout_ref:
 
 
 reward_model:
-  type: diffusion
+  enable: True
+  strategy: fsdp
+  # type: diffusion
   reward_manager: dancegrpo
+
+use_rm: True

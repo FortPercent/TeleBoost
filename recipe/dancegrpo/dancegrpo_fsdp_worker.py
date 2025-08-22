@@ -14,11 +14,15 @@
 import logging
 import os
 import warnings
+import time
+import re
 
 import torch
 import torch.distributed
 from torch.distributed.device_mesh import init_device_mesh
 from diffusers.image_processor import VaeImageProcessor
+from typing import List, Dict, Any, Union
+
 
 from verl import DataProto
 from verl.models.transformers.monkey_patch import apply_monkey_patch
@@ -187,12 +191,286 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
 
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             with simple_timer("generate_sequences", timing_generate):
-                output = self.rollout.generate_sequences(prompts=prompts)
+                # 得到DataProto，其中non_tensor_batch中保存了本组batch的存储路径
+                output = self.rollout.generate_sequences(prompts=prompts)  # output的type是<class 'verl.protocol.DataProto'>
+                print(f"the type of the output is {type(output)}")
+                
 
             log_gpu_memory_usage("After rollout generation", logger=logger)
         return output
+ 
+class QwenRewardModelWorker(RewardModelWorker):
+    """
+    Note that we only implement the reward model that is subclass of AutoModelForTokenClassification.
+    Use vllm based Qwen model as the reward model.
+    """
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def init_model(self):
+        """
+        initialize the reward model and sampling_params
+        """
+        # This is used to import external_lib into the huggingface systems
+        # import_external_libs(self.config.model.get("external_lib", None))
+        self.reward_module, self.sampling_params = self._build_model()
+        print(f"成功初始化Qwen模型...")
+        print("="*40)
+        # exit(0)
+        # TODO
+        # self.image_processor = VaeImageProcessor(16)
+        return
 
+    def _build_model(self):
+        # the following line is necessary
+        from torch.distributed.fsdp import CPUOffload
+        # use_shm = config.model.get("use_shm", False)
+        # download the checkpoint from hdfs
+        # local_path = copy_to_local(config.model.path, use_shm=use_shm)
+        model_path = "/gemini/space/Qwen/Qwen2___5-VL-72B-Instruct"
+    
+        from vllm import LLM, SamplingParams
+        logger.info(f"Loading Qwen model from {model_path}...")   
+        llm = LLM(model = model_path, tensor_parallel_size = 8, gpu_memory_utilization = 0.9)  
+        sampling_params = SamplingParams(temperature = 0.8, top_p = 0.90)   
+        return llm, sampling_params
+        
+    
+    def _create_simple_prompt(self) -> str:
+        """创建结构化视频质量评估提示词（界面风格）"""
+        return """请你作为一个专业视频质量评估助手，参考以下评分标准和格式，对给定的视频进行多维度质量评估。请严格按照输出格式，以客观、公正、结构化的方式打分。
 
+                评估维度（每项满分100分）：
+                1. 视觉审美（Aesthetics）：
+                - 参考项：构图是否合理、光影运用是否自然、色彩搭配是否和谐、整体画面是否具有美感。
+                - 高分标准：画面构图精妙、光影自然、色彩生动，具备艺术性。
+                - 扣分项：画面凌乱、光照极端或失衡、颜色搭配不当或灰暗。
+
+                2. 局部变形（Distortion）：
+                - 参考项：人物或物体是否出现异常形态、肢体是否扭曲、是否有结构性突变或失真、是否突然消失。
+                - 高分标准：视频中不存在明显变形，物体结构自然、稳定。
+                - 扣分项：出现严重扭曲、肢体不合理、局部区域断裂或消失。
+
+                3. 视觉伪影与不一致（Artifacts/Inconsistency）：
+                - 参考项：是否存在突变区域、马赛克、色块、条纹、边缘断裂、纹理模糊等问题。
+                - 高分标准：无明显视觉瑕疵，画面一致性强。
+                - 扣分项：出现视觉伪影或明显瑕疵，视觉体验受到影响。
+
+                4. 清晰度（Sharpness）：
+                - 参考项：细节呈现的清晰度，边缘锐利程度，物体是否具备较高的辨识度。
+                - 高分标准：画面细节丰富、边缘清晰锐利。
+                - 扣分项：整体模糊、边缘不清晰、细节缺失。
+
+                5. 视觉一致性（Consistency）：
+                - 参考项：视频内容在时间上的连贯性，是否存在跳帧、镜头突变或画面不稳定等问题。
+                - 高分标准：过渡自然，时间逻辑连贯，画面稳定。
+                - 扣分项：镜头跳跃明显、物体突然改变状态、画面抖动。
+
+                评分规则：
+                - 每个维度评分在 0 ~ 100 范围内，越好越高分。
+                - 合计为五项得分的算术平均，保留整数。
+                - 对于某项严重失真或效果极差（如严重模糊、强伪影等），请大胆给出低分（例如低于30分）。
+                - 每个视频的打分应充分拉开差距，避免视频之间出现“同分”或“几乎同分”情况。
+                - 请确保不同维度之间的评分不互相矛盾，确保评分具有可比性与区分度。
+
+                输出格式（严格遵守）：
+                dim1:XX分,dim2:XX分,dim3:XX分,dim4:XX分,dim5:XX分,合计:XX分
+
+                风格要求：
+                - 禁止输出解释性文字或分析过程。
+                - 禁止使用“我认为”、“可能”、“大致”等模糊词语。
+                - 输出必须严格按照上述格式，一次性返回评估结果。
+
+                请严格按照输出格式要求，输出且只输出输出格式的内容。请依照以上标准、逻辑和格式，对视频进行结构化质量评估。
+                """
+        
+    def _generate_batch_prompts(self,batch_path, max_pixels = 360*420, fps = 1.0) -> List:
+        """
+        generate prompts for a batch of paths.
+        Args:
+            - batch_path: a List[str] item that consists all the paths of videos in the batch.
+            - max_pixels: default to 360*420, int
+            - fps: default to 1.0, float
+        Returns:
+            - A List[List[Dict[str,Any]]] item that each element is a List satisfying the conversation format of llm.chat method.
+        """
+        messages=[]
+        prompt = self._create_simple_prompt()
+        i=1
+        print("开始生成对话...")
+        total_time=0
+        logger.info(f"Starting generating batch of prompts ...")
+        VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
+        for file_path in batch_path:
+            if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
+                start_time=time.time()
+                video_path = str(file_path)
+                message = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "video_url",
+                                "video_url": {"url":f"file://{video_path}"},
+                                "max_pixels": max_pixels,
+                                "fps": fps,
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ]
+                messages.append(message)
+                processing_time=time.time()-start_time
+                total_time+=processing_time
+                print(f"成功生成第{i}个message，用时{processing_time}")
+                i+=1
+                if i>30:
+                    print(f"成功生成{len(messages)}条对话，用时{total_time}")
+                    print("="*40)
+                    return messages
+                
+    def _parse_simple_evaluation(self, output_text: str) -> Dict[str, Any]:
+        """
+        extract the score in the output_text. Aligning with new prompts format.
+        Args:
+            - output_text: the output text in "str" form from llm rollout
+        Returns:
+            - A dict that includes keys:
+                - overall_score: the score extract from the output text, float
+                - dimensionn_scores: dimension scores, Dict[str,float]
+                - summery: output_text[:500], str
+                - raw_output: output_text, str
+        """
+        # 针对新格式的分数提取模式
+        score_patterns = [
+                r'合计[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 合计：80分
+                r'综合得分[：:]\s*(\d+(?:\.\d+)?)\s*分',      # 综合得分：80分
+                r'总分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 总分：80分
+                r'dim5[：:]\s*(\d+(?:\.\d+)?)\s*分.*?合计[：:]\s*(\d+(?:\.\d+)?)\s*分',  # 提取合计分数
+                r'最终[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 最终：80分
+                r'评分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 评分：80分
+                r'质量评分[：:]\s*(\d+(?:\.\d+)?)',          # 质量评分：80
+                r'分数[：:]\s*(\d+(?:\.\d+)?)',              # 分数：80
+                r'(\d+(?:\.\d+)?)\s*分',                     # 80分
+                r'(\d+(?:\.\d+)?)/100',                      # 80/100
+                r'(\d+(?:\.\d+)?)%',                         # 80%
+            ]
+            
+        score = 50.0  # 默认分数
+        for pattern in score_patterns:
+            match = re.search(pattern, output_text)
+            if match:
+                # 对于有多个捕获组的模式，取最后一个（合计分数）
+                if len(match.groups()) > 1:
+                    found_score = float(match.group(2))  # 取合计分数
+                else:
+                    found_score = float(match.group(1))
+                    
+                if found_score > 100:
+                    found_score = min(found_score, 100)
+                score = found_score
+                logger.info(f"Found score: {score} using pattern: {pattern}")
+                break
+            
+        # 如果没找到分数，记录日志
+        if score == 50.0:
+            logger.warning(f"No score found in output, using default 50.0. Output: {output_text[:200]}...")
+            
+        # 尝试提取各个维度的分数
+        dimension_scores = {}
+        dim_patterns = [
+                (r'dim1[：:]\s*(\d+(?:\.\d+)?)\s*分', 'visual_artifacts'),
+                (r'dim2[：:]\s*(\d+(?:\.\d+)?)\s*分', 'local_deformation'),
+                (r'dim3[：:]\s*(\d+(?:\.\d+)?)\s*分', 'noise_quality'),
+                (r'dim4[：:]\s*(\d+(?:\.\d+)?)\s*分', 'clarity_sharpness'),
+                (r'dim5[：:]\s*(\d+(?:\.\d+)?)\s*分', 'color_accuracy'),
+            ]
+            
+        for pattern, dim_name in dim_patterns:
+            match = re.search(pattern, output_text)
+            if match:
+                dimension_scores[dim_name] = float(match.group(1))
+            
+        result = {
+                "overall_score": score,
+                "summary": output_text[:500] + "..." if len(output_text) > 500 else output_text,
+                "raw_output": output_text
+            }
+            
+        # 如果提取到了维度分数，也加入结果
+        if dimension_scores:
+            result["dimension_scores"] = dimension_scores
+            logger.info(f"Extracted dimension scores: {dimension_scores}")
+            
+        return result 
+    
+    def _get_batch_reward(self,batch_output: List) -> List:
+        """
+        extract rewards from a batch of output. Using self._parse_simple_evaluation method
+        Args:
+            - batch_output: the batch of output in the form of list and need to be extract rewards.
+        Returns:
+            - A list that includes all the rewards of the batch_output.
+        """
+        results = []
+        for single_prompt_output in batch_output:
+            for response in single_prompt_output:
+                output = response.outputs[0]
+                output_text = output.text
+                logger.info(f"Generated text length: {len(output_text)}")
+                logger.info(f"Generated text preview: {output_text[:200]}...")
+            
+                # 解析结果
+                result = self._parse_simple_evaluation(output_text)
+                overall_score = result.get("overall_score","N/A")
+                # processing_time = result.get("processing_time", 0)
+        
+                print(f"🎯 综合质量分数: {overall_score}/100")
+                # print(f"⏱️ 处理时间: {processing_time:.2f} 秒")
+                print()
+                results.append(result)
+        return results
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    @WorkerProfiler.annotate(color="brown")
+    def compute_rm_score(self, data: DataProto):
+        from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+        # Support all hardwares
+        datas=data.pop(
+            batch_keys=['video_frames'],
+            non_tensor_batch_keys=["caption","video_paths"],
+        )
+        print("开始用llm计算得分：")
+        start_time = time.time()
+        video_paths = datas.non_tensor_batch['video_paths']
+        import numpy as np
+        batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
+        batch_paths = [str(x.squeeze(0)) for x in batch_paths]
+        batch_indices = torch.chunk(torch.arange(len(batch_paths)), len(batch_paths))
+        all_rewards = []  
+        outputs = []
+        i=1
+        print(f"本轮需要计算{len(video_paths)}个奖励,每个batch_size大小为{len(batch_paths[0])}")
+        self.reward_module.to(device=get_device_id())
+        for batch_path in batch_paths:
+            batch_message=self._generate_batch_prompts(batch_path)
+            batch_output = []
+            for message in batch_message:
+                output = self.reward_model.chat(message, sampling_params = self.sampling_params)
+                batch_output.append(output)
+                
+            batch_reward = self._get_batch_reward(batch_output)
+            all_rewards.union(batch_reward)
+        all_rewards = torch.tensor(all_rewards)
+        batch = TensorDict(
+            {
+                "rewards": all_rewards,
+            },
+            batch_size = len(batch_paths)
+        )
+        self.reward_model.to('cpu')
+        
+        non_tensor_batch = data.non_tensor_batch
+        return DataProto(batch=batch, non_tensor_batch = non_tensor_batch)  
+        
     
 # TODO(sgm): we may need to extract it to dp_reward_model.py
 class DiffusionRewardModelWorker(RewardModelWorker):
