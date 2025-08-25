@@ -511,8 +511,16 @@ def patched_post_backward_hook(
     for i, (view, (param_name, module, module_name)) in enumerate(
             zip(views_grads, handle.flat_param._param_infos)
         ):
+        if view is None:
+            continue  # 该 param 本步没有 grad
         if "modulation" in param_name.lower():
-            view = view / 2
+            # 就地缩放，避免新分配；确保是浮点类型再做缩放
+            if view.is_floating_point():
+                view.mul_(0.5)  # 等价于除以 2
+            else:
+                # 若是整型/量化（极少见于可训练权重），跳过或显式转换
+                pass
+
             # print("modulation",param_name,view.float().norm().item())
             # exit(0)
     

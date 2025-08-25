@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 MODEL_PATH="/root/Wan2___1-T2V-14B"
+=======
+MODEL_PATH="/gemini/space/Wan2___1-T2V-14B"
+>>>>>>> origin/verl
 OUTPUT_DIR="/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings"
 export PYTHONPATH=/nvfile-heatstorage/teleai-infra/wxe/Dancegrpo_verl/wan:$PYTHONPATH
 

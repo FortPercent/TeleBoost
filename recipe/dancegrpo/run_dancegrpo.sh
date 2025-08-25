@@ -35,8 +35,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
