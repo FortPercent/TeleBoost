@@ -113,11 +113,12 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         batch_keys=["context","context_orig_lengths","null_context"],
                         non_tensor_batch_keys=["caption"],
                     )
+                    
                     # 形状与配置
                     B = new_batch.batch.batch_size[0]
-                    S = self.config.sampling_steps
-                    num_frames = self.config.num_frames
-                    size = (self.config.w, self.config.h)
+                    S = self.config.actor_rollout_ref.sampling_steps
+                    num_frames = self.config.actor_rollout_ref.num_frames
+                    size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
                     vae_stride = [4, 8, 8]
                     latent_dtype = torch.float16
                     latent_shape = (
@@ -137,10 +138,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     for i in range(new_batch.batch.batch_size[0]):  # 注意：这里用 gen_batch，不是 new_batch
                         # 这两个其实对所有样本都一样，放在循环外算一次也行
                         sigma_schedule = torch.linspace(1, 0, S + 1)
-                        sigma_schedule = sd3_time_shift(self.config.shift, sigma_schedule)   # [S+1]
+                        sigma_schedule = sd3_time_shift(self.config.actor_rollout_ref.shift, sigma_schedule)   # [S+1]
 
                         sigma_schedule_B[i] = sigma_schedule
-                        timesteps[i] = (sigma_schedule[:-1] * 1000).to(torch.long)
 
                         input_latents[i] = torch.randn(latent_shape, dtype=latent_dtype)
 
@@ -148,7 +148,6 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     gen_batch.batch["input_latents"]  = input_latents
                     gen_batch.batch["sigma_schedule"] = sigma_schedule_B
                     
-
                     gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
                 elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
                     gen_batch = new_batch.pop(
