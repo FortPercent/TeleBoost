@@ -105,7 +105,7 @@ class VariableClipDataset(BaseDataset):
             # Broken images or random augmentations may cause the returned data
             # to be None
             if data is None:
-                bucket_idx = self.get_data_info(idx)["bucket_index"]
+                bucket_idx = self.data_list[idx].bucket_index
                 idx = self._rand_another(bucket_idx)
                 continue
             return data

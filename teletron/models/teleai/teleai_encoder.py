@@ -100,29 +100,38 @@ class TeleaiEncoder(BaseEncoder):
         print(f"在设备 {self.device} 上设置 TeleaiEncoder...")
         print(f"加载 VAE 模型... {self.vae_path}")
         if self.vae_type == "TeleaiVideoVAE_2_1":
-            self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            with torch.device("meta"):
+                self.vae = TeleaiVideoVAE()
             self.compression = (4,8,8)
         else:
-            self.vae = TeleaiVideoVAE_2_2().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            with torch.device("meta"):
+                self.vae = TeleaiVideoVAE_2_2()
             self.compression = (4,16,16)
-        self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True)
+        self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True, assign=True)
+        self.vae.to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
 
         print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
-        self.text_encoder = TeleaiTextEncoder().to(device=self.device, dtype=torch.bfloat16)
-        self.text_encoder.load_state_dict(torch.load(self.text_encoder_path, map_location='cpu', weights_only=False), strict=True)
+        with torch.device("meta"):
+            self.text_encoder = TeleaiTextEncoder()
+        self.text_encoder.load_state_dict(torch.load(self.text_encoder_path, map_location='cpu', weights_only=False), strict=True, assign=True)
+        self.text_encoder.to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
         self.prompter = TeleaiPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)
 
         if self.image_encoder_path is not None:
             print(f"加载 Image Encoder 模型... {self.image_encoder_path}")
-            self.image_encoder = TeleaiImageEncoder().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
-            self.image_encoder.model.load_state_dict(torch.load(self.image_encoder_path, map_location='cpu', weights_only=False), strict=False)
-
+            with torch.device("meta"):
+                self.image_encoder = TeleaiImageEncoder()
+            self.image_encoder.model.load_state_dict(torch.load(self.image_encoder_path, map_location='cpu', weights_only=False), strict=False, assign=True)
+            self.image_encoder.to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+        
         if self.depth_model_path is not None:
             print(f"加载 Depth Model 模型... {self.depth_model_path}")
-            self.depth_model = VideoDepthAnything().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
-            self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu', weights_only=False), strict=True)
+            with torch.device("meta"):
+                self.depth_model = VideoDepthAnything()
+            self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu', weights_only=False), strict=True, assign=True)
+            self.depth_model.to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
 
 
         for key, val in self.work_fn.items():
