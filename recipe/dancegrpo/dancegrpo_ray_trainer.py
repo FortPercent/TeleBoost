@@ -113,6 +113,42 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         batch_keys=["context","context_orig_lengths","null_context"],
                         non_tensor_batch_keys=["caption"],
                     )
+                    # 形状与配置
+                    B = new_batch.batch.batch_size[0]
+                    S = self.config.sampling_steps
+                    num_frames = self.config.num_frames
+                    size = (self.config.w, self.config.h)
+                    vae_stride = [4, 8, 8]
+                    latent_dtype = torch.float16
+                    latent_shape = (
+                        16,
+                        (num_frames - 1) // vae_stride[0] + 1,
+                        size[1] // vae_stride[1],
+                        size[0] // vae_stride[2],
+                    )
+
+                    # 预分配批量张量
+                    input_latents = torch.empty((B, *latent_shape), dtype=latent_dtype)
+                    sigma_schedule_B = torch.empty((B, S+1), dtype=torch.float32)
+
+                    def sd3_time_shift(shift, x):
+                        return (shift * x) / (1 + (shift - 1) * x)
+
+                    for i in range(new_batch.batch.batch_size[0]):  # 注意：这里用 gen_batch，不是 new_batch
+                        # 这两个其实对所有样本都一样，放在循环外算一次也行
+                        sigma_schedule = torch.linspace(1, 0, S + 1)
+                        sigma_schedule = sd3_time_shift(self.config.shift, sigma_schedule)   # [S+1]
+
+                        sigma_schedule_B[i] = sigma_schedule
+                        timesteps[i] = (sigma_schedule[:-1] * 1000).to(torch.long)
+
+                        input_latents[i] = torch.randn(latent_shape, dtype=latent_dtype)
+
+                    # 塞回 gen_batch
+                    gen_batch.batch["input_latents"]  = input_latents
+                    gen_batch.batch["sigma_schedule"] = sigma_schedule_B
+                    
+
                     gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
                 elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
                     gen_batch = new_batch.pop(

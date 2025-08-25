@@ -92,7 +92,8 @@ class DiffusionRollout(BaseRollout):
 
         batch_size=1
         batch_indices = torch.chunk(torch.arange(B), B // batch_size)
-        latent_dtype = torch.float16 #TODO
+        latent_dtype = torch.float16 
+        #TODO 是不是要broadcast timesteps和noise？
         if self.config.init_same_noise:
             latent_shape = (
                 16,
