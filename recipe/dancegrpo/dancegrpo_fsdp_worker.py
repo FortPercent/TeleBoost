@@ -182,14 +182,15 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
     def generate_sequences(self, prompts: DataProto):
         prompts = prompts.to(get_device_id())
         timing_generate = {}
-        with self.rollout_sharding_manager:
-            log_gpu_memory_usage("After entering rollout sharding manager", logger=logger)
+        with self.rollout_ulysses_sharding_manager:
+            with self.rollout_sharding_manager:
+                log_gpu_memory_usage("After entering rollout sharding manager", logger=logger)
 
-            prompts = self.rollout_sharding_manager.preprocess_data(prompts)
-            with simple_timer("generate_sequences", timing_generate):
-                output = self.rollout.generate_sequences(prompts=prompts)
+                prompts = self.rollout_sharding_manager.preprocess_data(prompts)
+                with simple_timer("generate_sequences", timing_generate):
+                    output = self.rollout.generate_sequences(prompts=prompts)
 
-            log_gpu_memory_usage("After rollout generation", logger=logger)
+                log_gpu_memory_usage("After rollout generation", logger=logger)
         return output
 
 
