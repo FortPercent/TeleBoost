@@ -150,12 +150,12 @@ def patch_diffusion_for_ulysses_input_slicing(model: type):
     def _create_ulysses_wrapped_block_forward(original_forward):
         def ulysses_wrapped_block_forward(*args, **kwargs):
             x = kwargs.get("x")
-            
+            print("x_before",x.shape)
             current_ulysses_sp_size = get_ulysses_sequence_parallel_world_size()
             slice_now = x is not None and current_ulysses_sp_size > 1
             if slice_now:
                 x_sliced = diffusion_slice_input_tensor_pad(x, dim=1, padding=True)
-                print("x",x_sliced.shape)
+                print("x_after",x_sliced.shape)
                 # no need to split freqs
                 # freqs_sliced = diffusion_slice_input_tensor_pad(freqs,dim=0,padding=True)
                 # print("freqs_sliced",freqs_sliced.shape)

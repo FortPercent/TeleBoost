@@ -98,8 +98,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         #         batch[k] = v.unsqueeze(1)  # 添加一维，保持 [B, 1, ...] 结构
         # batch.batch_size=data.batch.batch_size
 
-
-        # 合并到 data 中（假设 DataProto 接收一个包含 batch 的 dict）
         self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
@@ -129,7 +127,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     
                 ctxs  = [c.to(device) for c in ctxs_cpu]
                 nctxs = [c.to(device) for c in nctx_cpu]
-                del ctxs_cpu, nctx_cpu   # CPU 中间产物可丢
+                del ctxs_cpu, nctx_cpu
                 # mini_batch = data
                 # # split batch into micro_batches
                 # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
