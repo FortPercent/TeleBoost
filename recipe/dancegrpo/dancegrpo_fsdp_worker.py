@@ -13,16 +13,17 @@
 # limitations under the License.
 import logging
 import os
-import warnings
-import time
 import re
+import time
+import warnings
+from typing import Any, Dict, List, Union
 
 import torch
 import torch.distributed
-from torch.distributed.device_mesh import init_device_mesh
 from diffusers.image_processor import VaeImageProcessor
-from typing import List, Dict, Any, Union
-
+from omegaconf import DictConfig, open_dict
+from tensordict import TensorDict
+from torch.distributed.device_mesh import init_device_mesh
 
 from verl import DataProto
 from verl.models.transformers.monkey_patch import apply_monkey_patch
@@ -30,35 +31,28 @@ from verl.single_controller.base import Worker
 from verl.single_controller.base.decorator import Dispatch, register
 from verl.utils import hf_tokenizer
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
-from verl.utils.debug import log_gpu_memory_usage
+from verl.utils.debug import ProfilerConfig, WorkerProfiler, WorkerProfilerExtension, log_gpu_memory_usage, simple_timer
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
 from verl.utils.flops_counter import FlopsCounter
-from verl.utils.fs import copy_local_path_from_hdfs
+from verl.utils.fs import copy_local_path_from_hdfs, copy_to_local
 from verl.utils.fsdp_utils import (
-    get_fsdp_wrap_policy,
-    get_init_weight_context_manager,
-    init_fn,
-    load_fsdp_model_to_gpu,
-    load_fsdp_optimizer,
-    offload_fsdp_model_to_cpu,
-    offload_fsdp_optimizer,
     CPUOffloadPolicy,
     MixedPrecisionPolicy,
     apply_fsdp2,
     fsdp2_load_full_state_dict,
     fsdp_version,
+    get_fsdp_wrap_policy,
     get_init_weight_context_manager,
-    layered_summon_lora_params
+    init_fn,
+    layered_summon_lora_params,
+    load_fsdp_model_to_gpu,
+    load_fsdp_optimizer,
+    offload_fsdp_model_to_cpu,
+    offload_fsdp_optimizer,
 )
 from verl.utils.import_utils import import_external_libs
-from verl.workers.fsdp_workers import create_device_mesh, get_sharding_strategy, ActorRolloutRefWorker,RewardModelWorker
+from verl.workers.fsdp_workers import ActorRolloutRefWorker, RewardModelWorker, create_device_mesh, get_sharding_strategy
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
-from verl.utils.debug import ProfilerConfig, WorkerProfiler, WorkerProfilerExtension, log_gpu_memory_usage, simple_timer
-
-from omegaconf import DictConfig, open_dict
-from typing import Union
-from verl.utils.fs import copy_to_local
-from tensordict import TensorDict
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -211,7 +205,7 @@ class QwenRewardModelWorker(RewardModelWorker):
         """
         # This is used to import external_lib into the huggingface systems
         # import_external_libs(self.config.model.get("external_lib", None))
-        self.reward_module, self.sampling_params = self._build_model()
+        self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
         print(f"成功初始化Qwen模型...")
         print("="*40)
         # exit(0)
@@ -219,19 +213,71 @@ class QwenRewardModelWorker(RewardModelWorker):
         # self.image_processor = VaeImageProcessor(16)
         return
 
-    def _build_model(self):
-        # the following line is necessary
-        from torch.distributed.fsdp import CPUOffload
-        # use_shm = config.model.get("use_shm", False)
-        # download the checkpoint from hdfs
-        # local_path = copy_to_local(config.model.path, use_shm=use_shm)
-        model_path = "/gemini/space/Qwen/Qwen2___5-VL-72B-Instruct"
+    def _build_reward_rollout(self,trust_remote_code=False):
+        device_name = get_device_name()
+
+        from torch.distributed.device_mesh import init_device_mesh
+
+        # TODO(sgm): support FSDP hybrid shard for larger model
+        infer_tp = self.config.rollout.tensor_model_parallel_size
+        dp = self.world_size // infer_tp
+        assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
+        rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
+        rollout_name = self.config.name
+        
+        print("[DEBUG] rollout_name",rollout_name,"infer_tp",infer_tp)
+        
+        from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
+        from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager
+        log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
+        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False))
+        print("[DEBUG_PATH],local_path",local_path)
+        # lora_kwargs = {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}} if self._is_lora else {}
+        lora_kwargs = {}
+        if vllm_mode == "customized":
+            rollout = vLLMRollout(actor_module=self.actor_module_fsdp, config=self.config.rollout, tokenizer=self.tokenizer, model_hf_config=self.actor_model_config, trust_remote_code=trust_remote_code, **lora_kwargs)
+        elif vllm_mode == "spmd":
+            # from verl.workers.rollout.vllm_rollout import vLLMAsyncRollout
+            lora_kwargs={}
+            from transformers import AutoConfig
+            actor_model_config = AutoConfig.from_pretrained(
+            local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2"
+            )
+            tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
+            vllm_rollout_cls = vLLMRollout
+            rollout = vllm_rollout_cls(model_path=local_path, config=self.config.rollout, tokenizer=tokenizer, model_hf_config=actor_model_config, device_mesh=rollout_device_mesh, trust_remote_code=trust_remote_code, **lora_kwargs)
+        else:
+            raise NotImplementedError("vllm_mode must be 'customized' or 'spmd'")
+        
+        log_gpu_memory_usage(f"After building {rollout_name} rollout", logger=logger)
+        full_params = torch.distributed.get_world_size() == 1
+        #TODO
+        rollout_sharding_manager = RewardVLLMManager(
+            # module=self.actor_module_fsdp,
+            inference_engine=rollout.inference_engine,
+            # model_config=self.actor_model_config,
+            full_params=full_params,
+            device_mesh=rollout_device_mesh,
+            # offload_param=self._is_offload_param,
+            load_format=self.config.rollout.load_format,
+            layered_summon=self.config.rollout.get("layered_summon", False),
+        )
+        log_gpu_memory_usage("After building sharding manager", logger=logger)
+        
+        return rollout, rollout_sharding_manager
+        # # the following line is necessary
+        # from torch.distributed.fsdp import CPUOffload
+
+        # # use_shm = config.model.get("use_shm", False)
+        # # download the checkpoint from hdfs
+        # # local_path = copy_to_local(config.model.path, use_shm=use_shm)
+        # model_path = "/nvfile-heatstorage/chatrl/public/models/Qwen2.5-VL-72B-Instruct"
     
-        from vllm import LLM, SamplingParams
-        logger.info(f"Loading Qwen model from {model_path}...")   
-        llm = LLM(model = model_path, tensor_parallel_size = 8, gpu_memory_utilization = 0.9)  
-        sampling_params = SamplingParams(temperature = 0.8, top_p = 0.90)   
-        return llm, sampling_params
+        # from vllm import LLM, SamplingParams
+        # logger.info(f"Loading Qwen model from {model_path}...")   
+        # llm = LLM(model = model_path, tensor_parallel_size = 4, gpu_memory_utilization = 0.9)  
+        # sampling_params = SamplingParams(temperature = 0.8, top_p = 0.90)   
+        # return llm, sampling_params
         
     
     def _create_simple_prompt(self) -> str:
@@ -433,6 +479,7 @@ class QwenRewardModelWorker(RewardModelWorker):
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
         from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+
         # Support all hardwares
         datas=data.pop(
             batch_keys=['video_frames'],
@@ -450,6 +497,8 @@ class QwenRewardModelWorker(RewardModelWorker):
         i=1
         print(f"本轮需要计算{len(video_paths)}个奖励,每个batch_size大小为{len(batch_paths[0])}")
         self.reward_module.to(device=get_device_id())
+        #TODO
+        with self.reward_rollout_sharding_manager:
         for batch_path in batch_paths:
             batch_message=self._generate_batch_prompts(batch_path)
             batch_output = []
@@ -503,10 +552,11 @@ class DiffusionRewardModelWorker(RewardModelWorker):
             self.input_tokenizer = hf_tokenizer(input_tokenizer_local_path, trust_remote_code=config.model.get("trust_remote_code", False))
             self.tokenizer = hf_tokenizer(local_path, trust_remote_code=config.model.get("trust_remote_code", False))
 
-        from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
         from typing import Union
+
         import huggingface_hub
-        from hpsv2.utils import root_path, hps_version_map
+        from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
+        from hpsv2.utils import hps_version_map, root_path
 
         def initialize_model():
             model_dict = {}
@@ -598,6 +648,7 @@ class DiffusionRewardModelWorker(RewardModelWorker):
         import itertools
 
         from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+
         # Support all hardwares
         datas=data.pop(
             batch_keys=['video_frames'],
