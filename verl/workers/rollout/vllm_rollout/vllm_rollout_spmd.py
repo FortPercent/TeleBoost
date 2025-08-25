@@ -92,7 +92,7 @@ class vLLMRollout(BaseRollout):
         tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
         assert tensor_parallel_size <= torch.distributed.get_world_size(), "tensor parallel size should be less than or equal to the world size"
         max_num_batched_tokens = self.config.get("max_num_batched_tokens", 8192)
-
+        
         if kwargs.get("train_tp") is not None:
             # deployed with megatron
             import os
@@ -145,7 +145,7 @@ class vLLMRollout(BaseRollout):
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
         if config.get("limit_images", None):  # support for multi-image data
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
-
+            
         self.inference_engine = LLM(
             model=model_path,
             enable_sleep_mode=True,
