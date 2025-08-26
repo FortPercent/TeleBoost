@@ -789,7 +789,7 @@ class RayPPOTrainer:
             self.rm_wg = all_wg["rm"]
             print(f"开始初始化奖励模型...")
             self.rm_wg.init_model()
-            exit(0)
+            print(f"ray_trainer: 成功初始化Qwen模型")
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg["actor_rollout"]

@@ -135,10 +135,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # 具体见DiffusionActorRolloutWorker.generate_sequences方法
                         # 得到的gen_batch_output是聚合所有gpu的结果
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                        # print(f"gen_batch_output的形状为：{gen_batch_output.batch['video_frames'].shape}")
-                        # print(f"video_paths的内容是：{gen_batch_output.non_tensor_batch['video_paths'].tolist()}")
-                        # print("="*40)
-                        # exit(0)
+                        
                     # 目前用的是gae，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):

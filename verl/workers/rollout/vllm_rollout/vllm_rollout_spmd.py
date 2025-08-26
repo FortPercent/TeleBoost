@@ -146,6 +146,8 @@ class vLLMRollout(BaseRollout):
         if config.get("limit_images", None):  # support for multi-image data
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
             
+        VIDEO_DIRECTORY = "/gemini/space/ljm/Dancegrpo/videos/output" 
+        
         self.inference_engine = LLM(
             model=model_path,
             enable_sleep_mode=True,
@@ -165,6 +167,7 @@ class vLLMRollout(BaseRollout):
             enable_prefix_caching=True,
             trust_remote_code=trust_remote_code,
             seed=config.get("seed", 0),
+            allowed_local_media_path=VIDEO_DIRECTORY,
             **lora_kwargs,
             **engine_kwargs,
         )
