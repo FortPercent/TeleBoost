@@ -58,11 +58,13 @@ class DiffusionRollout(BaseRollout):
         sample_steps = self.config.sampling_steps
 
         sigma_schedule = torch.linspace(1, 0, self.config.sampling_steps + 1)
+        # sigma_schedule = torch.linspace(1, 0, self.config.sampling_steps +1).to(get_device_id())
         
         def sd3_time_shift(shift, num_frames):
             return (shift * num_frames) / (1 + (shift - 1) * num_frames)
  
         sigma_schedule = sd3_time_shift(self.config.shift, sigma_schedule)
+        
                
         def assert_eq(x, y, msg=None):
             assert x == y, f"{msg or 'Assertion failed'}: {x} != {y}"
@@ -287,8 +289,10 @@ class DiffusionRollout(BaseRollout):
             all_video_frames = all_video_frames[0]
             all_sigma_schedule = all_sigma_schedule[0]
             all_video_paths = all_video_paths
+            
         print(f"The length of all_video_paths is {len(all_video_paths)}")
         print(f"all_video_frames的形状为:{all_video_frames.shape}")
+        print(all_video_paths)
         
         print("="*40)
         
@@ -298,7 +302,7 @@ class DiffusionRollout(BaseRollout):
         timestep_values = [timestep_value[:] for _ in range(B)]
 
         timesteps =  torch.tensor(timestep_values, device=get_device_id(), dtype=torch.long)
-        # print("all_latents",all_latents.shape,"all_log_probs",all_log_probs.shape,"all_video_frames",all_video_frames.shape,"all_sigma_schedule",all_sigma_schedule.shape)
+        print("all_latents",all_latents.shape,"all_log_probs",all_log_probs.shape,"all_video_frames",all_video_frames.shape,"all_sigma_schedule",all_sigma_schedule.shape)
         # exit(0)
         # timesteps = timesteps.unsqueeze(0).repeat(B, 1,1)
         latents=all_latents[:, :-1]
@@ -355,6 +359,7 @@ class DiffusionRollout(BaseRollout):
                 transformer.eval()
                 with torch.autocast("cuda", torch.bfloat16):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
+                    # transformer.to(device)
                     pred_cond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]
                         t=timestep_cond,

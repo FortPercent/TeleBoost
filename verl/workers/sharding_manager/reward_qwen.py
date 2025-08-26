@@ -103,42 +103,9 @@ class RewardVLLMManager(BaseShardingManager):
             if self.offload_param:
                 load_fsdp_model_to_gpu(self.module)
 
-            peft_config = None
-            # peft_model = getattr(self.module, "_fsdp_wrapped_module", self.module)
-            # if hasattr(peft_model, "peft_config"):
-            #     peft_config = peft_model.peft_config.get("default", None)
-            #     params = __collect_lora_params()
-            # else:
-            #     params = self.module.state_dict()
-            # params = convert_weight_keys(params, getattr(self.module, "_fsdp_wrapped_module", self.module))
-            # log_gpu_memory_usage("After state_dict() in sharding manager memory", logger=logger)
-
-            # # Copy, not share memory
-            # load_format = "hf" if self.full_params else "dtensor"
-
-            # if vllm_version in (
-            #     "0.5.4",
-            #     "0.6.3",
-            # ):
-            #     self.inference_engine.sync_model_weights(params, load_format=load_format)
-            #     log_gpu_memory_usage("After sync model weights in sharding manager", logger=logger)
-            #     del params
-            # else:
-            self.inference_engine.wake_up()
-            # if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
-            #     self.inference_engine.wake_up(tags=["weights"])
-            # else:
-            #     self.inference_engine.wake_up()
-            # # update model params
-            # # self.update_params(params, peft_config=peft_config)
-            # # log_gpu_memory_usage("After sync model weights in sharding manager", logger=logger)
+            # peft_config = None
             
-            # if self.offload_param:
-            #     offload_fsdp_model_to_cpu(self.module)
-                
-            # get_torch_device().empty_cache()
-            # if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
-            #     self.inference_engine.wake_up(tags=["kv_cache"])
+            self.inference_engine.wake_up()
 
             log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager", logger=logger)
 
@@ -158,7 +125,7 @@ class RewardVLLMManager(BaseShardingManager):
         else:
             self.inference_engine.sleep(level=1)
 
-        self.module.train()
+        # self.module.train()
 
         # add empty cache after each compute
         get_torch_device().empty_cache()
