@@ -206,6 +206,8 @@ class QwenRewardModelWorker(RewardModelWorker):
         # This is used to import external_lib into the huggingface systems
         # import_external_libs(self.config.model.get("external_lib", None))
         self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
+        from vllm import SamplingParams
+        self.sampling_params = SamplingParams(temperature=0.8, top_p=0.90)
         print(f"成功初始化Qwen模型...")
         print("="*40)
         # exit(0)
@@ -265,19 +267,6 @@ class QwenRewardModelWorker(RewardModelWorker):
         log_gpu_memory_usage("After building sharding manager", logger=logger)
         
         return rollout, rollout_sharding_manager
-        # # the following line is necessary
-        # from torch.distributed.fsdp import CPUOffload
-
-        # # use_shm = config.model.get("use_shm", False)
-        # # download the checkpoint from hdfs
-        # # local_path = copy_to_local(config.model.path, use_shm=use_shm)
-        # model_path = "/nvfile-heatstorage/chatrl/public/models/Qwen2.5-VL-72B-Instruct"
-    
-        # from vllm import LLM, SamplingParams
-        # logger.info(f"Loading Qwen model from {model_path}...")   
-        # llm = LLM(model = model_path, tensor_parallel_size = 4, gpu_memory_utilization = 0.9)  
-        # sampling_params = SamplingParams(temperature = 0.8, top_p = 0.90)   
-        # return llm, sampling_params
         
     
     def _create_simple_prompt(self) -> str:
@@ -346,9 +335,10 @@ class QwenRewardModelWorker(RewardModelWorker):
         logger.info(f"Starting generating batch of prompts ...")
         VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
         for file_path in batch_path:
-            if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
+            # if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
                 start_time=time.time()
-                video_path = str(file_path)
+                video_path = str(file_path).replace("./","/gemini/space/ljm/Dancegrpo/")
+                # print(f"视频地址是file://{video_path}")
                 message = [
                     {
                         "role": "user",
@@ -363,15 +353,15 @@ class QwenRewardModelWorker(RewardModelWorker):
                         ],
                     }
                 ]
+                # print(f"传入的content是{message[0]['content'][0]}")
                 messages.append(message)
                 processing_time=time.time()-start_time
                 total_time+=processing_time
                 print(f"成功生成第{i}个message，用时{processing_time}")
-                i+=1
-                if i>30:
-                    print(f"成功生成{len(messages)}条对话，用时{total_time}")
-                    print("="*40)
-                    return messages
+                
+        print(f"成功生成{len(messages)}条对话，用时{total_time}")
+        print("="*40)
+        return messages
                 
     def _parse_simple_evaluation(self, output_text: str) -> Dict[str, Any]:
         """
@@ -488,26 +478,36 @@ class QwenRewardModelWorker(RewardModelWorker):
         print("开始用llm计算得分：")
         start_time = time.time()
         video_paths = datas.non_tensor_batch['video_paths']
+        print(f"video_paths包含的内容是{video_paths},batch_size大小为{datas.batch.batch_size[0]}")
         import numpy as np
         batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
-        batch_paths = [str(x.squeeze(0)) for x in batch_paths]
+        
+        # print(f"batch_paths包含的内容是{batch_paths}")
+        # batch_paths = [str(x.squeeze(0)) for x in batch_paths]
+        batch_paths = [list(x) for x in  batch_paths]
+        # print(f"修改后batch_paths包含内容是{batch_paths}")
+        print("--------"*5)
+        
         batch_indices = torch.chunk(torch.arange(len(batch_paths)), len(batch_paths))
         all_rewards = []  
         outputs = []
-        i=1
-        print(f"本轮需要计算{len(video_paths)}个奖励,每个batch_size大小为{len(batch_paths[0])}")
-        self.reward_module.to(device=get_device_id())
+        
+        
+        # print(f"本轮需要计算{len(video_paths)}个奖励,每个batch_size大小为{len(batch_paths[0])}")
+        # self.reward_rollout.to(device=get_device_id())
         #TODO
         with self.reward_rollout_sharding_manager:
-        for batch_path in batch_paths:
-            batch_message=self._generate_batch_prompts(batch_path)
-            batch_output = []
-            for message in batch_message:
-                output = self.reward_model.chat(message, sampling_params = self.sampling_params)
-                batch_output.append(output)
-                
-            batch_reward = self._get_batch_reward(batch_output)
-            all_rewards.union(batch_reward)
+            # 每个batch_path是一批video_paths的列表
+            # batch_paths是很多批路径列表构成的列表
+            for batch_path in batch_paths:
+                batch_message=self._generate_batch_prompts(batch_path)
+                batch_output = []
+                for message in batch_message:
+                    output = self.reward_rollout.inference_engine.chat(message, sampling_params = self.sampling_params)
+                    batch_output.append(output)
+                    
+                batch_reward = self._get_batch_reward(batch_output)
+                all_rewards.union(batch_reward)
         all_rewards = torch.tensor(all_rewards)
         batch = TensorDict(
             {
@@ -515,7 +515,6 @@ class QwenRewardModelWorker(RewardModelWorker):
             },
             batch_size = len(batch_paths)
         )
-        self.reward_model.to('cpu')
         
         non_tensor_batch = data.non_tensor_batch
         return DataProto(batch=batch, non_tensor_batch = non_tensor_batch)  

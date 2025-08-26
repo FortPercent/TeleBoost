@@ -101,7 +101,7 @@ reward_model:
     max_num_batched_tokens: 8192
 
     # max length for rollout
-    max_model_len: null
+    max_model_len: 1024
 
     # max length of sequences
     max_num_seqs: 1024
