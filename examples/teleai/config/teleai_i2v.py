@@ -11,7 +11,7 @@ config = dict(
         serialize_data=False,
         data_path_list=[
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_2.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_3.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_4.json",
@@ -171,6 +171,7 @@ config = dict(
         data_path_list=[
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
         ],
+        eval_time_steps=[200,400,600,800,1000]
     ),
     sampler=dict(
         type="DefaultSampler",

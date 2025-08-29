@@ -12,7 +12,7 @@ def extra_args(parser):
 
     return parser
 
-def forward_step(data_iterator, model):
+def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
     
@@ -30,6 +30,9 @@ def forward_step(data_iterator, model):
         tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
         if mpu.get_tensor_context_parallel_world_size() > 1:
             dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
+    
+    if time_step is not None:
+        timestep = torch.tensor([time_step], dtype=torch.bfloat16, device=torch.cuda.current_device())
 
     broadcast_timesteps(timestep)
     broadcast_timesteps(noise)

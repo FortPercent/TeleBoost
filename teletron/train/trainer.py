@@ -52,6 +52,7 @@ from logging import getLogger
 from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import DistDataProducer
 from teletron.train.consumer_dataloader import create_batch_loader
+from functools import partial
 
 
 logger = getLogger(__name__)
@@ -104,6 +105,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         self.valid_itrt = create_batch_loader(args, self.valid_itrt) if args.eval_iters > 0 else None
         self.test_itrt =  None
         self.config = get_model_config(self.model[0])
+        self.eval_time_steps = set_config().get('eval', None).get('eval_time_steps', None)
 
     def setup_model_and_optimizer(self,  
                                   model_type,
@@ -813,19 +815,28 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         # Timelimit hit during evaluation
         if timelimit:
             return
-        string = ' validation loss at {} | '.format(prefix)
+        string = ' validation loss at {} | '.format(prefix) + '\n'
         import math
-        for key in total_loss_dict:
-            string += '{} value: {:.6E} | '.format(key, total_loss_dict[key].item())
-            ppl = math.exp(min(20, total_loss_dict[key].item()))
-            string += '{} PPL: {:.6E} | '.format(key, ppl)
+        
+        if self.eval_time_steps:
+            for time_step in total_loss_dict:
+                string += 'time step: {} |'.format(time_step)
+                for key in total_loss_dict[time_step]:
+                    string += '{} value: {:.6E} | '.format(key, total_loss_dict[time_step][key].item())
+                string +='\n'
+        else:
+            for key in total_loss_dict:
+                string += '{} value: {:.6E} | '.format(key, total_loss_dict[key].item())
+                ppl = math.exp(min(20, total_loss_dict[key].item()))
+                string += '{} PPL: {:.6E} | '.format(key, ppl)
+        
 
         length = len(string) + 1
         print_rank_last('-' * length)
         print_rank_last(string)
         print_rank_last('-' * length)
 
-        self.log_validation_infos(total_loss_dict, iteration)
+        self.log_validation_infos(total_loss_dict, iteration, self.eval_time_steps)
 
     def evaluate(
         self,
@@ -866,14 +877,28 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 forward_backward_func = get_forward_backward_func()
                 # Don't care about timing during evaluation
                 config.timers = None
-                loss_dicts = forward_backward_func(
-                    forward_step_func=forward_step_func,
-                    data_iterator=data_iterator,
-                    model=model,
-                    num_microbatches=eval_num_microbatches,
-                    seq_length=args.seq_length,
-                    micro_batch_size=args.micro_batch_size,
-                    forward_only=True)
+                
+                
+                if self.eval_time_steps:
+                    time_steps_loss_dicts = {}
+                    for time_step in self.eval_time_steps:
+                        time_steps_loss_dicts[time_step] = forward_backward_func(
+                            forward_step_func=partial(forward_step_func,time_step=time_step),
+                            data_iterator=data_iterator,
+                            model=model,
+                            num_microbatches=eval_num_microbatches,
+                            seq_length=args.seq_length,
+                            micro_batch_size=args.micro_batch_size,
+                            forward_only=True)
+                else:
+                    loss_dicts = forward_backward_func(
+                        forward_step_func=partial(forward_step_func),
+                        data_iterator=data_iterator,
+                        model=model,
+                        num_microbatches=eval_num_microbatches,
+                        seq_length=args.seq_length,
+                        micro_batch_size=args.micro_batch_size,
+                        forward_only=True)
 
                 # Empty unused memory
                 if args.empty_unused_memory_level >= 1:
@@ -881,10 +906,19 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
 
                 if mpu.is_pipeline_last_stage(ignore_virtual=True):
                     # Reduce across processes.
-                    for loss_dict in loss_dicts:
-                        for key in loss_dict:
-                            total_loss_dict[key] = total_loss_dict.get(
-                                key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
+                    if self.eval_time_steps:
+                        for time_step in time_steps_loss_dicts:
+                            loss_dict_per_time_step={}
+                            for loss_dict in time_steps_loss_dicts[time_step]:
+                                for key in loss_dict:
+                                    loss_dict_per_time_step[key] = loss_dict_per_time_step.get(
+                                        key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
+                            total_loss_dict[time_step] = loss_dict_per_time_step
+                    else:
+                        for loss_dict in loss_dicts:
+                            for key in loss_dict:
+                                total_loss_dict[key] = total_loss_dict.get(
+                                    key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
 
                 args.consumed_valid_samples += eval_batch_size
 
@@ -917,7 +951,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         for model_module in model:
             model_module.train()
 
-        for key in total_loss_dict:
-            total_loss_dict[key] /= args.eval_iters * eval_num_microbatches
+        if self.eval_time_steps:
+            for time_step in total_loss_dict:
+                for key in total_loss_dict[time_step]:
+                    total_loss_dict[time_step][key] /= args.eval_iters * eval_num_microbatches
+        else :
+            for key in total_loss_dict:
+                total_loss_dict[key] /= args.eval_iters * eval_num_microbatches
 
         return total_loss_dict, collected_non_loss_data, False

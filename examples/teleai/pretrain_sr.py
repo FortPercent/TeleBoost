@@ -15,7 +15,7 @@ def extra_args(parser):
     
     return parser
 
-def forward_step(data_iterator, model):
+def forward_step(data_iterator, model, time_step=None):
     prompt_emb = {}
     batch = next(data_iterator)
     latents = batch["latents"]
@@ -38,6 +38,8 @@ def forward_step(data_iterator, model):
         if mpu.get_tensor_context_parallel_world_size() > 1:
             dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
 
+    if time_step is not None:
+        rescaled_timestep = torch.tensor([time_step], dtype=torch.bfloat16, device=torch.cuda.current_device())
     broadcast_timesteps(rescaled_timestep)
     broadcast_timesteps(noise)
     prompt_emb["context"] = batch["context"]
