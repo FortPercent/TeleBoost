@@ -51,6 +51,7 @@ config = dict(
         data_path_list=[
             "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
         ],
+        eval_time_steps=[200,400,600,800,1000]
     ),
     sampler=dict(
         type="DefaultSampler",

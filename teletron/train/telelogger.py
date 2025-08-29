@@ -251,11 +251,19 @@ class TeleLoggerMixin:
 
         return report_memory_flag
 
-    def log_validation_infos(self, loss_dict, iteration):
+    def log_validation_infos(self, loss_dict, iteration, eval_time_steps=None):
         args = get_args()
         writer = get_tensorboard_writer()
         if writer:
-            for key in loss_dict:
-                writer.add_scalar(f"validation: {key}" , loss_dict[key], iteration)
-                writer.add_scalar(f"validation: {key}" + ' vs samples', loss_dict[key],
-                                  args.consumed_train_samples)
+            if eval_time_steps:
+                for time_step in loss_dict:
+                    writer.add_scalar(f"time step: {time_step}")
+                    for key in loss_dict[time_step]:
+                        writer.add_scalar(f"validation: {key}" , loss_dict[time_step][key], iteration)
+                        writer.add_scalar(f"validation: {key}" + ' vs samples', loss_dict[time_step][key],
+                                    args.consumed_train_samples)
+            else:
+                for key in loss_dict:
+                    writer.add_scalar(f"validation: {key}" , loss_dict[key], iteration)
+                    writer.add_scalar(f"validation: {key}" + ' vs samples', loss_dict[key],
+                                    args.consumed_train_samples)
