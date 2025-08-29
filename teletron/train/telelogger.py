@@ -257,10 +257,10 @@ class TeleLoggerMixin:
         if writer:
             if eval_time_steps:
                 for time_step in loss_dict:
-                    writer.add_scalar(f"time step: {time_step}")
+                    # writer.add_scalar(f"time step: {time_step}")
                     for key in loss_dict[time_step]:
-                        writer.add_scalar(f"validation: {key}" , loss_dict[time_step][key], iteration)
-                        writer.add_scalar(f"validation: {key}" + ' vs samples', loss_dict[time_step][key],
+                        writer.add_scalar(f"validation/time step: {time_step} {key}" , loss_dict[time_step][key], iteration)
+                        writer.add_scalar(f"validation vs samples/time step: {time_step} {key}" + ' ', loss_dict[time_step][key],
                                     args.consumed_train_samples)
             else:
                 for key in loss_dict:
