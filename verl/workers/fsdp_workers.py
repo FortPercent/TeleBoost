@@ -173,6 +173,10 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
 
         # normalize config
         if self._is_actor:
+            print("self.config.rollout.n",self.config.rollout.n)
+            print("self.config.actor.ppo_mini_batch_size",self.config.actor.ppo_mini_batch_size)
+            print("device_mesh",self.device_mesh.size(),self.ulysses_sequence_parallel_size)
+            print("="*100)
             self.config.actor.ppo_mini_batch_size *= self.config.rollout.n
             self.config.actor.ppo_mini_batch_size //= self.device_mesh.size() // self.ulysses_sequence_parallel_size
             assert self.config.actor.ppo_mini_batch_size > 0, f"ppo_mini_batch_size {self.config.actor.ppo_mini_batch_size} should be larger than 0 after normalization"
@@ -481,7 +485,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
         rollout_name = self.config.rollout.name
-        if self.config.type=="diffusion":
+        if self.config.type=="diffusion":  #用的是这个
             from verl.workers.rollout import DiffusionRollout
             from verl.workers.sharding_manager.base import BaseShardingManager
 
@@ -746,10 +750,13 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
 
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             with simple_timer("generate_sequences", timing_generate):
+                # output的类型是dataProto
                 output = self.rollout.generate_sequences(prompts=prompts)
 
             log_gpu_memory_usage("After rollout generation", logger=logger)
 
+            # BaseShardingManager处理数据，所以这里没有对output做出修改
+            # output类型是DataProto
             output = self.rollout_sharding_manager.postprocess_data(output)
 
         timing_generate.update(self.rollout_sharding_manager.timing)
