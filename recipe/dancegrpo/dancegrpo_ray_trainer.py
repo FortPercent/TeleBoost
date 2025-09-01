@@ -23,6 +23,7 @@ from pprint import pprint
 
 import numpy as np
 import torch
+import time
 
 # from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
 from omegaconf import OmegaConf, open_dict
@@ -135,8 +136,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                     def sd3_time_shift(shift, x):
                         return (shift * x) / (1 + (shift - 1) * x)
-                    
-                    print("config.actor_rollout_ref.shift",self.config.actor_rollout_ref.shift)
+
                     for i in range(new_batch.batch.batch_size[0]):  # 注意：这里用 gen_batch，不是 new_batch
                         # 这两个其实对所有样本都一样，放在循环外算一次也行
                         
@@ -172,8 +172,11 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # gen_batch_output的数据类型是DataProto
                         # 具体见DiffusionActorRolloutWorker.generate_sequences方法
                         # 得到的gen_batch_output是聚合所有gpu的结果
+                        start = time.time()
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                        
+                        end = time.time()
+                        print(f"[Step {self.global_steps}] gen took {end - start:.3f}s")
+
                     # 目前用的是gae，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
@@ -200,8 +203,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
-                        print(f"是否使用奖励模型: {str(self.use_rm)}")
-                        print("="*40)
+                        start = time.time()
                         if self.use_rm:
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
@@ -215,6 +217,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             new_batch = gen_batch_output.union(reward_tensor)
                             new_batch.pop(batch_keys=['video_frames'])
                             del gen_batch_output
+                        end = time.time()
+                        print(f"[Step {self.global_steps}] reward took {end - start:.3f}s")
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)
 
@@ -278,7 +282,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with marked_timer("update_actor", timing_raw):
+                            start = time.time()
                             actor_output = self.actor_rollout_wg.update_actor(new_batch)
+                            print(f"[Step {self.global_steps}] update_actor took {end - start:.3f}s")
                         # actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         # metrics.update(actor_output_metrics)
 
