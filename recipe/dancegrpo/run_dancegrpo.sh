@@ -2,7 +2,7 @@
 set -xeuo pipefail
 
 project_name='Dancegrpo'
-exp_name='Dancegrpo_Wan_14B_720P_129'
+exp_name='Dancegrpo_Wan_1__3B_720P_129'
 
 adv_estimator=grpo
 
@@ -22,10 +22,9 @@ loss_agg_mode="token-mean"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
-train_prompt_bsz=4 # same with dp
+train_prompt_bsz=8 # same with dp
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=12
-train_prompt_mini_bsz=1
 
 # Ray
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
@@ -59,6 +58,8 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     data.prompt_key=prompt \
     data.truncation='left' \
     data.train_batch_size=${train_prompt_bsz} \
+    data.max_prompt_length=${max_prompt_length} \
+    data.max_response_length=${max_response_length} \
     actor_rollout_ref.rollout.n=${n_resp_per_prompt} \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
@@ -119,10 +120,13 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
-    reward_model.enable=False \
-    reward_model.model.path='./model/HPS_v2.1_compressed.pt' \
+    reward_model.enable=True \
+    reward_model.model.path='/gemini/space/Qwen/Qwen2___5-VL-72B-Instruct' \
     reward_model.micro_batch_size_per_gpu=1 \
     reward_model.model.input_tokenizer=null \
+    reward_model.rollout.gpu_memory_utilization=0.9 \
+    reward_model.rollout.max_model_len=$((max_prompt_length + max_response_length)) \
+    reward_model.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
     trainer.logger=['tensorboard'] \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \

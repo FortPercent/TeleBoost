@@ -249,7 +249,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 traceback.print_exc()
                 exit(0)
 
-
     def grpo_wan_one_step(
         self,
         latents,
