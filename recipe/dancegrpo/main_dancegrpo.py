@@ -91,16 +91,16 @@ class TaskRunner:
         # - for code related prompt, we send to a sandbox if there are test cases
         # - finally, we combine all the rewards together
         # - The reward type depends on the tag of the data
-        print(f"enable参数被设置为：{config.reward_model.enable}")
-        print(f"strategy参数设置为{config.reward_model.strategy}")
-        print("="*40)
         if config.reward_model.enable:
             if config.reward_model.strategy == "fsdp":
-                from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+                from .fsdp_worker import RewardModelWorker
             elif config.reward_model.strategy == "megatron":
                 from verl.workers.megatron_workers import RewardModelWorker
-            # elif config.reward_model.strategy == "qwen":
-            #     from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+            elif config.reward_model.strategy == "diffusion":
+                if config.reward_model.type == "qwen":
+                    from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+                elif config.reward_model.type == "single":
+                    from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
             else:
                 raise NotImplementedError
             print(f"Mapping type{Role.RewardModel} to be the reward model")

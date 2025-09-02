@@ -71,6 +71,7 @@ class DiffusionRollout(BaseRollout):
         all_latents = []
         all_log_probs = []
         all_video_frames = []
+        all_video_ids = []
 
         batch_indices = torch.chunk(torch.arange(B), B // self.config.rollout.ulysses_sequence_parallel_size)
         
@@ -103,6 +104,7 @@ class DiffusionRollout(BaseRollout):
             all_latents.append(batch_latents.unsqueeze(0))
             all_log_probs.append(batch_log_probs.unsqueeze(0))
            
+            
             autocast_dtype = torch.float16 #TODO
             with torch.autocast("cuda", dtype=autocast_dtype):
                 # 确保final_latents的数据类型正确
@@ -111,10 +113,36 @@ class DiffusionRollout(BaseRollout):
 
                 decoded_videos = self.vae_module.decode([final_latents_vae])
                 video_frames = decoded_videos[0]
+                # print(f"video_frames的形状是{video_frames.shape}")
 
+                
                 # 后处理
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
+                
+                
+                # 确保video_frames是正确的格式 (C, T, H, W)
+                if video_frames.dim() == 4:
+                    # 调整帧率
+                    fps=15
+                    video_frames = video_frames[:, ::fps, :, :]
+                    C, T, H, W = video_frames.shape
+                    # print(video_frames.shape)
+                        
+                    # 转换为numpy格式 (T, H, W, C)
+                    video_id = video_frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+                    # video_id = video_frames.cpu().numpy()
+                    print(f"video_id形状为{video_id.shape}")
+                    import numpy as np
+                    video_id = (video_id * 255).astype(np.uint8)
+                        
+                        # 如果是单通道，扩展为3通道
+                    if C == 1:
+                        video_id = id.repeat(video_id, 3, axis=-1)
+                # with open('/gemini/space/ljm/Dancegrpo/np.txt', 'a', encoding='utf-8') as f:
+                #     f.write(f"video_np形状{video_id.shape}\n")
+                #     f.write(f"{video_id}\n\n")
+                all_video_ids.append(video_id)
                 # 创建输出目录
                 os.makedirs("./videos", exist_ok=True)
                 os.makedirs("./images", exist_ok=True)
@@ -261,7 +289,7 @@ class DiffusionRollout(BaseRollout):
             batch_size=B
         )
         non_tensor_batch = prompts.non_tensor_batch
-        
+        non_tensor_batch['video_ids'] = np.array(all_video_ids)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     def run_wan_sample_step(
