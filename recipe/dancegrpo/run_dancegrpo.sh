@@ -30,7 +30,7 @@ filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=8 # same with dp
 gen_prompt_bsz=$((train_prompt_bsz * 3))
-n_resp_per_prompt=12
+n_resp_per_prompt=2
 
 # Ray
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
@@ -40,8 +40,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/data/wuxn5/wuxuaner/Dancegrpo_verl/data/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Algorithm
@@ -58,7 +58,7 @@ infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
 offload=False
 gen_tp=1
 
-# export TENSORBOARD_DIR=/nvfile-heatstorage/ai_infra/code/lit117/wxy/Dancegrpo/tensorboard_log/${exp_name}
+export TENSORBOARD_DIR=/nvfile-heatstorage/ai_infra/code/lit117/wxy/Dancegrpo/tensorboard_log/${exp_name}
 
 
 HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
@@ -73,13 +73,13 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/gemini/space/Wan2___1-T2V-1___3B' \
-    actor_rollout_ref.model.vae_model_path='/gemini/space/Wan2___1-T2V-1___3B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.path='/Wan___1-T2V-14B' \
+    actor_rollout_ref.model.vae_model_path='/Wan___1-T2V-14B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=5.0 \
-    actor_rollout_ref.h=720 \
-    actor_rollout_ref.w=1280 \
-    actor_rollout_ref.num_frames=81 \
-    actor_rollout_ref.sampling_steps=16 \
+    actor_rollout_ref.h=256 \
+    actor_rollout_ref.w=256 \
+    actor_rollout_ref.num_frames=5 \
+    actor_rollout_ref.sampling_steps=3 \
     actor_rollout_ref.actor.eta=0.25 \
     actor_rollout_ref.lr_warmup_steps=0 \
     actor_rollout_ref.use_hpsv2=True \
@@ -130,7 +130,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     reward_model.enable=True \
-    reward_model.model.path='/gemini/space/Qwen/Qwen2___5-VL-72B-Instruct' \
+    reward_model.model.path='/nvfile-heatstorage/chatrl/public/models/Qwen2.5-VL-3B-Instruct' \
     reward_model.micro_batch_size_per_gpu=1 \
     reward_model.model.input_tokenizer=null \
     reward_model.rollout.gpu_memory_utilization=0.9 \
@@ -140,7 +140,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.total_training_steps=1000 \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=5 \
