@@ -154,7 +154,7 @@ class TeleaiEncoder(BaseEncoder):
         else:
             return work_fn
     
-    def encode(self, raw_batch: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[List[Any], List[List[Any]]]:
+    def encode(self, raw_batch: Union[Dict[str, Any]]) -> Union[List[Any], List[List[Any]]]:
         """
         使用teleai模型对数据批次进行编码。
         
@@ -166,17 +166,9 @@ class TeleaiEncoder(BaseEncoder):
             如果输入是样本列表，返回一个包含两个列表的列表，分别对应每个样本的编码结果。
         """
         schema = self.get_output_schema()
-        batch = {data_to_produce: list() for data_to_produce in schema}
+        batch = {}
         for data_to_produce in schema:
-            if data_to_produce == "latents":
-                batch[data_to_produce] = self.work_fn[data_to_produce](batch=[raw_batch[idx] for idx in range(len(raw_batch))])
-            else:
-                for idx in range(len(raw_batch)):
-                    batch[data_to_produce].append(self.work_fn[data_to_produce](batch=raw_batch[idx]))
+            batch[data_to_produce] = self.work_fn[data_to_produce](batch=raw_batch)
 
-        encoded_data = list()
-        for idx in range(len(raw_batch)):
-            encoded_data.append([batch[key][idx] for key in schema])
-            
-        return encoded_data
+        return batch
                 
