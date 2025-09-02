@@ -10,6 +10,7 @@ from teletron.utils import video_utils
 import torch.nn.functional as F
 from einops import rearrange
 from math import floor, ceil
+from func_timeout import func_set_timeout
 
 
 class MaskGenerator:
@@ -195,6 +196,7 @@ class SampleImages:
     ):
         self.num_frames = num_frames
 
+    @func_set_timeout(60)
     def __call__(self, data_dict):
         video = data_dict["video"]
         if self.num_frames > 1:
