@@ -225,7 +225,7 @@ class QwenRewardModelWorker(RewardModelWorker):
         dp = self.world_size // infer_tp
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
-        rollout_name = self.config.name
+        rollout_name = self.config.rollout.name
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
         from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager
