@@ -7,7 +7,8 @@ pip install diffusers peft==0.17.0 easydict ftfy
 
 
 project_name='Dancegrpo'
-exp_name='Dancegrpo_Wan_1__3B_720P_129'
+export TIMESTAMP=$(date +"%m-%d_%H-%M-%S")
+exp_name=${project_name}_Dancegrpo_Wan_1__3B_720P_129_${TIMESTAMP}
 
 adv_estimator=grpo
 
