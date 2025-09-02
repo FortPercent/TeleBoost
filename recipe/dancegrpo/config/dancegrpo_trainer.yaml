@@ -42,9 +42,11 @@ actor_rollout_ref:
 
 reward_model:
   enable: True
-  strategy: fsdp
-  name: vllm
-  # type: diffusion
+  
+  strategy: diffusion
+
+  type: qwen
+
   reward_manager: dancegrpo
   # Rollout model config.
   rollout:

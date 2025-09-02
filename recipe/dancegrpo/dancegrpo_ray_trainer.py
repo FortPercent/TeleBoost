@@ -207,7 +207,6 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         if self.use_rm:
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
-                                # TODO:关键要修改这里！
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
                                 new_batch = gen_batch_output.union(reward_tensor)
                                 new_batch.pop(batch_keys=['video_frames'])
@@ -235,25 +234,13 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     # compute global_valid tokens
                     # batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
-                    # recompute old_log_probs
-                    # with marked_timer("old_log_prob", timing_raw):
-                    #     old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                    #     entropys = old_log_prob.batch["entropys"]
-                    #     response_masks = batch.batch["response_mask"]
-                    #     loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                    #     entropy_loss = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
-                    #     old_log_prob_metrics = {"actor/entropy_loss": entropy_loss.detach().item()}
-                    #     metrics.update(old_log_prob_metrics)
-                    #     old_log_prob.batch.pop("entropys")
-                    #     batch = batch.union(old_log_prob)
-
                     # if self.use_reference_policy:
                     #     # compute reference log_prob
                     #     with marked_timer("ref", timing_raw):
                     #         ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                     #         batch = batch.union(ref_log_prob)
 
-                    # # compute values
+                    # compute values
                     # if self.use_critic:
                     #     with marked_timer("values", timing_raw):
                     #         values = self.critic_wg.compute_values(batch)
@@ -284,6 +271,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         with marked_timer("update_actor", timing_raw):
                             start = time.time()
                             actor_output = self.actor_rollout_wg.update_actor(new_batch)
+                            end = time.time()
                             print(f"[Step {self.global_steps}] update_actor took {end - start:.3f}s")
                         # actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         # metrics.update(actor_output_metrics)
