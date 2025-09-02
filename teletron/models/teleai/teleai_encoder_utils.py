@@ -323,7 +323,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_k
         msk = msk.view(1, msk.shape[1] // compression[0], compression[0], height // compression[1], width // compression[2]) # 1, 21, 4, 56, 98
         msk = msk.transpose(1, 2)[0]
         vae_input = torch.concat(
-            [image.transpose(0, 1), torch.zeros(3, num_frames - 1, height, width).to(image.device)],
+            [image.transpose(0, 1), torch.zeros((3, num_frames - 1, height, width), device=image.device)],
             dim=1,
         )
         y = vae.encode(
