@@ -216,7 +216,8 @@ def _gather(input_: torch.Tensor,
         return input_
 
     input_ = input_.contiguous()
-
+    tensor_shape_base = list(input_.size())
+    assert input_.device.type == "cuda"
     # Prepare the output list with appropriate shapes
     if gather_sizes:
         tensor_list = []
@@ -225,12 +226,11 @@ def _gather(input_: torch.Tensor,
             tensor_shape = list(tensor_shape_base)
             tensor_shape[dim] = gather_sizes[i]
             tensor_list.append(torch.empty(tensor_shape, dtype=input_.dtype, device=input_.device))
+            torch.distributed.all_gather(tensor_list, input_, group=pg)
+            output = torch.cat(tensor_list, dim=dim)
     else:
-        tensor_list = [torch.empty_like(input_, dtype=input_.dtype, device=input_.device) for _ in range(world_size)]
+        tensor_shape_base[dim] = tensor_shape_base[dim] * world_size
+        output = torch.empty(tensor_shape_base, dtype=input_.dtype, device=input_.device)
+        torch.distributed._all_gather_base(output, input_, group=pg)
 
-    assert input_.device.type == "cuda"
-    torch.distributed.all_gather(tensor_list, input_, group=pg)
-
-    # concat
-    output = torch.cat(tensor_list, dim=dim).contiguous()
-    return output
+    return output.contiguous()
