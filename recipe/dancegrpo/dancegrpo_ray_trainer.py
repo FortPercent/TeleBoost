@@ -178,10 +178,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # gen_batch_output的数据类型是DataProto
                         # 具体见DiffusionActorRolloutWorker.generate_sequences方法
                         # 得到的gen_batch_output是聚合所有gpu的结果
-                        start = time.time()
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                        end = time.time()
-                        print(f"[Step {self.global_steps}] gen took {end - start:.3f}s")
 
                     # 目前用的是gae，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
@@ -209,7 +206,6 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
-                        start = time.time()
                         if self.use_rm:
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
@@ -223,8 +219,6 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             new_batch = gen_batch_output.union(reward_tensor)
                             new_batch.pop(batch_keys=['video_frames'])
                             del gen_batch_output
-                        end = time.time()
-                        print(f"[Step {self.global_steps}] reward took {end - start:.3f}s")
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)
 
@@ -288,9 +282,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with marked_timer("update_actor", timing_raw):
-                            start = time.time()
                             actor_output = self.actor_rollout_wg.update_actor(new_batch)
-                            print(f"[Step {self.global_steps}] update_actor took {end - start:.3f}s")
                         # actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         # metrics.update(actor_output_metrics)
 
@@ -319,8 +311,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 num_prompt_in_batch = 0
                 num_gen_batches = 0
 
-                # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
+                timing_raw = defaultdict(float)
 
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")
