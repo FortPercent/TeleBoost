@@ -110,6 +110,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         move_keys = ["latents", "next_latents", "timesteps", "log_probs", "advantages", "sigma_schedule"]
         perms=perms.to(device)
         # log_file = f"/gemini/space/wuxuaner/Dancegrpo/recipe/dancegrpo/log/rank{get_device_id()}"
+        metrics = {}
         for batch_idx, data in enumerate(dataloader):
 
             try:
@@ -194,9 +195,17 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                         1.0 - clip_range,
                         1.0 + clip_range,
                     )
+                    temp = torch.maximum(unclipped_loss, clipped_loss)
                     
                     loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-
+                    data = {
+                        "response_length/clip_ratio": torch.mean(torch.eq(temp, clipped_loss).float()).item(),
+                        "actor/loss": loss.detach().item(),
+                        # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
+                        # "actor/preference_mean": preference.mean().detach().item(),
+                    }
+                    from verl.utils.py_functional import append_to_dict
+                    append_to_dict(metrics, data)
                     loss.backward()
     
                     avg_loss = loss.detach()
@@ -248,6 +257,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 import traceback
                 traceback.print_exc()
                 exit(0)
+        return metrics
 
     def grpo_wan_one_step(
         self,
