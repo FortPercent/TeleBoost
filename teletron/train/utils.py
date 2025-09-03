@@ -1440,7 +1440,11 @@ def _add_network_size_args(parser):
 
 def _add_logging_args(parser):
     group = parser.add_argument_group(title='logging')
-
+    group.add_argument('--producer-log-level', type=int,
+                       default=2, choices=range(1,3),
+                       help='logging level to producer detail. '
+                       '   1: DEBUG LEVEL '
+                       '   2: INFO LEVEL')
     group.add_argument('--log-params-norm', action='store_true',
                        help='If set, calculate and log parameters norm.')
     group.add_argument('--log-num-zeros-in-grad', action='store_true',

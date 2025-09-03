@@ -53,6 +53,7 @@ from teletron.datasets.build import build_train_valid_test_datasets
 from teletron.core.distributed.distributed_encoder import DistDataProducer
 from teletron.train.consumer_dataloader import create_batch_loader
 from functools import partial
+import logging
 
 
 logger = getLogger(__name__)
@@ -74,9 +75,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         self.initialize_megatron(args)
         set_jit_fusion_options()
         transformer_group = get_transformer_model_group()
-        if transformer_group is None:            
+        if transformer_group is None:
+            rank = int(os.environ.get("RANK"))
+            producer_logger = logging.getLogger(f"ProducerRank{rank}")
+            producer_logger.setLevel(args.producer_log_level*10)
             producer = DistDataProducer(
-                rank= int(os.environ.get("RANK", 0)), 
+                rank= rank, 
                 encoder_name=set_config().get('model_config', None).get('encoder', None).type,
                 device=torch.cuda.current_device(),
                 build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
