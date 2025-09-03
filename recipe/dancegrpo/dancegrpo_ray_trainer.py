@@ -192,11 +192,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
-                                reward = reward_tensor.pop(batch_keys=['rewards'],).batch['rewards'].mean()
-                                fprint(reward)
-                                fprint(reward_tensor.batch["rewards"])                                
+                                metrics["train/rewards"] = reward_tensor.batch['rewards'].mean()
                                 new_batch = gen_batch_output.union(reward_tensor)
                                 new_batch.pop(batch_keys=['video_frames'])
+                                metrics["train/log_probs"] = new_batch.batch["log_probs"].mean()                                
                                 del gen_batch_output
                         else:
                             reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
@@ -242,6 +241,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             num_repeat=self.config.actor_rollout_ref.rollout.n,
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                         )
+                        metrics["train/advantage"] = new_batch.batch['advantages'].mean()
 
                     # # update critic
                     # if self.use_critic:
@@ -255,8 +255,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # update actor
                         with marked_timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(new_batch)
-                        # actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                        # metrics.update(actor_output_metrics)
+                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                        metrics.update(actor_output_metrics)
 
                     # validate
                     # if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
