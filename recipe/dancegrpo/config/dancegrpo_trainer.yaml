@@ -99,7 +99,7 @@ reward_model:
     layered_summon: False
 
     # TP size for rollout. Only effective for vLLM.
-    tensor_model_parallel_size: 4
+    tensor_model_parallel_size: 2
 
     # max number of tokens in a batch
     max_num_batched_tokens: 8192
