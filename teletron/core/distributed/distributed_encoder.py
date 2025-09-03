@@ -10,7 +10,8 @@ import traceback
 import copy
 import random
 import json
-import numpy as np 
+import numpy as np
+import logging 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import get_args
 from teletron.train.checkpoint import ensure_directory_exists
@@ -66,6 +67,7 @@ def _set_random_seed_by_rank(seed_=1234):
         #     tensor_parallel.model_parallel_cuda_manual_seed(seed)
     else:
         raise ValueError("Seed ({}) should be a positive integer.".format(seed))
+
 class DistDataProducer:
     """
     分布式数据生产者
@@ -83,8 +85,8 @@ class DistDataProducer:
         self.rank = rank
         self.device = device
         
-        self.print_log = True
-        self._log("初始化开始...")
+        self._setup_logger() 
+        self.logger.info("初始化开始...")
 
         self.args = get_args()
         _set_random_seed_by_rank(self.args.seed)
@@ -96,35 +98,45 @@ class DistDataProducer:
         self.step = 0
         self.batch_size = 1
         
-
         self.modes = [TRAIN_MODE]
         if self.args.eval_iters > 0:
             self.modes.append(VALID_MODE)
-        self._log(f"运行模式: {self.modes}")
+        self.logger.info(f"运行模式: {self.modes}")
 
         self.encoder.setup()
-        self._log("编码器设置完成")
+        self.logger.info("编码器设置完成")
 
         self.comm_pairs = get_comm_pair()
         self.merged_comm_pairs = merge_commpairs(self.comm_pairs)
-        self._log(f"原始通信对: {self.comm_pairs}")
-        self._log(f"合并后通信对: {self.merged_comm_pairs}")
+        self.logger.info(f"原始通信对: {self.comm_pairs}")
+        self.logger.debug(f"合并后通信对: {self.merged_comm_pairs}") # 使用 debug 级别，因为这个信息比较冗长
         
         self._initialize_consumer_state()
         self._create_data_iterators()
         self._initialize_queues_and_trackers()
         self._setup_profiler()
 
-        self._log("初始化完成")
+        self.logger.info("初始化完成")
 
-    def _log(self, msg: str):
-        """[MODIFICATION] 带时间和 Rank 前缀的日志记录器，同时输出到控制台和文件"""
-        if self.print_log:
-            timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            full_msg = f"PRODUCER (Rank {self.rank}) [{timestamp}]: {msg}"
-            print(full_msg, flush=True)
+    def _setup_logger(self):
 
-    # [MODIFICATION] 新增资源监控辅助函数
+        self.logger = logging.getLogger(f"ProducerRank{self.rank}")
+        if not self.logger.handlers:
+
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.DEBUG)
+            
+            # 定义 handler 的输出格式
+            formatter = logging.Formatter(
+                f'PRODUCER (Rank {self.rank}) [%(asctime)s.%(msecs)03d] [%(levelname)s]: %(message)s',
+                datefmt='%H:%M:%S'
+            )
+            ch.setFormatter(formatter)
+
+            self.logger.addHandler(ch)
+
+        self.logger.propagate = False
+
     def _get_gpu_memory_usage(self) -> str:
         """获取并格式化当前GPU显存使用情况"""
         try:
@@ -152,29 +164,29 @@ class DistDataProducer:
 
     def _initialize_consumer_state(self):
         """与 Consumers 同步初始状态，如训练迭代步数 """
-        self._log("正在从 Consumers 获取初始状态...")
+        self.logger.info("正在从 Consumers 获取初始状态...")
         num_consumers = len(self.comm_pairs)
         consumers_data = torch.zeros((num_consumers, 3), dtype=torch.int64, device=self.device)
         
         reqs = []
         for i, cp in enumerate(self.comm_pairs):
             consumer_rank = cp.consumer
-            self._log(f"PRE-RECV from Consumer Rank {consumer_rank} for initial state...")
+            self.logger.debug(f"PRE-RECV from Consumer Rank {consumer_rank} for initial state...")
             reqs.append(dist.irecv(tensor=consumers_data[i], src=consumer_rank))
 
         for i, req in enumerate(reqs):
             consumer_rank = self.comm_pairs[i].consumer
-            self._log(f"Waiting for Consumer Rank {consumer_rank}'s initial state...")
+            self.logger.debug(f"Waiting for Consumer Rank {consumer_rank}'s initial state...")
             req.wait()
-            self._log(f"POST-RECV: 已收到来自 Consumer Rank {consumer_rank} 的初始状态")
+            self.logger.info(f"POST-RECV: 已收到来自 Consumer Rank {consumer_rank} 的初始状态")
         self.args.iteration = consumers_data[0][0].item()
         self.args.consumed_train_samples = consumers_data[0][1].item() // self.args.distributed_vae_world_size 
         self.args.consumed_valid_samples = consumers_data[0][2].item()
-        self._log(f"状态同步完成 Iteration: {self.args.iteration}, Consumed Train: {self.args.consumed_train_samples}, Consumed Valid: {self.args.consumed_valid_samples}")
+        self.logger.info(f"状态同步完成 Iteration: {self.args.iteration}, Consumed Train: {self.args.consumed_train_samples}, Consumed Valid: {self.args.consumed_valid_samples}")
 
     def _create_data_iterators(self):
         """根据合并后的通信对创建数据迭代器 """
-        self._log("正在创建数据迭代器...")
+        self.logger.info("正在创建数据迭代器...")
         self.data_iterators = {mode: {} for mode in self.modes}
         self.same_data_group = {}
         
@@ -185,7 +197,7 @@ class DistDataProducer:
             dp_rank = idx
             dp_size = len(self.merged_comm_pairs)
 
-            self._log(f"为数据组 {idx} (dp_rank={dp_rank}, dp_size={dp_size}) 创建迭代器")
+            self.logger.info(f"为数据组 {idx} (dp_rank={dp_rank}, dp_size={dp_size}) 创建迭代器")
             train_iter, valid_iter, _, train_ds_current, valid_ds_current = self.build_data_iterators_fn(
                 is_tp_first=True, dp_rank=dp_rank, dp_size=dp_size,
                 train_ds_prev=train_ds_current, valid_ds_prev=valid_ds_current, return_ds=True
@@ -196,11 +208,11 @@ class DistDataProducer:
 
             first_consumer = mcp.consumer[0]
             self.same_data_group[first_consumer] = mcp.consumer
-        self._log("数据迭代器创建完成")
+        self.logger.info("数据迭代器创建完成")
 
     def _initialize_queues_and_trackers(self):
         """初始化数据队列和发送/生产计数器 """
-        self._log("正在初始化队列和计数器...")
+        self.logger.info("正在初始化队列和计数器...")
         all_consumer_ranks = [cp.consumer for cp in self.comm_pairs]
         self.data_queues = {}
         self.produced_count = {}
@@ -210,7 +222,7 @@ class DistDataProducer:
             self.data_queues[mode] = {rank: collections.deque() for rank in all_consumer_ranks}
             self.produced_count[mode] = {rank: 0 for rank in all_consumer_ranks}
             self.sended_count[mode] = {rank: 0 for rank in all_consumer_ranks}
-        self._log("队列和计数器初始化完成")
+        self.logger.info("队列和计数器初始化完成")
 
     def _setup_profiler(self):
         """如果配置中启用，则设置PyTorch Profiler """
@@ -224,34 +236,33 @@ class DistDataProducer:
                 on_trace_ready=lambda p: p.export_chrome_trace(prof_save_path),
                 record_shapes=True
             )
-            self._log(f"Profiler已设置，结果将保存到: {prof_save_path}")
+            self.logger.info(f"Profiler已设置，结果将保存到: {prof_save_path}")
 
     def _produce_and_enqueue_data(self, idx: int, mcp: CommPair, mode: str):
         """从数据迭代器生产数据，编码后放入队列 """
         first_consumer = mcp.consumer[0]
         
-
         try:
-            self._log(f"PRE-GET-RAW-DATA")
+            self.logger.debug(f"PRE-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
             raw_batch = next(self.data_iterators[mode][idx])
         except StopIteration:
-            self._log(f"警告: {mode} 模式的数据迭代器 {idx} 已耗尽")
+            self.logger.warning(f"警告: {mode} 模式的数据迭代器 {idx} 已耗尽")
             return
-        self._log(f"POST-GET-RAW-DATA")
-        self._log(f"PRE-ENCODE: {self._get_gpu_memory_usage()}")
+        self.logger.debug(f"POST-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
+        self.logger.debug(f"PRE-ENCODE: {self._get_gpu_memory_usage()}")
         s_t = datetime.now()
         tensors_to_send = self.encoder.encode(raw_batch)
         encode_time = (datetime.now() - s_t).total_seconds()
-        self._log(f"POST-ENCODE: {self._get_gpu_memory_usage()}")
+        self.logger.debug(f"POST-ENCODE: {self._get_gpu_memory_usage()}")
         
         self.produced_count[mode][first_consumer] += 1
         item_index = self.produced_count[mode][first_consumer]
         
-        self._log(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded in {encode_time:.3f}s")
+        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded in {encode_time:.3f}s")
 
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)
-            self._log(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
+            self.logger.debug(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
 
         if mode == TRAIN_MODE:
             self.step += 1
@@ -260,24 +271,23 @@ class DistDataProducer:
         """从队列中取出数据，并使用同步方式发送 """
         consumer_rank = cp.consumer
         
-
         self.sended_count[mode][consumer_rank] += 1
         item_index = self.sended_count[mode][consumer_rank]
         
         tensors_to_send = self.data_queues[mode][consumer_rank].popleft()
-        self._log(f"QUEUE for Consumer {consumer_rank}: get {item_index} data for sending")
+        self.logger.debug(f"QUEUE for Consumer {consumer_rank}: get {item_index} data for sending")
         
         meta_info = {key: val.shape for key,val in tensors_to_send.items()}
         packed_tensor = self.encoder._pack_tensors([tensors_to_send[key] for key in tensors_to_send.keys()])
 
         resource_status = f"{self._get_gpu_memory_usage()} | {self._get_shm_usage()}"
-        self._log(f"PRE-SEND-META to Consumer {consumer_rank} (item {item_index}): {meta_info}. Status: {resource_status}")
+        self.logger.debug(f"PRE-SEND-META to Consumer {consumer_rank} (item {item_index}): {meta_info}. Status: {resource_status}")
         dist.send_object_list([meta_info], dst=consumer_rank)
-        self._log(f"POST-SEND-META to Consumer {consumer_rank} (item {item_index}): success")
+        self.logger.debug(f"POST-SEND-META to Consumer {consumer_rank} (item {item_index}): success")
 
-        self._log(f"PRE-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): shape={packed_tensor.shape}, dtype={packed_tensor.dtype}")
+        self.logger.debug(f"PRE-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): shape={packed_tensor.shape}, dtype={packed_tensor.dtype}")
         dist.send(tensor=packed_tensor, dst=consumer_rank)
-        self._log(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
+        self.logger.debug(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
 
     def _main_loop_step(self):
         """执行一个主循环步骤：生产和发送数据 """
@@ -289,22 +299,22 @@ class DistDataProducer:
         else:
             mode_to_process = TRAIN_MODE
 
-        self._log(f"start produce  data")
+        self.logger.debug(f"Start produce data for mode: {mode_to_process}")
         for idx, mcp in self.merged_comm_pairs.items():
             self._produce_and_enqueue_data(idx, mcp, mode_to_process)
-        self._log(f"end produce  data")
+        self.logger.debug(f"End produce data")
         
-        self._log(f"start send  data")
+        self.logger.debug(f"Start send data for mode: {mode_to_process}")
         for cp in self.comm_pairs:
             self._send_data_from_queue(cp, mode_to_process)
-        self._log(f"end send  data")
+        self.logger.debug(f"End send data")
 
     def run(self):
         """运行主循环，直到满足停止条件 """
         try:
-            self._log("主循环开始")
+            self.logger.info("主循环开始")
             if self.profiler and self.step >= self.args.profile_step_start:
-                self._log("启动性能分析器...")
+                self.logger.info("启动性能分析器...")
                 self.profiler.start()
 
             while any(self.sended_count[TRAIN_MODE][cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in self.comm_pairs):
@@ -312,27 +322,30 @@ class DistDataProducer:
                 
                 if self.profiler:
                     if not self.profiler.enabled and self.step >= self.args.profile_step_start:
-                        self._log("启动性能分析器...")
+                        self.logger.info("启动性能分析器...")
                         self.profiler.start()
                     if self.profiler.enabled and self.step >= self.args.profile_step_end:
-                        self._log("停止性能分析器...")
+                        self.logger.info("停止性能分析器...")
                         self.profiler.stop()
-                        self._log(f"性能分析数据已保存")
+                        self.logger.info(f"性能分析数据已保存")
                 
                 time.sleep(0.001)
 
-            self._log("所有 Consumer 已达到目标数据量 主循环结束")
+            self.logger.info("所有 Consumer 已达到目标数据量. 主循环结束.")
             
-            self._log("等待所有进程到达屏障...")
+            self.logger.info("等待所有进程到达屏障...")
             dist.barrier(group=get_world_group())
-            self._log("所有进程已同步")
+            self.logger.info("所有进程已同步")
 
         except Exception as e:
-            # [MODIFICATION] 打印更详细的异常信息到日志
-            self._log(f"!!!--- 发生严重异常 ---!!!\n{traceback.format_exc()}")
+            # [MODIFICATION] 使用 logger.exception 记录异常，它会自动包含堆栈跟踪
+            self.logger.exception("!!!--- 主循环中发生严重异常 ---!!!")
             dist.abort(group=get_world_group())
         finally:
-            self._log("开始清理...")
-            self._log(f"{traceback.format_exc()}")
+            self.logger.info("开始清理...")
+            # 记录可能的退出时异常信息
+            exc_info = traceback.format_exc()
+            if "NoneType: None" not in exc_info: # 过滤掉正常的退出
+                self.logger.error(f"清理阶段的异常信息: {exc_info}")
             cleanup_dist()
-            self._log("程序退出")
+            self.logger.info("程序退出")
