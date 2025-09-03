@@ -1,21 +1,3 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-FSDP PPO Trainer with Ray-based single controller.
-This trainer supports model-agonistic model initialization with huggingface
-"""
-
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -36,6 +18,12 @@ from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_througho
 from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_response_mask
 from verl.utils.debug import marked_timer
 from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
+
+
+def fprint(*args, **kwargs):
+    text = " ".join(str(a) for a in args)
+    with open("output.log", "a", encoding="utf-8") as f:
+        f.write(text + "\n")
 
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
@@ -172,10 +160,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # gen_batch_output的数据类型是DataProto
                         # 具体见DiffusionActorRolloutWorker.generate_sequences方法
                         # 得到的gen_batch_output是聚合所有gpu的结果
-                        start = time.time()
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                        end = time.time()
-                        print(f"[Step {self.global_steps}] gen took {end - start:.3f}s")
 
                     # 目前用的是gae，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
@@ -203,21 +188,20 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
-                        start = time.time()
                         if self.use_rm:
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
+                                metrics["train/rewards"] = reward_tensor.batch['rewards'].mean()
                                 new_batch = gen_batch_output.union(reward_tensor)
                                 new_batch.pop(batch_keys=['video_frames'])
+                                metrics["train/log_probs"] = new_batch.batch["log_probs"].mean()                                
                                 del gen_batch_output
                         else:
                             reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
                             new_batch = gen_batch_output.union(reward_tensor)
                             new_batch.pop(batch_keys=['video_frames'])
                             del gen_batch_output
-                        end = time.time()
-                        print(f"[Step {self.global_steps}] reward took {end - start:.3f}s")
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)
 
@@ -257,6 +241,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             num_repeat=self.config.actor_rollout_ref.rollout.n,
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                         )
+                        metrics["train/advantage"] = new_batch.batch['advantages'].mean()
 
                     # # update critic
                     # if self.use_critic:
@@ -269,12 +254,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with marked_timer("update_actor", timing_raw):
-                            start = time.time()
                             actor_output = self.actor_rollout_wg.update_actor(new_batch)
-                            end = time.time()
-                            print(f"[Step {self.global_steps}] update_actor took {end - start:.3f}s")
-                        # actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                        # metrics.update(actor_output_metrics)
+                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                        metrics.update(actor_output_metrics)
 
                     # validate
                     # if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
@@ -290,7 +272,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                 # collect metrics
                 # metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
-                # metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+                metrics.update(compute_timing_metrics(batch=new_batch, timing_raw=timing_raw))
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
                 # metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
@@ -301,8 +283,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 num_prompt_in_batch = 0
                 num_gen_batches = 0
 
-                # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
+                timing_raw = defaultdict(float)
 
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")
