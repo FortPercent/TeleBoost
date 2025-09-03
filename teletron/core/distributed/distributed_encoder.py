@@ -7,6 +7,10 @@ from typing import Callable, Any, Dict, List
 from datetime import datetime
 import psutil
 import traceback
+import copy
+import random
+import json
+import numpy as np 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import get_args
 from teletron.train.checkpoint import ensure_directory_exists
@@ -50,7 +54,18 @@ def merge_commpairs(commpairs: list) -> Dict[int, CommPair]:
         merged_list[idx] = new_cp
     return merged_list
 
-
+def _set_random_seed_by_rank(seed_=1234):
+    """Set random seed for reproducability."""
+    if seed_ is not None and seed_ > 0:
+        # Ensure that different producer get different seeds.
+        seed = seed_ + (10 * torch.distributed.get_rank())
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        # if torch.cuda.device_count() > 0:
+        #     tensor_parallel.model_parallel_cuda_manual_seed(seed)
+    else:
+        raise ValueError("Seed ({}) should be a positive integer.".format(seed))
 class DistDataProducer:
     """
     分布式数据生产者
@@ -72,6 +87,7 @@ class DistDataProducer:
         self._log("初始化开始...")
 
         self.args = get_args()
+        _set_random_seed_by_rank(self.args.seed)
         self.encoder = get_encoder(name=encoder_name, device=self.device)
         self.build_data_iterators_fn = build_train_valid_test_data_iterators
         self.train_ds_preloaded = train_ds
