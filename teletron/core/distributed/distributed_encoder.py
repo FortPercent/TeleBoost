@@ -3,38 +3,44 @@ import torch
 import torch.distributed as dist
 import collections
 import time
+from typing import Callable, Any, Dict, List
+from datetime import datetime
+import psutil
+import traceback
 import copy
 import random
-import numpy as np 
-from typing import Callable, Any, Dict
 import json
+import numpy as np
+import logging 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import get_args
 from teletron.train.checkpoint import ensure_directory_exists
 from teletron.models.encoder_registry import get_encoder
 
-
+# --- 常量定义 ---
 NUM_ITEMS_PER_CONSUMER = 100000
 MAX_QUEUE_PER_CONSUMER_ON_PRODUCER = 2
-MAX_OUTSTANDING_SENDS_PER_CONSUMER = 1
-
 
 TRAIN_MODE = 'train'
 VALID_MODE = 'valid'
 
 def cleanup_dist():
+    """如果分布式环境已初始化，则销毁进程组 """
     if dist.is_initialized():
-        print(f"Rank {dist.get_rank()}: 销毁进程组。")
+        print(f"Rank {dist.get_rank()}: 销毁进程组 ")
         dist.destroy_process_group()
 
 def merge_commpairs(commpairs: list) -> Dict[int, CommPair]:
+    """
+    将通信对列表（commpairs）根据相同的生产者和数据并行设置进行合并
+    这用于将需要相同数据的消费者分组
+    """
     merge_dict = {}
     for cp in commpairs:
         key = (cp.producer, cp.dp_rank, cp.dp_size)
         if key not in merge_dict:
             merge_dict[key] = []
         
-        # 统一处理单个或多个 consumer 的情况
         consumers = cp.consumer if isinstance(cp.consumer, list) else [cp.consumer]
         merge_dict[key].extend(consumers)
     
@@ -42,13 +48,12 @@ def merge_commpairs(commpairs: list) -> Dict[int, CommPair]:
     for idx, (key, consumers_list) in enumerate(merge_dict.items()):
         new_cp = CommPair(
             producer=key[0],
-            consumer=consumers_list,
+            consumer=sorted(list(set(consumers_list))),
             dp_rank=key[1],
             dp_size=key[2]
         )
         merged_list[idx] = new_cp
     return merged_list
-
 
 def _set_random_seed_by_rank(seed_=1234):
     """Set random seed for reproducability."""
@@ -64,6 +69,10 @@ def _set_random_seed_by_rank(seed_=1234):
         raise ValueError("Seed ({}) should be a positive integer.".format(seed))
 
 class DistDataProducer:
+    """
+    分布式数据生产者
+    该类负责从数据集中加载、编码数据，并通过 PyTorch Distributed 同步地发送给消费者进程
+    """
     def __init__(
         self,
         rank: int,
@@ -73,56 +82,111 @@ class DistDataProducer:
         train_ds: Any = None,
         valid_ds: Any = None,
     ):
-        self.args = get_args()
-        _set_random_seed_by_rank(self.args.seed)
         self.rank = rank
         self.device = device
+        
+        self._setup_logger() 
+        self.logger.info("初始化开始...")
+
+        self.args = get_args()
+        _set_random_seed_by_rank(self.args.seed)
         self.encoder = get_encoder(name=encoder_name, device=self.device)
         self.build_data_iterators_fn = build_train_valid_test_data_iterators
         self.train_ds_preloaded = train_ds
         self.valid_ds_preloaded = valid_ds
+        
         self.step = 0
+        self.batch_size = 1
+        
         self.modes = [TRAIN_MODE]
         if self.args.eval_iters > 0:
             self.modes.append(VALID_MODE)
-        if self.args.producer_profile:
-            self.batch_size = 1
-        else:
-            self.batch_size = self.args.producer_batch_size
-        
+        self.logger.info(f"运行模式: {self.modes}")
+
         self.encoder.setup()
+        self.logger.info("编码器设置完成")
+
         self.comm_pairs = get_comm_pair()
         self.merged_comm_pairs = merge_commpairs(self.comm_pairs)
-
-        # 2. 初始化 Consumer 状态
+        self.logger.info(f"原始通信对: {self.comm_pairs}")
+        self.logger.debug(f"合并后通信对: {self.merged_comm_pairs}") # 使用 debug 级别，因为这个信息比较冗长
+        
         self._initialize_consumer_state()
-        
-        # 3. 创建数据迭代器
         self._create_data_iterators()
-        
-        # 4. 初始化队列和请求跟踪器
         self._initialize_queues_and_trackers()
-
-        # 5. 设置性能分析器 (Profiler)
         self._setup_profiler()
 
+        self.logger.info("初始化完成")
+
+    def _setup_logger(self):
+
+        self.logger = logging.getLogger(f"ProducerRank{self.rank}")
+        if not self.logger.handlers:
+
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.DEBUG)
+            
+            # 定义 handler 的输出格式
+            formatter = logging.Formatter(
+                f'PRODUCER (Rank {self.rank}) [%(asctime)s.%(msecs)03d] [%(levelname)s]: %(message)s',
+                datefmt='%H:%M:%S'
+            )
+            ch.setFormatter(formatter)
+
+            self.logger.addHandler(ch)
+
+        self.logger.propagate = False
+
+    def _get_gpu_memory_usage(self) -> str:
+        """获取并格式化当前GPU显存使用情况"""
+        try:
+            if not torch.cuda.is_available():
+                return "CUDA not available"
+            allocated = torch.cuda.memory_allocated(self.device) / 1024**2
+            reserved = torch.cuda.memory_reserved(self.device) / 1024**2
+            free, total = torch.cuda.mem_get_info(self.device)
+            free_mb = free / 1024**2
+            total_mb = total / 1024**2
+            return (f"GPU Mem: Alloc={allocated:.2f}MB, "
+                    f"Reserv={reserved:.2f}MB, Free={free_mb:.2f}MB, Total={total_mb:.2f}MB")
+        except Exception as e:
+            return f"GPU Mem: Error getting info - {e}"
+
+    def _get_shm_usage(self) -> str:
+        """获取并格式化/dev/shm使用情况"""
+        try:
+            shm_usage = psutil.disk_usage("/dev/shm")
+            used_mb = shm_usage.used / 1024**2
+            total_mb = shm_usage.total / 1024**2
+            return f"SHM Mem: Used={used_mb:.2f}MB, Total={total_mb:.2f}MB ({shm_usage.percent}%)"
+        except (FileNotFoundError, AttributeError):
+            return "SHM Mem: /dev/shm not found or psutil error."
+
     def _initialize_consumer_state(self):
-        """
-        与 Consumers 同步初始状态。
-        """
-        print(f"Producer Rank {self.rank}: 从 Consumer 获取初始状态。")
-        consumers_data = torch.zeros((len(self.comm_pairs), 3), dtype=torch.int64, device=self.device)
-        req_queue = [dist.irecv(tensor=consumers_data[i], src=cp.consumer) for i, cp in enumerate(self.comm_pairs)]
-        for req in req_queue:
-            req.wait()
+        """与 Consumers 同步初始状态，如训练迭代步数 """
+        self.logger.info("正在从 Consumers 获取初始状态...")
+        num_consumers = len(self.comm_pairs)
+        consumers_data = torch.zeros((num_consumers, 3), dtype=torch.int64, device=self.device)
         
-        # 假设所有 consumer 的初始状态是一致的
+        reqs = []
+        for i, cp in enumerate(self.comm_pairs):
+            consumer_rank = cp.consumer
+            self.logger.debug(f"PRE-RECV from Consumer Rank {consumer_rank} for initial state...")
+            reqs.append(dist.irecv(tensor=consumers_data[i], src=consumer_rank))
+
+        for i, req in enumerate(reqs):
+            consumer_rank = self.comm_pairs[i].consumer
+            self.logger.debug(f"Waiting for Consumer Rank {consumer_rank}'s initial state...")
+            req.wait()
+            self.logger.info(f"POST-RECV: 已收到来自 Consumer Rank {consumer_rank} 的初始状态")
         self.args.iteration = consumers_data[0][0].item()
-        self.args.consumed_train_samples = consumers_data[0][1].item() // self.args.distributed_vae_world_size
-        self.args.consumed_valid_samples = consumers_data[0][2].item() // self.args.distributed_vae_world_size
-        print(f"Producer Rank {self.rank}: 同步完成。Iteration: {self.args.iteration}, Consumed Train: {self.args.consumed_train_samples}")
+        self.args.consumed_train_samples = consumers_data[0][1].item() // self.args.distributed_vae_world_size 
+        self.args.consumed_valid_samples = consumers_data[0][2].item()
+        self.logger.info(f"状态同步完成 Iteration: {self.args.iteration}, Consumed Train: {self.args.consumed_train_samples}, Consumed Valid: {self.args.consumed_valid_samples}")
 
     def _create_data_iterators(self):
+        """根据合并后的通信对创建数据迭代器 """
+        self.logger.info("正在创建数据迭代器...")
         self.data_iterators = {mode: {} for mode in self.modes}
         self.same_data_group = {}
         
@@ -133,6 +197,7 @@ class DistDataProducer:
             dp_rank = idx
             dp_size = len(self.merged_comm_pairs)
 
+            self.logger.info(f"为数据组 {idx} (dp_rank={dp_rank}, dp_size={dp_size}) 创建迭代器")
             train_iter, valid_iter, _, train_ds_current, valid_ds_current = self.build_data_iterators_fn(
                 is_tp_first=True, dp_rank=dp_rank, dp_size=dp_size,
                 train_ds_prev=train_ds_current, valid_ds_prev=valid_ds_current, return_ds=True
@@ -143,30 +208,27 @@ class DistDataProducer:
 
             first_consumer = mcp.consumer[0]
             self.same_data_group[first_consumer] = mcp.consumer
-        
+        self.logger.info("数据迭代器创建完成")
 
     def _initialize_queues_and_trackers(self):
+        """初始化数据队列和发送/生产计数器 """
+        self.logger.info("正在初始化队列和计数器...")
         all_consumer_ranks = [cp.consumer for cp in self.comm_pairs]
         self.data_queues = {}
-        self.size_queues = {}
+        self.produced_count = {}
         self.sended_count = {}
-        self.received_count = {}
-        self.size_reqs = {}
-        self.data_reqs = {}
 
         for mode in self.modes:
             self.data_queues[mode] = {rank: collections.deque() for rank in all_consumer_ranks}
-            self.size_queues[mode] = {rank: collections.deque() for rank in all_consumer_ranks}
+            self.produced_count[mode] = {rank: 0 for rank in all_consumer_ranks}
             self.sended_count[mode] = {rank: 0 for rank in all_consumer_ranks}
-            self.received_count[mode] = {rank: 0 for rank in all_consumer_ranks}
-            self.size_reqs[mode] = []
-            self.data_reqs[mode] = []
+        self.logger.info("队列和计数器初始化完成")
 
     def _setup_profiler(self):
-        """如果配置中启用，则设置PyTorch Profiler。"""
+        """如果配置中启用，则设置PyTorch Profiler """
         self.profiler = None
         if self.args.producer_profile:
-            prof_save_path = os.path.join(self.args.profile_path, f"producer/rank_{dist.get_rank()}.json")
+            prof_save_path = os.path.join(self.args.profile_path, f"producer/rank_{self.rank}.json")
             ensure_directory_exists(prof_save_path)
             self.profiler = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
@@ -174,127 +236,116 @@ class DistDataProducer:
                 on_trace_ready=lambda p: p.export_chrome_trace(prof_save_path),
                 record_shapes=True
             )
-    
-    def _cleanup_completed_sends(self, mode: str):
-        new_size_reqs, new_data_reqs = [], []
-        for r_size, r_data in zip(self.size_reqs[mode], self.data_reqs[mode]):
-            if r_size[0].is_completed() and r_data[0].is_completed():
-                consumer_rank = r_size[1]
-                self.received_count[mode][consumer_rank] += 1
-            else:
-                new_size_reqs.append(r_size)
-                new_data_reqs.append(r_data)
-        
-        self.size_reqs[mode] = new_size_reqs
-        self.data_reqs[mode] = new_data_reqs
-    
+            self.logger.info(f"Profiler已设置，结果将保存到: {prof_save_path}")
+
     def _produce_and_enqueue_data(self, idx: int, mcp: CommPair, mode: str):
+        """从数据迭代器生产数据，编码后放入队列 """
         first_consumer = mcp.consumer[0]
         
-        if len(self.data_queues[mode][first_consumer]) < MAX_QUEUE_PER_CONSUMER_ON_PRODUCER:
-            try:
-                raw_batch = [next(self.data_iterators[mode][idx]) for i in range(self.batch_size)]
-            except StopIteration:
-                # 统一处理迭代器耗尽的情况
-                print(f"信息: {mode} 模式的数据迭代器 {idx} 已耗尽。")
-                return
+        try:
+            self.logger.debug(f"PRE-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
+            raw_batch = next(self.data_iterators[mode][idx])
+        except StopIteration:
+            self.logger.warning(f"警告: {mode} 模式的数据迭代器 {idx} 已耗尽")
+            return
+        self.logger.debug(f"POST-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
+        self.logger.debug(f"PRE-ENCODE: {self._get_gpu_memory_usage()}")
+        s_t = datetime.now()
+        tensors_to_send = self.encoder.encode(raw_batch)
+        encode_time = (datetime.now() - s_t).total_seconds()
+        self.logger.debug(f"POST-ENCODE: {self._get_gpu_memory_usage()}")
+        
+        self.produced_count[mode][first_consumer] += 1
+        item_index = self.produced_count[mode][first_consumer]
+        
+        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded in {encode_time:.3f}s")
 
-            tensors_to_send = self.encoder.encode(raw_batch)
+        for consumer_rank in self.same_data_group[first_consumer]:
+            self.data_queues[mode][consumer_rank].append(tensors_to_send)
+            self.logger.debug(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
 
-            for item in tensors_to_send:
-                size_info_tensor = self.encoder._get_tensors_size(item, device=self.device)
-                packed_tensor = self.encoder._pack_tensors(item)
-                
-                for consumer_rank in self.same_data_group[first_consumer]:
-                    self.size_queues[mode][consumer_rank].append(size_info_tensor)
-                    self.data_queues[mode][consumer_rank].append(packed_tensor)
+        if mode == TRAIN_MODE:
+            self.step += 1
 
-            if mode == TRAIN_MODE:
-                self.step += self.batch_size
-    
-    def _initiate_new_sends(self, cp: CommPair, mode: str):
+    def _send_data_from_queue(self, cp: CommPair, mode: str):
+        """从队列中取出数据，并使用同步方式发送 """
         consumer_rank = cp.consumer
         
-        outstanding_sends = sum(1 for _, c, _ in self.size_reqs[mode] if c == consumer_rank)
-        if self.size_queues[mode][consumer_rank] and outstanding_sends < MAX_OUTSTANDING_SENDS_PER_CONSUMER:
-            size_to_send = self.size_queues[mode][consumer_rank].popleft()
-            req_size = dist.isend(tensor=size_to_send, dst=consumer_rank)
-            self.size_reqs[mode].append((req_size, consumer_rank, size_to_send))
-            tensor_to_send = self.data_queues[mode][consumer_rank].popleft()
-            req_data = dist.isend(tensor=tensor_to_send, dst=consumer_rank)
-            self.data_reqs[mode].append((req_data, consumer_rank, tensor_to_send))
-            
-            self.sended_count[mode][consumer_rank] += 1
+        self.sended_count[mode][consumer_rank] += 1
+        item_index = self.sended_count[mode][consumer_rank]
         
-    def _wait_all_reqs_end(self):
-        """等待所有模式下挂起的请求完成。"""
-        print(f"Rank {dist.get_rank()}: 所有数据项已启动发送，等待最终完成...")
-        for mode in self.modes:
-            for r_size, r_data in zip(self.size_reqs[mode], self.data_reqs[mode]):
-                r_size[0].wait()
-                r_data[0].wait()
-    
-    def _main_produce_and_send(self):
-        # 阶段 A: 清理所有模式下已完成的发送
-        for mode in self.modes:
-            self._cleanup_completed_sends(mode)
+        tensors_to_send = self.data_queues[mode][consumer_rank].popleft()
+        self.logger.debug(f"QUEUE for Consumer {consumer_rank}: get {item_index} data for sending")
         
-        # 阶段 B: 根据模式和需求生产和发送数据
+        meta_info = {key: val.shape for key,val in tensors_to_send.items()}
+        packed_tensor = self.encoder._pack_tensors([tensors_to_send[key] for key in tensors_to_send.keys()])
+
+        resource_status = f"{self._get_gpu_memory_usage()} | {self._get_shm_usage()}"
+        self.logger.debug(f"PRE-SEND-META to Consumer {consumer_rank} (item {item_index}): {meta_info}. Status: {resource_status}")
+        dist.send_object_list([meta_info], dst=consumer_rank)
+        self.logger.debug(f"POST-SEND-META to Consumer {consumer_rank} (item {item_index}): success")
+
+        self.logger.debug(f"PRE-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): shape={packed_tensor.shape}, dtype={packed_tensor.dtype}")
+        dist.send(tensor=packed_tensor, dst=consumer_rank)
+        self.logger.debug(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
+
+    def _main_loop_step(self):
+        """执行一个主循环步骤：生产和发送数据 """
         if VALID_MODE in self.modes:
-            # 训练和验证交替进行
             train_data_count = self.args.eval_interval
-            valid_data_count = self.args.eval_iters
-            
-            # 假设每个 consumer 的进度大致相同，以第一个为基准
             first_consumer = self.comm_pairs[0].consumer
-            num_dispatched_in_cycle = self.sended_count[TRAIN_MODE][first_consumer] % train_data_count
-            
-            if num_dispatched_in_cycle < train_data_count:
-                mode_to_process = TRAIN_MODE
-                
-            else:
-                mode_to_process = VALID_MODE
-            
-            # 为当前模式生产和发送数据
-            for idx, mcp in self.merged_comm_pairs.items():
-                self._produce_and_enqueue_data(idx, mcp, mode_to_process)
-            for cp in self.comm_pairs:
-                self._initiate_new_sends(cp, mode_to_process)
+            num_sended_in_cycle = self.sended_count[TRAIN_MODE][first_consumer] % train_data_count
+            mode_to_process = TRAIN_MODE if num_sended_in_cycle < train_data_count else VALID_MODE
         else:
-            # 只处理训练数据
-            for idx, mcp in self.merged_comm_pairs.items():
-                self._produce_and_enqueue_data(idx, mcp, TRAIN_MODE)
-            for cp in self.comm_pairs:
-                self._initiate_new_sends(cp, TRAIN_MODE)
+            mode_to_process = TRAIN_MODE
+
+        self.logger.debug(f"Start produce data for mode: {mode_to_process}")
+        for idx, mcp in self.merged_comm_pairs.items():
+            self._produce_and_enqueue_data(idx, mcp, mode_to_process)
+        self.logger.debug(f"End produce data")
+        
+        self.logger.debug(f"Start send data for mode: {mode_to_process}")
+        for cp in self.comm_pairs:
+            self._send_data_from_queue(cp, mode_to_process)
+        self.logger.debug(f"End send data")
 
     def run(self):
+        """运行主循环，直到满足停止条件 """
         try:
-            # 启动性能分析器
-            if self.profiler and self.step == self.args.profile_step_start:
+            self.logger.info("主循环开始")
+            if self.profiler and self.step >= self.args.profile_step_start:
+                self.logger.info("启动性能分析器...")
                 self.profiler.start()
 
-            # 主循环
             while any(self.sended_count[TRAIN_MODE][cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in self.comm_pairs):
-                self._main_produce_and_send()
+                self._main_loop_step()
                 
-                # 检查是否停止 profiler
-                if self.profiler and self.step == self.args.profile_step_end:
-                    self.profiler.stop()
-                    print(f"Rank {dist.get_rank()}: Profiler data saved.")
+                if self.profiler:
+                    if not self.profiler.enabled and self.step >= self.args.profile_step_start:
+                        self.logger.info("启动性能分析器...")
+                        self.profiler.start()
+                    if self.profiler.enabled and self.step >= self.args.profile_step_end:
+                        self.logger.info("停止性能分析器...")
+                        self.profiler.stop()
+                        self.logger.info(f"性能分析数据已保存")
                 
-                
-                time.sleep(0.01)  # 短暂休眠以避免CPU空转
+                time.sleep(0.001)
 
-            # 等待所有挂起的通信完成
-            self._wait_all_reqs_end()
+            self.logger.info("所有 Consumer 已达到目标数据量. 主循环结束.")
             
-            # 全局屏障，确保所有进程都完成了它们的工作
+            self.logger.info("等待所有进程到达屏障...")
             dist.barrier(group=get_world_group())
+            self.logger.info("所有进程已同步")
 
         except Exception as e:
-            import traceback
-            print(f"Rank {dist.get_rank()} 发生异常:")
-            traceback.print_exc()
+            # [MODIFICATION] 使用 logger.exception 记录异常，它会自动包含堆栈跟踪
+            self.logger.exception("!!!--- 主循环中发生严重异常 ---!!!")
             dist.abort(group=get_world_group())
         finally:
+            self.logger.info("开始清理...")
+            # 记录可能的退出时异常信息
+            exc_info = traceback.format_exc()
+            if "NoneType: None" not in exc_info: # 过滤掉正常的退出
+                self.logger.error(f"清理阶段的异常信息: {exc_info}")
             cleanup_dist()
+            self.logger.info("程序退出")

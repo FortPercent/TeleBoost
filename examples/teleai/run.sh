@@ -5,10 +5,11 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/teleai_data_tool
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
@@ -17,8 +18,8 @@ TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=8
+N_GPU_FOR_TRAIN=1
+N_GPU_FOR_DATA=1
 
 # Single-node config 
 # N_MOE=1
@@ -114,9 +115,10 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1 # for terminal infos
     --save-interval 500
     --eval-interval 500
-    --load $CHECKPOINT_PATH_LOAD 
-    --save $CHECKPOINT_PATH_SAVE
+    # --load $CHECKPOINT_PATH_LOAD 
+    # --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20 # sample 20 video to eval
+    --producer-log-level 1 # 1: debug | 2: Info
 )
 
 torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \

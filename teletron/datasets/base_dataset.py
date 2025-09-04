@@ -8,7 +8,7 @@ from teletron.datasets.transform.build import build_transform
 import numpy as np
 from torch.utils.data import Dataset
 from teleai_data_tool.logger import logger
-
+import func_timeout
 
 class Compose:
     """Compose multiple transforms sequentially.
@@ -542,6 +542,13 @@ class BaseDataset(Dataset):
         try:
             data_info = self.get_data_info(idx)
             return self.pipeline(data_info)
+        
+        except func_timeout.exceptions.FunctionTimedOut as e:
+            # Log error details and return None to trigger resampling
+            import traceback
+            print(f"Error processing sample at index {idx}: {traceback.format_exc()}")
+            return None
+        
         except Exception as e:
             # Log error details and return None to trigger resampling
             import traceback

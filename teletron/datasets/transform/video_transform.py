@@ -10,6 +10,7 @@ from teletron.utils import video_utils
 import torch.nn.functional as F
 from einops import rearrange
 from math import floor, ceil
+from func_timeout import func_set_timeout
 
 
 class MaskGenerator:
@@ -187,7 +188,8 @@ class GenerateRawFirstLastRefImage:
         raw_last_image = copy.deepcopy(data_dict["images"][-1:, ...])
         data_dict["raw_last_image"] = raw_last_image
         return data_dict
-
+    
+@func_set_timeout(60)
 class SampleImages:
     def __init__(
         self,
@@ -195,6 +197,7 @@ class SampleImages:
     ):
         self.num_frames = num_frames
 
+    @func_set_timeout(60)
     def __call__(self, data_dict):
         video = data_dict["video"]
         if self.num_frames > 1:
@@ -222,7 +225,7 @@ class SampleImages:
         )
         return sample_indexes
     
-
+@func_set_timeout(60)
 class SampleDynamicFPSVideo:
     def __init__(
         self,
@@ -298,7 +301,7 @@ class SampleDynamicFPSVideo:
 
         return sample_indexes
     
-
+@func_set_timeout(60)
 class SampleWholeVideo:
     def __init__(
         self,
@@ -356,7 +359,7 @@ class SampleWholeVideo:
         return sample_indexes, max(1, int(self.base_fps // dst_fps))
     
     
-
+@func_set_timeout(60)
 class SampleImageVideo:
     def __call__(self, data_dict):
         video = data_dict["video"]
