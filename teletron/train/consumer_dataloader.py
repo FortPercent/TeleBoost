@@ -103,40 +103,32 @@ class VastDistBatchLoader(BaseBatchLoader):
         # breakpoint()
         comm_pair = get_comm_pair()
         args = get_args()
-        info_size  = sum([PROPERTY_DIMS[data_to_get] for data_to_get in TeleaiEncoder.get_output_schema()])
-        tensors_info = torch.ones((info_size), device=torch.cuda.current_device(), dtype=torch.int32)
-        req = dist.irecv(tensors_info, comm_pair.producer)
-        req.wait()
-        del req
+
+        meta_info = [None]
+        dist.recv_object_list(meta_info, comm_pair.producer)
+        meta_info = meta_info[0]
+
 
         batch = {}
         # unpack
         if args.distributed_vae:
-            start_dim = 0
             intervals = [0]
             
             for data_to_get in TeleaiEncoder.get_output_schema():
-                dims = PROPERTY_DIMS[data_to_get]
                 data_size = 1
-                for dim in tensors_info[start_dim:start_dim + dims].tolist():
+                for dim in meta_info[data_to_get]:
                     data_size *= dim 
-                start_dim += dims
                 intervals.append(intervals[-1] + data_size)
             
             total_size = intervals[-1]
             recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-            req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
-            req.wait()
-            del req
-            
+            dist.recv(recv_tensor, comm_pair.producer, tag=0)
             unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
-            start_dim = 0
+
             for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):
-                dims = PROPERTY_DIMS[data_to_get]
-                tensor_shape = tensors_info[start_dim:start_dim + dims].tolist()
+                tensor_shape = meta_info[data_to_get]
                 reshaped_data = unpacked_data[i].view(*tensor_shape)
                 batch[data_to_get] = reshaped_data
-                start_dim += dims
         else:
             # 如果 distributed_vae 为 False，需要定义相应的行为
             # 例如，返回空的或默认的 tensors

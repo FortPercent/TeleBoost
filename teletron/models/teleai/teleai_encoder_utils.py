@@ -354,27 +354,7 @@ def get_latents(batch, vae, dtype=torch.bfloat16, tiler_kwargs={}):
         )
         return latents.to(dtype=dtype, device=torch.cuda.current_device())
 
-    if not isinstance(batch, list):
-        batch = [batch]
-
-    groups = defaultdict(list)
-    for i, item in enumerate(batch):
-        shape = item["images"].shape
-        groups[shape].append((i, item))
-
-    results = [None] * len(batch)
-    for shape, items_with_indices in groups.items():
-        original_indices, items = zip(*items_with_indices)
-        
-        images_batch = torch.cat([item["images"] for item in items], dim=0)
-        
-        group_latents = _get_latents(images_batch)
-        
-        for i, latent in enumerate(group_latents):
-            original_idx = original_indices[i]
-            results[original_idx] = latent.unsqueeze(0)
-
-    return results
+    return _get_latents(batch["images"])
 
 
 @torch.no_grad
