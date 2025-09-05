@@ -14,7 +14,7 @@ from diffusers.utils import (
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from teletron.core.context_parallel.mappings import split_forward_gather_backward,\
-    gather_forward_split_backward
+    gather_forward_split_backward, SeqAllToAll
 from .model import HunyuanVideoTransformer3DModel
 import logging
 
@@ -77,10 +77,9 @@ class HunyuanVideoDoubleAttnProcessor2_0:
         # Ulysses Context Parallel AlltoAll of qkv
         cp_group = mpu.get_context_parallel_group()
 
-        from yunchang.comm.all_to_all import SeqAllToAll4D
-        query = SeqAllToAll4D.apply(cp_group, query, 1, 2)
-        key = SeqAllToAll4D.apply(cp_group, key,  1, 2)
-        value = SeqAllToAll4D.apply(cp_group, value,  1, 2)
+        query = SeqAllToAll.apply(cp_group, query, 1, 2)
+        key = SeqAllToAll.apply(cp_group, key,  1, 2)
+        value = SeqAllToAll.apply(cp_group, value,  1, 2)
         query, key ,value = map(
                 lambda x: ContextParallelMixin.remove_pad_for_context_parallel(x, dim=2),
                 [query, key, value]
@@ -111,7 +110,7 @@ class HunyuanVideoDoubleAttnProcessor2_0:
         
         # 6. Output projection
         hidden_states = ContextParallelMixin.pad_for_context_parallel(hidden_states, 1)
-        hidden_states = SeqAllToAll4D.apply(cp_group, hidden_states, 1, 2)
+        hidden_states = SeqAllToAll.apply(cp_group, hidden_states, 1, 2)
         encoder_hidden_states = gather_forward_split_backward(encoder_hidden_states, cp_group, 2)
         
         hidden_states = hidden_states.flatten(2, 3).contiguous()
@@ -174,10 +173,9 @@ class HunyuanVideoSingleAttnProcessor2_0:
         # Ulysses Context Parallel AlltoAll of qkv
         cp_group = mpu.get_context_parallel_group()
 
-        from yunchang.comm.all_to_all import SeqAllToAll4D
-        query = SeqAllToAll4D.apply(cp_group, img_query,  1, 2)
-        key = SeqAllToAll4D.apply(cp_group, img_key, 1, 2)
-        value = SeqAllToAll4D.apply(cp_group, img_value, 1, 2)
+        query = SeqAllToAll.apply(cp_group, img_query,  1, 2)
+        key = SeqAllToAll.apply(cp_group, img_key, 1, 2)
+        value = SeqAllToAll.apply(cp_group, img_value, 1, 2)
 
         added_query = split_forward_gather_backward(txt_query, cp_group, dim=1)
         added_key = split_forward_gather_backward(txt_key, cp_group, dim=1)

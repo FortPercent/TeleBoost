@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from megatron.core import mpu
 from yunchang.comm.all_to_all import SeqAllToAll4D
-from .mappings import split_forward_gather_backward, gather_forward_split_backward
+from .mappings import split_forward_gather_backward, gather_forward_split_backward, SeqAllToAll
 from .layers import GateWithGradReduce, ModulateWithCPGradReduce
 from teletron.utils import get_args
 
@@ -91,15 +91,16 @@ class ContextParallelMixin:
         v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
 
         # qkv: b s/CP n d
-        q = SeqAllToAll4D.apply(cp_group, q, 2, 1)
-        k = SeqAllToAll4D.apply(cp_group, k, 2, 1)
-        v = SeqAllToAll4D.apply(cp_group, v, 2, 1)
+        if mpu.get_context_parallel_world_size() > 1:
+            q = SeqAllToAll.apply(cp_group, q, 2, 1)
+            k = SeqAllToAll.apply(cp_group, k, 2, 1)
+            v = SeqAllToAll.apply(cp_group, v, 2, 1)
 
-        # qkv: b s n/CP d
-        q,k,v = map(
-            lambda x: self.remove_pad_for_context_parallel(x, 1),
-            [q,k,v]
-        )
+            # qkv: b s n/CP d
+            q,k,v = map(
+                lambda x: self.remove_pad_for_context_parallel(x, 1),
+                [q,k,v]
+            )
 
         if FLASH_ATTN_3_AVAILABLE:
             x = flash_attn_interface.flash_attn_func(q, k, v)[0]
@@ -109,13 +110,13 @@ class ContextParallelMixin:
             k = k.transpose(1, 2).contiguous()
             v = v.transpose(1, 2).contiguous()
             x = F.scaled_dot_product_attention(q, k, v)
-
-        x = self.pad_for_context_parallel(x, 2)
-        x = SeqAllToAll4D.apply(
-            cp_group, x, 2, 1
-        )  # b img_seq sub_n d
-        # torch.cuda.empty_cache()
-        # x: b n s/CP d
+        if mpu.get_context_parallel_world_size() > 1:
+            x = self.pad_for_context_parallel(x, 2)
+            x = SeqAllToAll.apply(
+                cp_group, x, 2, 1
+            )  # b img_seq sub_n d
+            # torch.cuda.empty_cache()
+            # x: b n s/CP d
         x = x.transpose(1, 2).flatten(2, 3).contiguous()
         # x: b s h
 
