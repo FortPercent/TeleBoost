@@ -1,10 +1,62 @@
 # Copyright (c) 2025 TeleAI-infra and Nvidia Megatron-LM Team. All rights reserved.
 
+
+from typing import Optional, List, Any
+
 import torch
-
-from typing import Optional, List
-
 import torch.distributed as dist
+from torch import Tensor
+from megatron.core import mpu
+
+
+class SeqAllToAll(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx: Any,
+        group: dist.ProcessGroup,
+        local_input: Tensor,
+        scatter_dim: int,
+        gather_dim: int,
+        async_op: bool = False,
+    ) -> Tensor:
+        ctx.group = group
+        ctx.scatter_dim = scatter_dim
+        ctx.gather_dim = gather_dim
+        ctx.async_op = async_op
+        return all_to_all_tensor(local_input, scatter_dim, gather_dim, group, async_op)
+
+    @staticmethod
+    def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
+        input_t = torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous() if ctx.async_op else grad_output[0]
+        return (
+            None,
+            all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.group, False),
+            None,
+            None,
+            None,
+            None,
+        )
+
+def all_to_all_tensor(
+    local_input: Tensor,
+    scatter_dim: int,
+    gather_dim: int,
+    group: Optional[dist.ProcessGroup] = None,
+    async_op: bool = False,
+):
+    group = mpu.get_context_parallel_group() if group is None else group
+    cp_size = dist.get_world_size(group)
+    input_list = [t.contiguous() for t in torch.tensor_split(local_input, cp_size, scatter_dim)]
+    output_list = [torch.empty_like(input_list[0]) for _ in range(cp_size)]
+    comm = dist.all_to_all(output_list, input_list, group=group, async_op=async_op)
+    if async_op:
+
+        def wait():
+            comm.wait()
+            return torch.cat(output_list, dim=gather_dim).contiguous()
+
+        return wait
+    return torch.cat(output_list, dim=gather_dim).contiguous()
 
 def split_forward_gather_backward(
     input_: torch.Tensor,

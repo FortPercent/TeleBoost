@@ -410,8 +410,6 @@ class SchedulerMixin:
                 round_robin_gradients=False,
                 has_moe_layers=False,
                 fp16_master_weights_and_gradients=False,
-                gradient_accumulation_dtype=torch.bfloat16,
-                communication_data_type=torch.bfloat16,
                 elastic_checkpoint=False,)
         return optimizer
 
