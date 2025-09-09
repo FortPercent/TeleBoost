@@ -24,3 +24,5 @@ logs*
 profile
 .ipynb_checkpoints
 logs/*
+experiment/*
+*.json
