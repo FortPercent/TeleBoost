@@ -917,8 +917,32 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                 for key in loss_dict:
                                     loss_dict_per_time_step[key] = loss_dict_per_time_step.get(
                                         key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
+                                    
+                            current_step_avg_loss = {k: v.clone().detach() / eval_num_microbatches for k, v in loss_dict_per_time_step.items()}
+                            
+                            log_strings = [f'   time_step {time_step}:']
+                            for key, value in current_step_avg_loss.items():
+                                log_strings.append(f'{key} = {value.item():.4f}')
+                            print_rank_last(f'  > eval iteration {iteration} results: ' + ', '.join(log_strings))
                             total_loss_dict[time_step] = loss_dict_per_time_step
+                            
+                            
                     else:
+                        current_step_loss = {}
+                        for loss_dict in loss_dicts:
+                            for key in loss_dict:
+                                current_step_loss[key] = current_step_loss.get(
+                                    key, torch.tensor([0.0], dtype=torch.float, device='cuda')) + loss_dict[key]
+                        
+                        # 在每个评估步骤后打印当前步骤的结果
+                            # 为了打印，需要将loss除以micro-batch的数量来得到平均值
+                        current_step_avg_loss = {k: v.clone().detach() / eval_num_microbatches for k, v in current_step_loss.items()}
+
+                        # 将Tensor转换为Python数值以便打印
+                        log_strings = []
+                        for key, value in current_step_avg_loss.items():
+                            log_strings.append(f'{key} = {value.item():.4f}')
+                        print_rank_last(f'  > eval iteration {iteration} results: ' + ', '.join(log_strings))
                         for loss_dict in loss_dicts:
                             for key in loss_dict:
                                 total_loss_dict[key] = total_loss_dict.get(

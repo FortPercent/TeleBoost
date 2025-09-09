@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
@@ -18,7 +18,7 @@ TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=1
+N_GPU_FOR_TRAIN=2
 N_GPU_FOR_DATA=1
 
 # Single-node config 
@@ -113,12 +113,12 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-log-interval 1
     --tensorboard-queue-size 10
     --log-interval 1 # for terminal infos
-    --save-interval 500
-    --eval-interval 500
+    # --save-interval 500
+    --eval-interval 2
     # --load $CHECKPOINT_PATH_LOAD 
     # --save $CHECKPOINT_PATH_SAVE
-    --eval-iters 20 # sample 20 video to eval
-    --producer-log-level 1 # 1: debug | 2: Info
+    --eval-iters 2 # sample 20 video to eval
+    --producer-log-level 2 # 1: debug | 2: Info
 )
 
 torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
