@@ -127,3 +127,5 @@ torchrun ${DISTRIBUTED_ARGS[@]} ${TRAIN_SCRIPT} \
     ${MOE_ARGS[@]} \
     ${DATA_ARGS[@]}    \
     ${EVAL_AND_LOGGING_ARGS[@]} \
+    ${LORA_CFG[@]} \
+    "$@"
