@@ -192,16 +192,16 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
                                 reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
-                                metrics["train/rewards"] = reward_tensor.batch['rewards'].mean()
-                                new_batch = gen_batch_output.union(reward_tensor)
-                                new_batch.pop(batch_keys=['video_frames'])
-                                metrics["train/log_probs"] = new_batch.batch["log_probs"].mean()                                
-                                del gen_batch_output
+                                gen_batch_output.pop(batch_keys=['video_frames'])
+                                
+                                gen_batch_output = gen_batch_output.union(reward_tensor)
+                                metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
+                                metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()                                
+
                         else:
                             reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
-                            new_batch = gen_batch_output.union(reward_tensor)
-                            new_batch.pop(batch_keys=['video_frames'])
-                            del gen_batch_output
+                            gen_batch_output = gen_batch_output.union(reward_tensor)
+                            gen_batch_output.pop(batch_keys=['video_frames'])
                     # === Updating ===
                     # batch.batch["response_mask"] = compute_response_mask(batch)
 
@@ -233,15 +233,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     with marked_timer("adv", timing_raw):
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
-                        new_batch = compute_advantage(
-                            new_batch,
+                        gen_batch_output = compute_advantage(
+                            gen_batch_output,
                             adv_estimator=self.config.algorithm.adv_estimator,
                             gamma=self.config.algorithm.gamma,
                             lam=self.config.algorithm.lam,
                             num_repeat=self.config.actor_rollout_ref.rollout.n,
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                         )
-                        metrics["train/advantage"] = new_batch.batch['advantages'].mean()
+                        metrics["train/advantage"] = gen_batch_output.batch['advantages'].mean()
 
                     # # update critic
                     # if self.use_critic:
@@ -254,8 +254,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with marked_timer("update_actor", timing_raw):
-                            actor_output = self.actor_rollout_wg.update_actor(new_batch)
-                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                            gen_batch_output = self.actor_rollout_wg.update_actor(gen_batch_output)
+                        actor_output_metrics = reduce_metrics(gen_batch_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
 
                     # validate
