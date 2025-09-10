@@ -570,8 +570,6 @@ class DiffusionRewardModelWorker(RewardModelWorker):
 
     def _build_model(self, config):
         # the following line is necessary
-        from torch.distributed.fsdp import CPUOffload
-        from transformers import AutoConfig, AutoModelForTokenClassification, GPT2Config
 
         use_shm = config.model.get("use_shm", False)
         # download the checkpoint from hdfs
@@ -627,31 +625,24 @@ class DiffusionRewardModelWorker(RewardModelWorker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
-        import itertools
-
-        from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
-
+        
         # Support all hardwares
-        datas=data.pop(
+        data=data.pop(
             batch_keys=['video_frames'],
             non_tensor_batch_keys=["caption"],
         )
-        decoded_image=datas.batch['video_frames']
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        print(decoded_image[0].shape)
-        print("="*100)
+        decoded_image=data.batch['video_frames']
+        decoded_images = decoded_image.chunk(data.batch.batch_size[0], dim=0)
         decoded_images = [x.squeeze(0) for x in decoded_images]
-        caption=datas.non_tensor_batch['caption']
+        caption=data.non_tensor_batch['caption']
         import numpy as np
-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+        batch_caption = np.array_split(caption, data.batch.batch_size[0])
         batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         all_rewards = []  
         self.reward_module.to(device=get_device_id())
         for index, batch_idx in enumerate(batch_indices):
             with torch.no_grad():
-                print("decoded_images shape:", decoded_images[index].shape)
-                print("dtype:", decoded_images[index].dtype)
                 frame = decoded_images[index][:, 0, :, :]  # (C, H, W)
                 # 转换为PIL图像
                 frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
@@ -667,9 +658,10 @@ class DiffusionRewardModelWorker(RewardModelWorker):
                     image_features, text_features = outputs["image_features"], outputs["text_features"]
                     logits_per_image = image_features @ text_features.T
                     hps_score = torch.diagonal(logits_per_image)
-                all_rewards.append(hps_score)
+                all_rewards.append(hps_score.unsqueeze(0))
 
         all_rewards = torch.cat(all_rewards, dim=0)
+
         # all_rewards=all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
             {
@@ -678,10 +670,8 @@ class DiffusionRewardModelWorker(RewardModelWorker):
             batch_size=len(batch_caption)
         )
         self.reward_module.to(torch.device('cpu'))
-
-        non_tensor_batch = data.non_tensor_batch
-
-        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+        print("complete"*100)
+        return DataProto(batch=batch)
 
 
 # ================================= Async related workers =================================
