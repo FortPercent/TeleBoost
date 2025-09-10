@@ -82,6 +82,26 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 torch.arange(data.batch.batch_size[0])[:, None],
                 perms,
             ]
+            
+        # B = data.batch.batch_size[0]  # = 12
+        # # 定义你想要的输出顺序：[1,2,3,1,2,3,1,2,3,1,2,3] 对应原始索引
+        # # 原始数据： [1,1,1,1,  2,2,2,2,  3,3,3,3]
+        # # 索引位置：[0,1,2,3,  4,5,6,7,  8,9,10,11]
+        # # 目标顺序：取第0个1, 第0个2, 第0个3 → 然后第1个1,2,3 → ...
+        # # 所以目标索引是：[0,4,8, 1,5,9, 2,6,10, 3,7,11]
+
+        # # 自动生成这个 permutation
+        # K = 3  # 有3种不同的值
+        # T = 8  # 每个值重复4次
+        # assert B == K * T
+
+        # # 构造 permutation: [0,4,8,1,5,9,2,6,10,3,7,11]
+        # perm = torch.tensor([i * T + j for j in range(T) for i in range(K)])  # 注意：i 是组号，j 是组内位置
+
+        # # 应用到所有 key
+        # for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+        #     if key in data.batch:
+        #         data.batch[key] = data.batch[key][perm]  # 直接按 batch 维度重排
 
         # print(data.batch["timesteps"].shape,type(data.batch["timesteps"]),data.batch["timesteps"][0].shape,type(data.batch["timesteps"][0]),len(data.batch["timesteps"][0].shape[1]))
         train_timesteps = int(len(data.batch["timesteps"][0]) * self.config.timestep_fraction)
@@ -106,169 +126,151 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
-        # assert self.gradient_accumulation ==self.config.ppo_mini_batch_size
+
         # data=data.to("cpu")
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
         
         device = torch.device(f"cuda:{get_device_id()}")
-        torch.cuda.memory._record_memory_history(max_entries=800000)
-        print("self.gradient_accumulation",self.gradient_accumulation)
+
         move_keys = ["latents", "next_latents", "timesteps", "log_probs", "advantages", "sigma_schedule"]
         perms=perms.to(device)
         # log_file = f"/gemini/space/wuxuaner/Dancegrpo/recipe/dancegrpo/log/rank{get_device_id()}"
         metrics = {}
         for batch_idx, data in enumerate(dataloader):
-
-            try:
-                td = data.batch
-                ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
-                # 裁剪后的 CPU 列表（短生命周期）
-                ctxs_cpu  = [td["contexts"][i][:int(ctx_lens[i])]   for i in range(len(data))]
-                nctx_cpu  = [td["null_context"][i]                  for i in range(len(data))]
+            td = data.batch
+            ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
+            # 裁剪后的 CPU 列表（短生命周期）
+            ctxs_cpu  = [td["contexts"][i][:int(ctx_lens[i])]   for i in range(len(data))]
+            nctx_cpu  = [td["null_context"][i]                  for i in range(len(data))]
+            
+            td = data.pop(batch_keys=move_keys).to(device)
+            # for k in move_keys:
+                # print(k,device)
+                # td[k] = td[k].to(device)
+                # print("after",k,td[k].device)
                 
-                td = data.pop(batch_keys=move_keys).to(device)
-                # for k in move_keys:
-                    # print(k,device)
-                    # td[k] = td[k].to(device)
-                    # print("after",k,td[k].device)
-                    
-                ctxs  = [c.to(device) for c in ctxs_cpu]
-                nctxs = [c.to(device) for c in nctx_cpu]
-                del ctxs_cpu, nctx_cpu
-                # mini_batch = data
-                # # split batch into micro_batches
-                # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
-
-                self.actor_optimizer.zero_grad()
-                # batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
-                # batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
-
-                # for i in range(len(data)):
-                #     orig_lengths =int(data.batch['context_orig_lengths'][i])
-                #     assert batch_contexts[i].shape[0] >= orig_lengths, \
-                #         f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
-                #     batch_contexts[i] = batch_contexts[i][:orig_lengths]
-                    
-                for step_idx in range(train_timesteps):
-                    clip_range = self.config.clip_range
-                    adv_clip_max = self.config.adv_clip_max
-                    latent_t  = td.batch["latents"][:, step_idx]
-                    nlatent_t = td.batch["next_latents"][:, step_idx]
-                    t_t       = td.batch["timesteps"][:, step_idx]
-                    sigma_0   = td.batch["sigma_schedule"][0]  # 若每样本不同 schedule，这里改成按样本取
-          
-                    latent_shape = td.batch["latents"][:, step_idx].shape
-                    seq_len = math.ceil(
-                        (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
-                    )
-        
-        
-                    new_log_probs = self.grpo_wan_one_step(
-                        latent_t,
-                        nlatent_t,
-                        ctxs, 
-                        nctxs,
-                        seq_len,
-                        self.actor_module,
-                        t_t,
-                        perms[batch_idx][step_idx],
-                        sigma_0, 
-                    )
-                    # if step_idx==2:
-                    #     from datetime import datetime
-                    #     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-                    #     file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}_{batch_idx}_step_idx_{step_idx}.pickle"
-                    #     # save record:
-                    #     torch.cuda.memory._dump_snapshot(file_name)
-                    #     # Stop recording memory snapshot history:
-                    #     torch.cuda.memory._record_memory_history(enabled=None)
-
-                    # print(new_log_probs)
-                    # exit(0)
-                    # 其余训练逻辑保持不变...
-                    advantages = torch.clamp(
-                        td.batch["advantages"],
-                        -adv_clip_max,
-                        adv_clip_max,
-                    )
-    
-                    ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
-                    clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
-                    clip_count = clipped_mask.sum().detach().item()
-                    clip_fraction = clipped_mask.float().mean().detach().item()                    
-
-                    # ratio = torch.exp(new_log_probs - current_log_probs)
-                    
-                    unclipped_loss = -advantages * ratio
-                    clipped_loss = -advantages * torch.clamp(
-                        ratio,
-                        1.0 - clip_range,
-                        1.0 + clip_range,
-                    )
-                    
-                    loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-                    data = {
-                        "actor/clip_fraction": clip_fraction,
-                        "actor/clip_count": clip_count,
-                        "actor/loss": loss.detach().item(),
-                        # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
-                        # "actor/preference_mean": preference.mean().detach().item(),
-                    }
-                    from verl.utils.py_functional import append_to_dict
-                    append_to_dict(metrics, data)
-                    loss.backward()
-    
-                    avg_loss = loss.detach()
-    
-                    torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
-                    
-                    # # 查看显存占用
-                    # import gc
-
-                    # # 遍历当前存活的所有 Tensor
-                    # for obj in gc.get_objects():
-                    #     try:
-                    #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    #             print(f"Tensor shape: {tuple(obj.shape)}, dtype: {obj.dtype}, device: {obj.device}, size: {obj.numel() * obj.element_size() / 1024**2:.2f} MB")
-                    #     except Exception as e:
-                    #         pass
-   
-                    print("batch_idx",batch_idx)
-                    print("+"*100)
-                    print(f"Allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
-                    print(f"Reserved:  {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
-                    print(f"Max Allocated: {torch.cuda.max_memory_allocated(0) / 1024**3:.2f} GB")
-
-                    # with open
-                    # if batch_idx==3:
-                    #     exit(0)
-                if (batch_idx + 1) % self.gradient_accumulation == 0:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
-                    data = {"actor/grad_norm": grad_norm.detach().item(),}
-                    append_to_dict(metrics, data)
-                    self.actor_optimizer.step()
-                    self.actor_optimizer.zero_grad()
-                    
-                del ctxs, nctxs
-                for k in move_keys:
-                    if k in td: 
-                        del td[k]
-                del td, data
-                torch.cuda.empty_cache()
+            ctxs  = [c.to(device) for c in ctxs_cpu]
+            nctxs = [c.to(device) for c in nctx_cpu]
+            del ctxs_cpu, nctx_cpu
+            # mini_batch = data
+            # # split batch into micro_batches
+            # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
+            self.actor_optimizer.zero_grad()
+            # batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
+            # batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
+            # for i in range(len(data)):
+            #     orig_lengths =int(data.batch['context_orig_lengths'][i])
+            #     assert batch_contexts[i].shape[0] >= orig_lengths, \
+            #         f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
+            #     batch_contexts[i] = batch_contexts[i][:orig_lengths]
                 
-            except Exception as e:
-                print(f"[RANK].Error:{e}")
-                # record
-                from datetime import datetime
-                timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-                file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}.pickle"
-                # save record:
-                torch.cuda.memory._dump_snapshot(file_name)
-                # Stop recording memory snapshot history:
-                torch.cuda.memory._record_memory_history(enabled=None)
-                import traceback
-                traceback.print_exc()
-                exit(0)
+            for step_idx in range(train_timesteps):
+                clip_range = self.config.clip_range
+                adv_clip_max = self.config.adv_clip_max
+                latent_t  = td.batch["latents"][:, step_idx]
+                nlatent_t = td.batch["next_latents"][:, step_idx]
+                t_t       = td.batch["timesteps"][:, step_idx]
+                sigma_0   = td.batch["sigma_schedule"][0]  # 若每样本不同 schedule，这里改成按样本取
+        
+                latent_shape = td.batch["latents"][:, step_idx].shape
+                seq_len = math.ceil(
+                    (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
+                )
+    
+    
+                new_log_probs = self.grpo_wan_one_step(
+                    latent_t,
+                    nlatent_t,
+                    ctxs, 
+                    nctxs,
+                    seq_len,
+                    self.actor_module,
+                    t_t,
+                    perms[batch_idx][step_idx],
+                    sigma_0, 
+                )
+                # if step_idx==2:
+                #     from datetime import datetime
+                #     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+                #     file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}_{batch_idx}_step_idx_{step_idx}.pickle"
+                #     # save record:
+                #     torch.cuda.memory._dump_snapshot(file_name)
+                #     # Stop recording memory snapshot history:
+                #     torch.cuda.memory._record_memory_history(enabled=None)
+                # print(new_log_probs)
+                # exit(0)
+                # 其余训练逻辑保持不变...
+                advantages = torch.clamp(
+                    td.batch["advantages"],
+                    -adv_clip_max,
+                    adv_clip_max,
+                )
+
+                ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
+                clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
+                clip_count = clipped_mask.sum().detach().item()
+                clip_fraction = clipped_mask.float().mean().detach().item()                     
+                
+                print("ratio",ratio)
+                print("="*100)
+
+                # ratio = torch.exp(new_log_probs - current_log_probs)
+                
+                unclipped_loss = -advantages * ratio
+                clipped_loss = -advantages * torch.clamp(
+                    ratio,
+                    1.0 - clip_range,
+                    1.0 + clip_range,
+                )
+                # temp = torch.maximum(unclipped_loss, clipped_loss)
+                
+                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+                data = {
+                    "actor/clip_count": clip_count,
+                    "actor/clip_fraction": clip_fraction,
+                    "actor/loss": loss.detach().item(),
+                    # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
+                    # "actor/preference_mean": preference.mean().detach().item(),
+                }
+                from verl.utils.py_functional import append_to_dict
+                append_to_dict(metrics, data)
+                loss.backward()
+
+                avg_loss = loss.detach()
+
+                torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+                
+                # # 查看显存占用
+                # import gc
+                # # 遍历当前存活的所有 Tensor
+                # for obj in gc.get_objects():
+                #     try:
+                #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                #             print(f"Tensor shape: {tuple(obj.shape)}, dtype: {obj.dtype}, device: {obj.device}, size: {obj.numel() * obj.element_size() / 1024**2:.2f} MB")
+                #     except Exception as e:
+                #         pass
+
+                # print("batch_idx",batch_idx)
+                # print("+"*100)
+                # print(f"Allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+                # print(f"Reserved:  {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+                # print(f"Max Allocated: {torch.cuda.max_memory_allocated(0) / 1024**3:.2f} GB")
+                # with open
+                # if batch_idx==3:
+                #     exit(0)
+            if (batch_idx + 1) % self.gradient_accumulation == 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                data = {"actor/grad_norm": grad_norm.detach().item(),}
+                append_to_dict(metrics, data)
+                
+            del ctxs, nctxs
+            for k in move_keys:
+                if k in td: 
+                    del td[k]
+            del td, data
+            torch.cuda.empty_cache()
+                
+            
         return metrics
 
     def grpo_wan_one_step(
