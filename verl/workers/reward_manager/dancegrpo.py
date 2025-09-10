@@ -52,10 +52,10 @@ class AIGCRewardManager:
             else:
                 return data.batch["rm_scores"]
 
-        reward_tensor = torch.zeros_like(data.batch["video_frames"], dtype=torch.float32)
-        reward_extra_info = defaultdict(list)
+        # reward_tensor = torch.zeros_like(data.batch["video_frames"], dtype=torch.float32)
+        # reward_extra_info = defaultdict(list)
 
-        already_print_data_sources = {}
+        # already_print_data_sources = {}
         
         all_rewards = []
 
