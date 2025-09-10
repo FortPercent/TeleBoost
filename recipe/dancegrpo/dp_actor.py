@@ -21,6 +21,11 @@ __all__ = ["DiffusionDataParallelPPOActor"]
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
+def fprint(*args, **kwargs):
+    text = " ".join(str(a) for a in args)
+    with open("output.log", "a", encoding="utf-8") as f:
+        f.write(text + "\n")
+
 # hook 函数：保存输入数据和模块名
 def save_input_hook(name):
     def hook(module, input, output):
@@ -101,6 +106,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
+        # assert self.gradient_accumulation ==self.config.ppo_mini_batch_size
         # data=data.to("cpu")
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
         
@@ -187,6 +193,10 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     )
     
                     ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
+                    clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
+                    clip_count = clipped_mask.sum().detach().item()
+                    clip_fraction = clipped_mask.float().mean().detach().item()                    
+
                     # ratio = torch.exp(new_log_probs - current_log_probs)
                     
                     unclipped_loss = -advantages * ratio
@@ -195,11 +205,11 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                         1.0 - clip_range,
                         1.0 + clip_range,
                     )
-                    temp = torch.maximum(unclipped_loss, clipped_loss)
                     
                     loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
                     data = {
-                        "response_length/clip_ratio": torch.mean(torch.eq(temp, clipped_loss).float()).item(),
+                        "actor/clip_fraction": clip_fraction,
+                        "actor/clip_count": clip_count,
                         "actor/loss": loss.detach().item(),
                         # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
                         # "actor/preference_mean": preference.mean().detach().item(),
@@ -233,7 +243,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     # if batch_idx==3:
                     #     exit(0)
                 if (batch_idx + 1) % self.gradient_accumulation == 0:
-                    # grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                    data = {"actor/grad_norm": grad_norm.detach().item(),}
+                    append_to_dict(metrics, data)
                     self.actor_optimizer.step()
                     self.actor_optimizer.zero_grad()
                     
