@@ -295,8 +295,8 @@ class DistDataProducer:
             train_data_count = self.args.eval_interval
             eval_data_count = self.args.eval_iters
             first_consumer = self.comm_pairs[0].consumer
-            num_sended_in_cycle = self.sended_count[TRAIN_MODE][first_consumer] % (train_data_count+eval_data_count)
-            mode_to_process = TRAIN_MODE if num_sended_in_cycle < train_data_count else VALID_MODE
+            num_sended_in_cycle = self.sended_count[TRAIN_MODE][first_consumer] % ((train_data_count+eval_data_count)*len(self.merged_comm_pairs))
+            mode_to_process = TRAIN_MODE if num_sended_in_cycle < train_data_count*len(self.merged_comm_pairs) else VALID_MODE
         else:
             mode_to_process = TRAIN_MODE
 
