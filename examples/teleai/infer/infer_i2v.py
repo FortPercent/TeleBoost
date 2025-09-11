@@ -8,12 +8,12 @@ from pathlib import Path
 
 from prompts.HardPrompt import PROMPT_CONFIGS
 from prompts.i2v150Prompt import PROMPT_CONFIGS
+from prompts.flf2vPrompt import PROMPT_CONFIGS
 
+CKPT_PATH = "/nvfile-heatstorage/AIGC_H100/shanggonghu/checkpints/teletron/10B_multimask_368p_pass_2/iter_0010000/mp_rank_00/model_optim_rng.pt" # ema_model.pt
+SAVEDIR = "/nvfile-heatstorage/AIGC_H100/shanggonghu/project/text2video/Teletron_0905/examples/teleai/infer/results"
 
-CKPT_PATH = "/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/lgc/merged_model_baseline/iter_0008000/mp_rank_00/model_optim_rng.pt" # ema_model.pt
-SAVEDIR = "/nvfile-heatstorage/AIGC_H100/shanggonghu/project/text2video/Teletron_latest/examples/teleai/infer/results"
-
-GPU_IDS = [0, 1, 2, 3, 4, 5, 6, 7]
+GPU_IDS = [0]
 
 DEFAULT_CONFIG = {
     "height": 528,
@@ -32,7 +32,7 @@ PIPELINE_CONFIG = dict(
         dit=dict(
             path=CKPT_PATH, # ema_model.pt
             config=dict(
-                has_image_input=False, # t2v:False i2v:True i2v Wan2.2:False
+                has_image_input=True, # t2v:False i2v:True i2v Wan2.2:False
                 patch_size=[1, 2, 2],
                 in_dim=36, # t2v:16 i2v:36
                 dim=5120, # 1.3B:1536 10B:5120 14B:5120
@@ -41,7 +41,7 @@ PIPELINE_CONFIG = dict(
                 text_dim=4096,
                 out_dim=16,
                 num_heads=40, # 1.3B:12 10B:40 14B:40
-                num_layers=40, # 1.3B:30 10B:30 14B:40
+                num_layers=30, # 1.3B:30 10B:30 14B:40
                 eps=1e-6,
                 has_image_pos_emb=False, 
             ),
@@ -109,12 +109,10 @@ def generate_video_filename(
 
 def prepare_reference_images(config: InferenceConfig) -> List[Image.Image]:
     ref_images = []
-    is_vertical = []
-    for _, img_path in config.ref_images.items():
+    for frame_id, img_path in config.ref_images.items():
         original_img = Image.open(img_path).convert("RGB")
-        ref_images.append(original_img)
-        is_vertical.append(original_img.height > original_img.width)
-    return ref_images, is_vertical
+        ref_images.append((frame_id, original_img))
+    return ref_images
 
 def load_pipeline(
     device: torch.device,
@@ -151,12 +149,12 @@ def inference_worker(
                 print(f"[Rank {rank}] 文件已存在，跳过: {save_path}")
                 continue
                             
-            ref_images, is_vertical = prepare_reference_images(config)
+            ref_images = prepare_reference_images(config)
             # 执行推理
             result = pipe(
                 prompt=config.prompt,
                 negative_prompt=config.negative_prompt,
-                input_image=ref_images[0],
+                ref_images=ref_images,
                 height=config.height,
                 width=config.width,
                 num_frames=config.num_frames,
