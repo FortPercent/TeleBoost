@@ -129,12 +129,10 @@ def generate_video_filename(
 
 def prepare_reference_images(config: InferenceConfig) -> List[Image.Image]:
     ref_images = []
-    is_vertical = []
-    for _, img_path in config.ref_images.items():
+    for frame_id, img_path in config.ref_images.items():
         original_img = Image.open(img_path).convert("RGB")
-        ref_images.append(original_img)
-        is_vertical.append(original_img.height > original_img.width)
-    return ref_images, is_vertical
+        ref_images.append((frame_id, original_img))
+    return ref_images
 
 def load_pipeline(
     device: torch.device,
@@ -172,12 +170,12 @@ def inference_worker(
                 print(f"[Rank {rank}] 文件已存在，跳过: {save_path}")
                 continue
                             
-            ref_images, is_vertical = prepare_reference_images(config)
+            ref_images = prepare_reference_images(config)
             # 执行推理
             result = pipe(
                 prompt=config.prompt,
                 negative_prompt=config.negative_prompt,
-                input_image=ref_images[0],
+                ref_images=ref_images,
                 height=config.height,
                 width=config.width,
                 num_frames=config.num_frames,

@@ -60,14 +60,22 @@ class WanVideoI2VMoEPipeline(BasePipeline):
         print(f"加载 high noise DiT 模型... {high_noise_model_config.get('path')}")
         with torch.device('meta'):
             self.high_noise_model = TeleaiModel(**high_noise_model_config.get("config"))
-        self.high_noise_model.load_state_dict(torch.load(high_noise_model_config.get("path"), map_location='cpu', weights_only=False)["model"], strict=True, assign=True)
+        if "ema" in high_noise_model_config.get("path"):
+            state_static = torch.load(high_noise_model_config.get("path"), map_location='cpu', weights_only=False)[0]
+        else:
+            state_static = torch.load(high_noise_model_config.get("path"), map_location='cpu', weights_only=False)["model"]
+        self.high_noise_model.load_state_dict(state_static, strict=True, assign=True)
         self.high_noise_model.to(device="cpu", dtype=torch.bfloat16).eval().requires_grad_(False)
 
         low_noise_model_config = self.model_config.get("low_noise_model", None)
         print(f"加载 low noise DiT 模型... {low_noise_model_config.get('path')}")
         with torch.device('meta'):
             self.low_noise_model = TeleaiModel(**low_noise_model_config.get("config"))
-        self.low_noise_model.load_state_dict(torch.load(low_noise_model_config.get("path"), map_location='cpu', weights_only=False)["model"], strict=True, assign=True)
+        if "ema" in low_noise_model_config.get("path"):
+            state_static = torch.load(low_noise_model_config.get("path"), map_location='cpu', weights_only=False)[0]
+        else:
+            state_static = torch.load(low_noise_model_config.get("path"), map_location='cpu', weights_only=False)["model"]
+        self.low_noise_model.load_state_dict(state_static, strict=True, assign=True)
         self.low_noise_model.to(device="cpu", dtype=torch.bfloat16).eval().requires_grad_(False)
 
         # encoder config
@@ -105,8 +113,8 @@ class WanVideoI2VMoEPipeline(BasePipeline):
         self.prompter.fetch_tokenizer(tokenizer_path)
 
         if self.encoder_model_config.get("image_encoder", None) is not None and self.high_noise_model.has_image_input:
-            print(f"加载 Image Encoder 模型... {image_encoder_path}")
             image_encoder_path = self.encoder_model_config.get("image_encoder", None).get("path", None)
+            print(f"加载 Image Encoder 模型... {image_encoder_path}")
             self.image_encoder = TeleaiImageEncoder().to(device="cpu", dtype=torch.bfloat16).eval().requires_grad_(False)
             self.image_encoder.model.load_state_dict(torch.load(image_encoder_path, map_location='cpu', weights_only=False), strict=False)
         else:
@@ -120,27 +128,33 @@ class WanVideoI2VMoEPipeline(BasePipeline):
     def encode_prompt(self, prompt, positive=True):
         prompt_emb = self.prompter.encode_prompt(prompt, positive=positive, device=self.device)
         return {"context": prompt_emb}
-    
-    def encode_image(self, image, num_frames, height, width, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
-        image = self.preprocess_image(resize_and_crop(image, (width, height))).to(self.device)
-        if self.high_noise_model.has_image_input:
-            clip_context = self.image_encoder.encode_image([image])
-            clip_context = clip_context.to(dtype=self.torch_dtype, device=self.device)
-        
-        msk = torch.ones(1, num_frames, height//8, width//8, device=self.device)
-        msk[:, 1:] = 0
+
+    def encode_ref_images(self, ref_images, num_frames, height, width, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
+        ref_images = [(int(frame_id), self.preprocess_image(resize_and_crop(image, (width, height))).to(self.device)) for frame_id, image in ref_images]
+        ref_video = torch.zeros(1, num_frames, 3, height, width)
+        for frame_id, ref_image in ref_images:
+            ref_video[:, frame_id] = ref_image.unsqueeze(0)
+        ref_video = ref_video.to(dtype=self.torch_dtype, device=self.device).permute(0, 2, 1, 3, 4)
+        ref_latents = self.vae.encode(
+            ref_video, device=self.device, 
+            tiled=tiled, tile_size=tile_size, tile_stride=tile_stride
+        ).to(dtype=self.torch_dtype, device=self.device)
+
+        msk = torch.zeros(1, num_frames, height//8, width//8, device=self.device)
+        for frame_id, _ in ref_images:
+            msk[:, frame_id] = 1
         msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
         msk = msk.view(1, msk.shape[1] // 4, 4, height//8, width//8)
-        msk = msk.transpose(1, 2)[0]
-        
-        vae_input = torch.concat([image.transpose(0, 1), torch.zeros(3, num_frames-1, height, width).to(image.device)], dim=1)
-        y = self.vae.encode([vae_input.to(dtype=self.torch_dtype, device=self.device)], device=self.device, 
-                            tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)[0]
-        y = y.to(dtype=self.torch_dtype, device=self.device)
-        y = torch.concat([msk, y])
-        y = y.unsqueeze(0)
-        y = y.to(dtype=self.torch_dtype, device=self.device)
-        if self.high_noise_model.has_image_input:
+        msk = msk.transpose(1, 2).to(dtype=self.torch_dtype, device=self.device)
+        y = torch.concat([msk, ref_latents], dim=1)
+
+        if self.dit.has_image_input:
+            assert ref_images[0][0] == 0 # first frame
+            clip_context = self.image_encoder.encode_image(
+                [ref_images[0][1].to(dtype=self.torch_dtype, device=self.device)]
+            ).to(dtype=self.torch_dtype, device=self.device)
+
+        if self.dit.has_image_input:
             return {"clip_feature": clip_context, "y": y}
         else:
             return {"y": y}
@@ -160,7 +174,7 @@ class WanVideoI2VMoEPipeline(BasePipeline):
         self,
         prompt,
         negative_prompt="",
-        input_image=None, # PIL Image
+        ref_images=None, # PIL Image
         denoising_strength=1.0,
         seed=None,
         rand_device="cpu",
@@ -182,8 +196,8 @@ class WanVideoI2VMoEPipeline(BasePipeline):
         self.scheduler.set_timesteps(num_inference_steps, denoising_strength=denoising_strength, shift=sigma_shift)
 
         target_area = width * height
-        if input_image is not None:
-            original_width, original_height = input_image.size
+        if ref_images is not None:
+            original_width, original_height = ref_images[0][1].size
             ratio = original_height / original_width
             new_width, new_height = math.sqrt(target_area / ratio), math.sqrt(target_area * ratio)
             width = int((new_width // 16) * 16)
@@ -204,9 +218,9 @@ class WanVideoI2VMoEPipeline(BasePipeline):
             prompt_emb_nega = self.encode_prompt(negative_prompt, positive=False)
             
         # Encode image
-        if input_image is not None:
+        if ref_images is not None:
             self.load_models_to_device(["vae"]) if self.image_encoder is None else self.load_models_to_device(["vae", "image_encoder"])
-            image_emb = self.encode_image(input_image, num_frames, height, width) # without tilling
+            image_emb = self.encode_ref_images(ref_images, num_frames, height, width) # without tilling
 
         # Denoise
         self.load_models_to_device(["high_noise_model"])
