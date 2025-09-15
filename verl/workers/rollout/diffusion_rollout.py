@@ -78,9 +78,10 @@ class DiffusionRollout(BaseRollout):
         batch_indices = torch.chunk(torch.arange(B), B // self.config.rollout.ulysses_sequence_parallel_size)
         
         grpo_sample = True
-        progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
+        
         self.vae_module.model.to(get_device_id())
         for index, batch_idx in enumerate(batch_indices):
+            progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
             batch_captions = [caption[i] for i in batch_idx]
             batch_contexts = [context[i].to(get_device_id()) for i in batch_idx]
             batch_neg_context = [neg_context[i].to(get_device_id()) for i in batch_idx]
@@ -154,102 +155,102 @@ class DiffusionRollout(BaseRollout):
                 #     f.write(f"{video_id}\n\n")
                 all_video_ids.append(video_id)
                 # 创建输出目录
-                os.makedirs("./videos", exist_ok=True)
-                os.makedirs("./images", exist_ok=True)
-                def save_video_and_prompt(video_frames, rank, index):
-                    """
-                    保存视频文件和对应的prompt文本
-                    Args:
-                        video_frames: torch.Tensor, shape (C, T, H, W), 范围 [0, 1]
-                        caption: str, 对应的文本prompt
-                        rank: int, 当前进程的rank
-                        index: int, 当前batch的索引
-                        args: 配置参数
-                    """
-                    import time
-                    from datetime import datetime
+                # os.makedirs("./videos", exist_ok=True)
+                # os.makedirs("./images", exist_ok=True)
+                # def save_video_and_prompt(video_frames, rank, index):
+                #     """
+                #     保存视频文件和对应的prompt文本
+                #     Args:
+                #         video_frames: torch.Tensor, shape (C, T, H, W), 范围 [0, 1]
+                #         caption: str, 对应的文本prompt
+                #         rank: int, 当前进程的rank
+                #         index: int, 当前batch的索引
+                #         args: 配置参数
+                #     """
+                #     import time
+                #     from datetime import datetime
 
-                    import cv2
-                    import numpy as np
-                    from PIL import Image
+                #     import cv2
+                #     import numpy as np
+                #     from PIL import Image
 
-                    # 获取当前时间戳
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                #     # 获取当前时间戳
+                #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     
-                    # 确保video_frames是正确的格式 (C, T, H, W)
-                    if video_frames.dim() == 4:
-                        C, T, H, W = video_frames.shape
+                #     # 确保video_frames是正确的格式 (C, T, H, W)
+                #     if video_frames.dim() == 4:
+                #         C, T, H, W = video_frames.shape
                         
-                        # 转换为numpy格式 (T, H, W, C)
-                        video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
-                        video_np = (video_np * 255).astype(np.uint8)
+                #         # 转换为numpy格式 (T, H, W, C)
+                #         video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+                #         video_np = (video_np * 255).astype(np.uint8)
                         
-                        # 如果是单通道，扩展为3通道
-                        if C == 1:
-                            video_np = np.repeat(video_np, 3, axis=-1)
+                #         # 如果是单通道，扩展为3通道
+                #         if C == 1:
+                #             video_np = np.repeat(video_np, 3, axis=-1)
                         
-                        # 1. 保存第一帧图像
-                        first_frame = video_np[0]  # (H, W, C)
+                #         # 1. 保存第一帧图像
+                #         first_frame = video_np[0]  # (H, W, C)
                         
-                        # 保存第一帧为PNG图像
-                        if C >= 3:
-                            first_frame_pil = Image.fromarray(first_frame)
-                        else:
-                            first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
+                #         # 保存第一帧为PNG图像
+                #         if C >= 3:
+                #             first_frame_pil = Image.fromarray(first_frame)
+                #         else:
+                #             first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
                         
-                        image_filename = f"wan_frame_rank{rank}_batch{index}_{batch_captions[0]}.png"
-                        image_path = os.path.join("./inference_demo/output", image_filename)
+                #         image_filename = f"wan_frame_rank{rank}_batch{index}_{batch_captions[0]}.png"
+                #         image_path = os.path.join("./inference_demo/output", image_filename)
                         
-                        try:
-                            # first_frame_pil.save(image_path)
-                            # print(f"First frame saved: {image_path}")
-                            print("skip image save")
-                        except Exception as e:
-                            print(f"Error saving first frame {image_path}: {e}")
+                #         try:
+                #             # first_frame_pil.save(image_path)
+                #             # print(f"First frame saved: {image_path}")
+                #             print("skip image save")
+                #         except Exception as e:
+                #             print(f"Error saving first frame {image_path}: {e}")
 
-                        # 保存视频
-                        video_filename = f"wan_video_rank{rank}_batch{index}_{timestamp}_{batch_captions[0]}.mp4"
-                        video_path = os.path.join("./videos/output", video_filename)
-                        print(video_path)
-                        # exit(0)
-                        # video_paths = []
-                        try:
-                            # 使用opencv保存视频
-                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                            # fps = args.video_fps if hasattr(args, 'video_fps') else 8  # 默认8fps
-                            fps = 5
-                            out = cv2.VideoWriter(video_path, fourcc, fps, (W, H))
+                #         # 保存视频
+                #         video_filename = f"wan_video_rank{rank}_batch{index}_{timestamp}_{batch_captions[0]}.mp4"
+                #         video_path = os.path.join("./videos/output", video_filename)
+                #         print(video_path)
+                #         # exit(0)
+                #         # video_paths = []
+                #         try:
+                #             # 使用opencv保存视频
+                #             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                #             # fps = args.video_fps if hasattr(args, 'video_fps') else 8  # 默认8fps
+                #             fps = 5
+                #             out = cv2.VideoWriter(video_path, fourcc, fps, (W, H))
                             
-                            for t in range(T):
-                                frame = video_np[t]  # (H, W, C)
-                                # OpenCV使用BGR格式
-                                if C == 3:
-                                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                                else:
-                                    frame_bgr = frame
-                                out.write(frame_bgr)
+                #             for t in range(T):
+                #                 frame = video_np[t]  # (H, W, C)
+                #                 # OpenCV使用BGR格式
+                #                 if C == 3:
+                #                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                #                 else:
+                #                     frame_bgr = frame
+                #                 out.write(frame_bgr)
                             
-                            out.release()
-                            print(f"Video saved: {video_path}")
-                            # video_paths.append(video_path)
+                #             out.release()
+                #             print(f"Video saved: {video_path}")
+                #             # video_paths.append(video_path)
                             
-                        except Exception as e:
-                            print(f"Error saving video {video_path}: {e}")
-                            # exit(0)
-                            # 如果视频保存失败，至少保存第一帧作为图像
-                            first_frame = video_np[0]  # (H, W, C)
-                            if C == 3:
-                                first_frame_pil = Image.fromarray(first_frame)
-                            else:
-                                first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
+                #         except Exception as e:
+                #             print(f"Error saving video {video_path}: {e}")
+                #             # exit(0)
+                #             # 如果视频保存失败，至少保存第一帧作为图像
+                #             first_frame = video_np[0]  # (H, W, C)
+                #             if C == 3:
+                #                 first_frame_pil = Image.fromarray(first_frame)
+                #             else:
+                #                 first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
                             
-                            image_filename = f"wan_frame_rank{rank}_batch{index}_{timestamp}.png"
-                            image_path = os.path.join("./images", image_filename)
-                            first_frame_pil.save(image_path)
-                            # print(f"First frame saved as image: {image_path}")
-                        return video_path  # 返回所有video_path构成的列表 video_paths                    
-                    else:
-                        print(f"Unexpected video_frames shape: {video_frames.shape}")
+                #             image_filename = f"wan_frame_rank{rank}_batch{index}_{timestamp}.png"
+                #             image_path = os.path.join("./images", image_filename)
+                #             first_frame_pil.save(image_path)
+                #             # print(f"First frame saved as image: {image_path}")
+                #         return video_path  # 返回所有video_path构成的列表 video_paths                    
+                #     else:
+                #         print(f"Unexpected video_frames shape: {video_frames.shape}")
             
                 # local_rank = int(os.environ["LOCAL_RANK"])
                 # # 保存视频
@@ -291,7 +292,7 @@ class DiffusionRollout(BaseRollout):
                 "null_context":neg_context,
                 "latents": latents,
                 "next_latents": next_latents,
-                "log_probs": all_log_probs,  # we will recompute old log prob with actor
+                "log_probs": all_log_probs,
                 "video_frames": all_video_frames,
                 "sigma_schedule": sigma_schedule,
                 'timesteps':timesteps[:, :-1]
@@ -336,6 +337,7 @@ class DiffusionRollout(BaseRollout):
                 with torch.autocast("cuda", torch.bfloat16):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
                     # transformer.to(device)
+                    print("in rollout latents norm: i", i, latents[0].norm().item())
                     pred_cond = transformer(
                         x=latents,  # [(16, 7, 64, 64)]
                         t=timestep_cond,

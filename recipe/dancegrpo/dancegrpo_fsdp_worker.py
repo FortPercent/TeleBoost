@@ -492,12 +492,12 @@ class QwenRewardModelWorker(RewardModelWorker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="brown")
-    def compute_rm_score(self, data: DataProto):
+    def compute_rm_score(self, datas: DataProto):
         # from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
-        datas = data.pop(
-                batch_keys=['video_frames'],
-                non_tensor_batch_keys=["caption","video_ids"],
-            )
+        # datas = data.pop(
+        #         # batch_keys=['video_frames'],
+        #         non_tensor_batch_keys=["caption","video_ids"],
+        #     )
             
         datas = datas.to(get_device_id())
         #TODO
@@ -553,7 +553,7 @@ class QwenRewardModelWorker(RewardModelWorker):
                 batch_size = len(batch_ids)
             )
             
-            non_tensor_batch = data.non_tensor_batch
+            non_tensor_batch = datas.non_tensor_batch
             batch_reward = DataProto(batch=batch, non_tensor_batch = non_tensor_batch)
             batch_reward = self.reward_rollout_sharding_manager.postprocess_data(batch_reward)
             # with open('/gemini/space/ljm/Dancegrpo/videos/my_file.txt', 'a', encoding='utf-8') as f:
