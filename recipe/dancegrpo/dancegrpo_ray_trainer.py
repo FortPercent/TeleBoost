@@ -199,8 +199,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         if self.use_rm:
                             # Calculate the HPS 自动混合精度计算
                             with torch.amp.autocast('cuda'):
-                                reward_tensor = self.rm_wg.compute_rm_score(gen_batch_output)
-                                gen_batch_output.pop(batch_keys=['video_frames'])
+                                if self.config.reward_model.type=="qwen":
+                                    reward_batch_output=gen_batch_output.select(
+                                        batch_keys=['null_context'],
+                                        non_tensor_batch_keys=["caption","video_ids"])
+                                elif self.config.reward_model.type=="single":
+                                    reward_batch_output=gen_batch_output
+                    
+                                reward_tensor = self.rm_wg.compute_rm_score(reward_batch_output)
+                                gen_batch_output.pop(batch_keys=['video_frames'],non_tensor_batch_keys=["caption","video_ids"])
                                 
                                 gen_batch_output = gen_batch_output.union(reward_tensor)
                                 metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
