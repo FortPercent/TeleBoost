@@ -90,6 +90,7 @@ config = dict(
                     tile_size=(34, 34),
                     tile_stride=(18, 16),
                 ),
+                torch_compile=False,
             ),
             text_encoder=dict(
                 path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
