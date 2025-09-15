@@ -598,10 +598,10 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         rollout_name = self.config.rollout.name
         if self.config.type=="diffusion":  #用的是这个
             from verl.workers.rollout import DiffusionRollout
-            from verl.workers.sharding_manager.base import BaseShardingManager
+            from verl.workers.sharding_manager.diffusion import DiffusionBaseShardingManager
 
             rollout = DiffusionRollout(module=self.actor_module_fsdp, config=self.config)
-            rollout_sharding_manager = BaseShardingManager()
+            rollout_sharding_manager = DiffusionBaseShardingManager(module=self.actor_module_fsdp,inference_engine=None,model_config=self.actor_model_config,offload_param=self._is_offload_param)
             #TODO
         elif rollout_name == "hf":
             from verl.workers.rollout import HFRollout
