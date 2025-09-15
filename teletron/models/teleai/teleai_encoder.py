@@ -65,6 +65,7 @@ class TeleaiEncoder(BaseEncoder):
         self.vae_path = encoder_model_config.get("vae", None).get("path", None)
         self.vae_type = encoder_model_config.get("vae", None).get("type", "TeleaiVideoVAE_2_1")
         self.tiler_kwargs = encoder_model_config.get("vae", None).get("tiler_kwargs", {})
+        self.vae_compile = encoder_model_config.get("vae", None).get("torch_compile", False)
         if self.tiler_kwargs is None:
             self.tiler_kwargs = dict(
                 tiled=False,
@@ -78,6 +79,7 @@ class TeleaiEncoder(BaseEncoder):
             self.image_encoder_path = encoder_model_config.get("image_encoder", None).get("path", None)
         else:
             self.image_encoder_path = None
+        self.image_encoder_compile = encoder_model_config.get("image_encoder", None).get("torch_compile", False)
         
         if encoder_model_config.get("depth_model", None) is not None:
             self.depth_model_path = encoder_model_config.get("depth_model", None).get("path", None)
@@ -101,6 +103,8 @@ class TeleaiEncoder(BaseEncoder):
         print(f"加载 VAE 模型... {self.vae_path}")
         if self.vae_type == "TeleaiVideoVAE_2_1":
             self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            if self.vae_compile:
+                self.vae.model.encode = torch.compile(self.vae.model.encode, dynamic=True)
             self.compression = (4,8,8)
         else:
             self.vae = TeleaiVideoVAE_2_2().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
@@ -124,7 +128,8 @@ class TeleaiEncoder(BaseEncoder):
             self.depth_model = VideoDepthAnything().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
             self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu', weights_only=False), strict=True)
 
-
+        if self.image_encoder_compile:
+            self.image_encoder.encode_image = torch.compile(self.image_encoder.encode_image)
         for key, val in self.work_fn.items():
             self.work_fn[key] = self.prepare_work_fn(key, val)
 

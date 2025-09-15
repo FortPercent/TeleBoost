@@ -264,4 +264,11 @@ Note：因为CP用的是ulysses实现，是在head维度切分，而TP切分hidd
 体现到attention上也会导致head维度被切分，因此要求TPxCP能被head数整除。
 Note：现在CausalWan和Hunyuan还没有实现TP
 ```
-
+### torch.compile 加速
+#### 使用方法
+启动 torch.compile，目前实验结果表明仅在 CLIP 模型和 VAE 模型上有较好的加速效果
+参照 example/teleai/config 中的设置
+```python
+torch_compile = True
+```
+选择性开启
