@@ -57,7 +57,7 @@ class DiffusionRollout(BaseRollout):
 
         context=prompts.batch['context']
         context_orig_lengths = prompts.batch['context_orig_lengths']
-        caption=prompts.non_tensor_batch['caption']
+        # caption=prompts.non_tensor_batch['caption']
         neg_context = prompts.batch['null_context']
         sigma_schedule = prompts.batch["sigma_schedule"]
         input_latents = prompts.batch["input_latents"]
@@ -78,11 +78,11 @@ class DiffusionRollout(BaseRollout):
         batch_indices = torch.chunk(torch.arange(B), B // self.config.rollout.ulysses_sequence_parallel_size)
         
         grpo_sample = True
-        
+        # self.module.eval()
         self.vae_module.model.to(get_device_id())
         for index, batch_idx in enumerate(batch_indices):
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
-            batch_captions = [caption[i] for i in batch_idx]
+            # batch_captions = [caption[i] for i in batch_idx]
             batch_contexts = [context[i].to(get_device_id()) for i in batch_idx]
             batch_neg_context = [neg_context[i].to(get_device_id()) for i in batch_idx]
             batch_context_orig_lengths = [context_orig_lengths[i] for i in batch_idx]
@@ -90,39 +90,34 @@ class DiffusionRollout(BaseRollout):
             
             for i in range(len(batch_contexts)):
                 batch_contexts[i] = batch_contexts[i][:batch_context_orig_lengths[i]]
+            
+            # ---- 打印信息 ----
 
-
-            with torch.no_grad(): 
-                _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
-                    batch_input_latents,
-                    progress_bar,
-                    sigma_schedule[0],
-                    self.module,
-                    batch_contexts,
-                    batch_neg_context,
-                    seq_len,
-                    grpo_sample,
-                )
+            # with torch.no_grad(): 
+            _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
+                batch_input_latents,
+                progress_bar,
+                sigma_schedule[0],
+                self.module,
+                batch_contexts,
+                batch_neg_context,
+                seq_len,
+                grpo_sample,
+            )
 
             all_latents.append(batch_latents.unsqueeze(0))
             all_log_probs.append(batch_log_probs.unsqueeze(0))
            
             
-            autocast_dtype = torch.float16 #TODO
-            with torch.autocast("cuda", dtype=autocast_dtype):
+            # autocast_dtype = torch.float32 #TODO
+            with torch.autocast("cuda", dtype=torch.bfloat16):
                 # 确保final_latents的数据类型正确
-                final_latents_vae = final_latents.to(dtype=autocast_dtype)
-                
-                import time
+                final_latents_vae = final_latents.to(dtype=torch.float32)
 
                 # 记录开始时间
-                start = time.time()
                 decoded_videos = self.vae_module.decode([final_latents_vae])
-                # 记录结束时间
-                end = time.time()
 
                 # 计算耗时
-                logger.warning(f"vae decode {batch_idx}, {final_latents_vae.shape} 执行完毕，耗时: {end - start:.2f} 秒")
                 video_frames = decoded_videos[0]
                 # print(f"video_frames的形状是{video_frames.shape}")
 
@@ -143,127 +138,19 @@ class DiffusionRollout(BaseRollout):
                     # 转换为numpy格式 (T, H, W, C)
                     video_id = video_id.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
                     # video_id = video_frames.cpu().numpy()
-                    print(f"video_id形状为{video_id.shape}")
+                    # print(f"video_id形状为{video_id.shape}")
                     import numpy as np
                     video_id = (video_id * 255).astype(np.uint8)
                         
                         # 如果是单通道，扩展为3通道
                     if C == 1:
                         video_id = id.repeat(video_id, 3, axis=-1)
-                # with open('/gemini/space/ljm/Dancegrpo/np.txt', 'a', encoding='utf-8') as f:
-                #     f.write(f"video_np形状{video_id.shape}\n")
-                #     f.write(f"{video_id}\n\n")
+                        
                 all_video_ids.append(video_id)
-                # 创建输出目录
-                # os.makedirs("./videos", exist_ok=True)
-                # os.makedirs("./images", exist_ok=True)
-                # def save_video_and_prompt(video_frames, rank, index):
-                #     """
-                #     保存视频文件和对应的prompt文本
-                #     Args:
-                #         video_frames: torch.Tensor, shape (C, T, H, W), 范围 [0, 1]
-                #         caption: str, 对应的文本prompt
-                #         rank: int, 当前进程的rank
-                #         index: int, 当前batch的索引
-                #         args: 配置参数
-                #     """
-                #     import time
-                #     from datetime import datetime
-
-                #     import cv2
-                #     import numpy as np
-                #     from PIL import Image
-
-                #     # 获取当前时间戳
-                #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    
-                #     # 确保video_frames是正确的格式 (C, T, H, W)
-                #     if video_frames.dim() == 4:
-                #         C, T, H, W = video_frames.shape
-                        
-                #         # 转换为numpy格式 (T, H, W, C)
-                #         video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
-                #         video_np = (video_np * 255).astype(np.uint8)
-                        
-                #         # 如果是单通道，扩展为3通道
-                #         if C == 1:
-                #             video_np = np.repeat(video_np, 3, axis=-1)
-                        
-                #         # 1. 保存第一帧图像
-                #         first_frame = video_np[0]  # (H, W, C)
-                        
-                #         # 保存第一帧为PNG图像
-                #         if C >= 3:
-                #             first_frame_pil = Image.fromarray(first_frame)
-                #         else:
-                #             first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
-                        
-                #         image_filename = f"wan_frame_rank{rank}_batch{index}_{batch_captions[0]}.png"
-                #         image_path = os.path.join("./inference_demo/output", image_filename)
-                        
-                #         try:
-                #             # first_frame_pil.save(image_path)
-                #             # print(f"First frame saved: {image_path}")
-                #             print("skip image save")
-                #         except Exception as e:
-                #             print(f"Error saving first frame {image_path}: {e}")
-
-                #         # 保存视频
-                #         video_filename = f"wan_video_rank{rank}_batch{index}_{timestamp}_{batch_captions[0]}.mp4"
-                #         video_path = os.path.join("./videos/output", video_filename)
-                #         print(video_path)
-                #         # exit(0)
-                #         # video_paths = []
-                #         try:
-                #             # 使用opencv保存视频
-                #             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                #             # fps = args.video_fps if hasattr(args, 'video_fps') else 8  # 默认8fps
-                #             fps = 5
-                #             out = cv2.VideoWriter(video_path, fourcc, fps, (W, H))
-                            
-                #             for t in range(T):
-                #                 frame = video_np[t]  # (H, W, C)
-                #                 # OpenCV使用BGR格式
-                #                 if C == 3:
-                #                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                #                 else:
-                #                     frame_bgr = frame
-                #                 out.write(frame_bgr)
-                            
-                #             out.release()
-                #             print(f"Video saved: {video_path}")
-                #             # video_paths.append(video_path)
-                            
-                #         except Exception as e:
-                #             print(f"Error saving video {video_path}: {e}")
-                #             # exit(0)
-                #             # 如果视频保存失败，至少保存第一帧作为图像
-                #             first_frame = video_np[0]  # (H, W, C)
-                #             if C == 3:
-                #                 first_frame_pil = Image.fromarray(first_frame)
-                #             else:
-                #                 first_frame_pil = Image.fromarray(first_frame[:,:,0], mode='L')
-                            
-                #             image_filename = f"wan_frame_rank{rank}_batch{index}_{timestamp}.png"
-                #             image_path = os.path.join("./images", image_filename)
-                #             first_frame_pil.save(image_path)
-                #             # print(f"First frame saved as image: {image_path}")
-                #         return video_path  # 返回所有video_path构成的列表 video_paths                    
-                #     else:
-                #         print(f"Unexpected video_frames shape: {video_frames.shape}")
-            
-                # local_rank = int(os.environ["LOCAL_RANK"])
-                # # 保存视频
-                # video_path = save_video_and_prompt(
-                #     video_frames = video_frames, 
-                #     rank=self.pid,
-                #     # batch_captions[0],
-                #     index = index,
-                # )
+                
                 video_frames = video_frames.unsqueeze(0)
                 
             all_video_frames.append(video_frames)
-            # all_video_paths.append(video_path)  # 添加path
             torch.cuda.empty_cache()
         
         # 除了all_video_paths返回的都是一个张量
@@ -299,6 +186,7 @@ class DiffusionRollout(BaseRollout):
             },
             batch_size=B
         )
+
         non_tensor_batch = prompts.non_tensor_batch
         non_tensor_batch['video_ids'] = np.array(all_video_ids)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
@@ -319,31 +207,42 @@ class DiffusionRollout(BaseRollout):
             all_latents = latents
             
             all_log_probs = []
+            B = len(context) if isinstance(context, list) else context.shape[0]
+            # 确保设备一致
+            device = latents[0].device
             
             for i in progress_bar:
-                B = len(context) if isinstance(context, list) else context.shape[0]
-                # 确保设备一致
-                device = latents[0].device
-                
                 # 使用sigma值计算timestep
                 sigma = sigma_schedule[i]
                 
                 timestep_value = int(sigma * 1000)
                 timestep = torch.full([B], timestep_value, device=device, dtype=torch.long)
                 
-                timestep_cond = timestep
-                timestep_uncond = timestep
-                transformer.eval()
+                # timestep_cond = timestep
+                # timestep_uncond = timestep
+
                 with torch.autocast("cuda", torch.bfloat16):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
                     # transformer.to(device)
-                    print("in rollout latents norm: i", i, latents[0].norm().item())
-                    pred_cond = transformer(
+                    arr = latents[0].detach().cpu().numpy()  # 取第 0 个样本，转 numpy
+                    import hashlib
+                    md5 = hashlib.md5(arr.tobytes()).hexdigest()
+                    # print(
+                    #     f"[Rollout] rank {torch.distributed.get_rank()} "
+                    #     f"step {i}/{self.config.sampling_steps} "
+                    #     f"shape={tuple(latents[0].shape)} "
+                    #     f"norm={latents[0].norm().item():.4f} "
+                    #     f"latents[0] md5={md5}"
+                    #     f"timestep_cond norm={timestep_cond} "
+                    #     f"context norm={context[0].norm().item():.4f} "
+                    #     f"seq_len={seq_len} "
+                    # )
+                    pred_cond = [transformer(
                         x=latents,  # [(16, 7, 64, 64)]
-                        t=timestep_cond,
+                        t=timestep,
                         context=context,
                         seq_len=seq_len
-                    )
+                    )[0].detach()]
 
                     # 处理模型输出
                     if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
@@ -355,12 +254,12 @@ class DiffusionRollout(BaseRollout):
 
                     # 为无条件预测准备输入
                     # transformer.to(device)
-                    pred_uncond = transformer(
+                    pred_uncond = [transformer(
                         x=latents,  # [(16, 7, 64, 64)]
-                        t=timestep_uncond,
+                        t=timestep,
                         context=neg_context,
                         seq_len=seq_len
-                    )
+                    )[0].detach()]
 
                     if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
                         model_output_uncond = pred_uncond['rgb'][0]
