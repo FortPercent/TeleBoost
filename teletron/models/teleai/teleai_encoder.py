@@ -105,6 +105,7 @@ class TeleaiEncoder(BaseEncoder):
             self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
             if self.vae_compile:
                 self.vae.model.encode = torch.compile(self.vae.model.encode, dynamic=True)
+                print(f"torch.compile VAE 模型... ")
             self.compression = (4,8,8)
         else:
             self.vae = TeleaiVideoVAE_2_2().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
@@ -130,6 +131,7 @@ class TeleaiEncoder(BaseEncoder):
 
         if self.image_encoder_compile:
             self.image_encoder.encode_image = torch.compile(self.image_encoder.encode_image)
+            print(f"torch.compile Image Encoder 模型... ")
         for key, val in self.work_fn.items():
             self.work_fn[key] = self.prepare_work_fn(key, val)
 

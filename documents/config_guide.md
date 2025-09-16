@@ -239,12 +239,14 @@ vae=dict(
         tile_size=(34, 34),    # 分块大小
         tile_stride=(18, 16),  # 分块步长
     ),
+    torch_compile = False
 )
 ```
 
 **参数说明：**
 - `tiled`: 大分辨率视频可启用分块处理节省内存，81帧的情况下，一般1080P及以下分辨率不用tile效率比较高。
 - `tile_size/tile_stride`: 控制分块的大小和重叠程度
+- `torch_compile`: 选择是否使用 torch.compile，加速 VAE 计算效率
 
 #### 文本编码器配置
 ```python
@@ -258,8 +260,10 @@ text_encoder=dict(
 ```python
 image_encoder=dict(
     path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+    torch_compile = False
 )
 ```
+- `torch_compile`: 选择是否使用 torch.compile，加速 CLIP 计算效率
 
 #### 深度模型配置
 ```python
