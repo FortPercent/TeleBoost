@@ -429,7 +429,7 @@ if __name__ == "__main__":
         
     
     # 生成传给奖励模型的prompts列表
-    print(f"成功加载{len(batch_prompts)}个prompts")
+    # print(f"成功加载{len(batch_prompts)}个prompts")
     
     # 使用奖励模型评分
     print("⚡ Testing batch video evaluation (fastest)...")
@@ -446,10 +446,10 @@ if __name__ == "__main__":
     for result in results:
         i=i+1
         overall_score = result.get("overall_score", "N/A")
-        processing_time = result.get("processing_time", 0)
+        # processing_time = result.get("processing_time", 0)
         
         print(f"🎯 第{i}个prompts的综合质量分数: {overall_score}/100")
-        print(f"⏱️ 第{i}个prompts的处理时间: {processing_time:.2f} 秒")
+        # print(f"⏱️ 第{i}个prompts的处理时间: {processing_time:.2f} 秒")
         print()
     
     """
