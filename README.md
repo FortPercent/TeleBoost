@@ -2,6 +2,10 @@
 
 Teletron 是一个专为训练长上下文多模态Transformer模型而设计的分布式训练框架，支持多种视频生成模型的高效训练。
 
+## News
+* 2025-09-18：可以使用torch compile加速encoder编码了，各分辨率下有20-40%不等的encoder时延下降。详见config_guide.md中的vae配置部分。
+
+
 ## QuickStart
 
 ### 环境设置
@@ -266,9 +270,11 @@ Note：现在CausalWan和Hunyuan还没有实现TP
 ```
 ### torch.compile 加速
 #### 使用方法
-启动 torch.compile，目前实验结果表明仅在 CLIP 模型和 VAE 模型上有较好的加速效果
-参照 example/teleai/config 中的设置
+启动 torch.compile，在VAE 模型上有显著的加速效果
+参照 example/teleai/config 中的设置，在vae配置中加入torch_compile=True
 ```python
-torch_compile = True
+vae=dict(
+    ...
+    torch_compile = True
+)
 ```
-选择性开启
