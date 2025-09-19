@@ -127,6 +127,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         self.gradient_accumulation = (
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
+        
+        print(self.gradient_accumulation)
+        print("="*100)
 
         # data=data.to("cpu")
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
@@ -179,7 +182,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
                 )
                 
-                
                 new_log_probs = self.grpo_wan_one_step(
                     latent_t,
                     nlatent_t,
@@ -191,17 +193,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     perms[batch_idx][step_idx],
                     sigma_0, 
                 )
-                # if step_idx==2:
-                #     from datetime import datetime
-                #     timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-                #     file_name = f"visual_mem_{timestamp}_{torch.distributed.get_rank()}_{batch_idx}_step_idx_{step_idx}.pickle"
-                #     # save record:
-                #     torch.cuda.memory._dump_snapshot(file_name)
-                #     # Stop recording memory snapshot history:
-                #     torch.cuda.memory._record_memory_history(enabled=None)
-                # print(new_log_probs)
-                # exit(0)
-                # 其余训练逻辑保持不变...
+                
                 advantages = torch.clamp(
                     td.batch["advantages"],
                     -adv_clip_max,
@@ -263,6 +255,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 #     exit(0)
             if (batch_idx + 1) % self.gradient_accumulation == 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                self.actor_optimizer.step()
+                self.actor_optimizer.zero_grad()
                 data = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, data)
                 
@@ -303,7 +297,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         if latents.shape[0] != 16:
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
         
-
+        
         autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
             pred_cond = transformer(
@@ -325,14 +319,15 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             # del pred_cond
             # torch.cuda.empty_cache()
                 
-            #再计算无条件预测
+            # 再计算无条件预测
             # with torch.no_grad(): 
-            pred_uncond = [transformer(
-                x=[latents],  # 保持List[Tensor]格式
-                t=timesteps,
-                context=context_null,  # List[Tensor]
-                seq_len=seq_len
-            )[0].detach()]
+            with torch.no_grad():
+                pred_uncond = transformer(
+                    x=[latents],  # [(16, 7, 64, 64)]
+                    t=timesteps,
+                    context=context_null,
+                    seq_len=seq_len
+                )
             
             #处理无条件预测输出
             if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
