@@ -54,7 +54,7 @@ class DiffusionRollout(BaseRollout):
         self.vae_module=vae
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
-
+        torch.cuda.memory._set_allocator_settings(f"expandable_segments:{False}")
         context=prompts.batch['context']
         context_orig_lengths = prompts.batch['context_orig_lengths']
         # caption=prompts.non_tensor_batch['caption']
@@ -79,7 +79,7 @@ class DiffusionRollout(BaseRollout):
         
         grpo_sample = True
         # self.module.eval()
-        self.vae_module.model.to(get_device_id())
+        self.vae_module.model.to(get_device_id(),dtype=torch.float16)
         for index, batch_idx in enumerate(batch_indices):
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
             # batch_captions = [caption[i] for i in batch_idx]
@@ -151,7 +151,9 @@ class DiffusionRollout(BaseRollout):
                 video_frames = video_frames.unsqueeze(0)
                 
             all_video_frames.append(video_frames)
-            torch.cuda.empty_cache()
+            
+        self.vae_module.model.to("cpu", dtype=torch.float32)
+        torch.cuda.empty_cache()
         
         # 除了all_video_paths返回的都是一个张量
         if len(all_latents) > 1:
@@ -186,6 +188,7 @@ class DiffusionRollout(BaseRollout):
             },
             batch_size=B
         )
+
 
         non_tensor_batch = prompts.non_tensor_batch
         non_tensor_batch['video_ids'] = np.array(all_video_ids)
@@ -224,9 +227,9 @@ class DiffusionRollout(BaseRollout):
                 with torch.autocast("cuda", torch.bfloat16):
                     # WAN模型输入：x是(C,T,H,W)格式的列表
                     # transformer.to(device)
-                    arr = latents[0].detach().cpu().numpy()  # 取第 0 个样本，转 numpy
-                    import hashlib
-                    md5 = hashlib.md5(arr.tobytes()).hexdigest()
+                    # arr = latents[0].detach().cpu().numpy()  # 取第 0 个样本，转 numpy
+                    # import hashlib
+                    # md5 = hashlib.md5(arr.tobytes()).hexdigest()
                     # print(
                     #     f"[Rollout] rank {torch.distributed.get_rank()} "
                     #     f"step {i}/{self.config.sampling_steps} "
@@ -237,13 +240,27 @@ class DiffusionRollout(BaseRollout):
                     #     f"context norm={context[0].norm().item():.4f} "
                     #     f"seq_len={seq_len} "
                     # )
+                    # with torch.no_grad():
+                    #     pred_cond = transformer(
+                    #         x=latents,  # [(16, 7, 64, 64)]
+                    #         t=timestep,
+                    #         context=context,
+                    #         seq_len=seq_len
+                    #     )
                     pred_cond = [transformer(
-                        x=latents,  # [(16, 7, 64, 64)]
-                        t=timestep,
-                        context=context,
-                        seq_len=seq_len
-                    )[0].detach()]
-
+                            x=latents,  # [(16, 7, 64, 64)]
+                            t=timestep,
+                            context=context,
+                            seq_len=seq_len
+                        )[0].detach()]
+                    # with torch.no_grad():
+                    #     pred_cond = transformer(
+                    #         x=latents,  # [(16, 7, 64, 64)]
+                    #         t=timestep,
+                    #         context=context,
+                    #         seq_len=seq_len
+                    #     )
+                        
                     # 处理模型输出
                     if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
                         model_output_cond = pred_cond['rgb'][0]
@@ -254,12 +271,13 @@ class DiffusionRollout(BaseRollout):
 
                     # 为无条件预测准备输入
                     # transformer.to(device)
-                    pred_uncond = [transformer(
-                        x=latents,  # [(16, 7, 64, 64)]
-                        t=timestep,
-                        context=neg_context,
-                        seq_len=seq_len
-                    )[0].detach()]
+                    with torch.no_grad():
+                        pred_uncond = transformer(
+                            x=latents,  # [(16, 7, 64, 64)]
+                            t=timestep,
+                            context=neg_context,
+                            seq_len=seq_len
+                        )
 
                     if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
                         model_output_uncond = pred_uncond['rgb'][0]

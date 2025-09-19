@@ -16,7 +16,9 @@ import inspect
 import logging
 import os
 import time
+import torch
 from collections import OrderedDict
+
 
 from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
@@ -96,6 +98,7 @@ class RewardVLLMManager(BaseShardingManager):
         # pytorch: https://pytorch.org/docs/stable/notes/cuda.html#memory-management
         # vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/device_allocator/cumem.py#L103
         self.timing = {}
+        torch.cuda.memory._set_allocator_settings(f"expandable_segments:{False}")
         with simple_timer("reshard", self.timing):
             get_torch_device().empty_cache()
 
@@ -129,7 +132,10 @@ class RewardVLLMManager(BaseShardingManager):
 
         # add empty cache after each compute
         get_torch_device().empty_cache()
-
+        
+        # if is_cuda_available:
+        torch.cuda.memory._set_allocator_settings(f"expandable_segments:{True}")
+        
         # restore random states
         if self.device_mesh is not None:
             self.gen_random_states = get_torch_device().get_rng_state()
