@@ -79,7 +79,10 @@ class TeleaiEncoder(BaseEncoder):
             self.image_encoder_path = encoder_model_config.get("image_encoder", None).get("path", None)
         else:
             self.image_encoder_path = None
-        self.image_encoder_compile = encoder_model_config.get("image_encoder", None).get("torch_compile", False)
+        if encoder_model_config.get("image_encoder", None) is not None:
+            self.image_encoder_compile = encoder_model_config.get("image_encoder", None).get("torch_compile", False)
+        else:
+            self.image_encoder_compile = None
         
         if encoder_model_config.get("depth_model", None) is not None:
             self.depth_model_path = encoder_model_config.get("depth_model", None).get("path", None)
