@@ -5,9 +5,16 @@ _GLOBAL_WANDB_WRITER = None
 _GLOBAL_TENSORBOARD_WRITER = None
 _GLOBAL_TIMERS = None
 
-from megatron.core import Timers
+# from megatron.core import Timers
+from .timers import Timers
+from .config import set_config
 from teletron.utils.microbatches import build_num_microbatches_calculator
 from teletron.utils.tokenizer import build_tokenizer
+
+def set_global_args(args):
+    assert args is not None
+    global _GLOBAL_ARGS
+    _GLOBAL_ARGS = args
 
 def set_args(args, build_tokenizer=True):
     assert args is not None
@@ -48,7 +55,9 @@ def _set_timers(args):
     """Initialize timers."""
     global _GLOBAL_TIMERS
     _ensure_var_is_not_initialized(_GLOBAL_TIMERS, 'timers')
-    _GLOBAL_TIMERS = Timers(args.timing_log_level, args.timing_log_option)
+    # _GLOBAL_TIMERS = Timers(args.timing_log_level, args.timing_log_option)
+    dit_model_config = set_config().get('model_config', None).get('dit', None)
+    _GLOBAL_TIMERS = Timers(args, dit_model_config.config)
 
 def _set_tensorboard_writer(args):
     """Set tensorboard writer."""

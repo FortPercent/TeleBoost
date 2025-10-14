@@ -4,7 +4,7 @@ import torch.distributed as dist
 from megatron.core import mpu
 from teletron.models.flow_match import FlowMatchScheduler
 from teletron.train.utils import flow_loss_func
-
+from teletron.utils import get_timers
 
 
 def extra_args(parser):
@@ -16,7 +16,11 @@ def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
     
+    timers = get_timers()
+    timers.start_timer('get-data-time')
     batch = next(data_iterator)
+    timers.stop_timer('get-data-time')
+
     latents = batch["latents"]
     noise = torch.randn_like(latents) 
     timestep_range = [0, flow_scheduler.num_train_timesteps]

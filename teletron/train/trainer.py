@@ -29,6 +29,7 @@ from teletron.utils import (
     set_config,
     update_num_microbatches,
     get_num_microbatches,
+    get_timers
 )
 from teletron.train.utils import (
     _initialize_distributed,
@@ -464,7 +465,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
     ):
         args = get_args()
         # model = self.model
-
+        timers = get_timers()
         for model_module in model:
             model_module.train()
         total_loss_dict = {}
@@ -562,6 +563,10 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                         config,
                         ema_models)
             
+            dit_time = timers.get_elapsed_time('dit-time')
+            get_data_time = timers.get_elapsed_time('get-data-time')
+            dit_time = (dit_time - get_data_time) / num_microbatches
+
             if grad_norm is None:
                 if args.use_zero2:
                     grad_norm = optimizer._global_grad_norm
@@ -607,7 +612,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 decoupled_learning_rate,
                 iteration, loss_scale,
                 report_memory_flag, skipped_iter,
-                grad_norm, params_norm, num_zeros_in_grad
+                grad_norm, params_norm, num_zeros_in_grad, dit_time
             )
 
             # breakpoint()
@@ -725,6 +730,12 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
 
+        timers = get_timers()
+        timers.get_timer('dit-time', barrier_group=get_transformer_model_group())
+        timers.get_timer('get-data-time', barrier_group=get_transformer_model_group())
+
+        timers.start_timer('dit-time')
+
         if args.use_zero2:
             losses_reduced = deepspeed_forward_backward(
                 forward_step_func=forward_step_func,
@@ -744,6 +755,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                 micro_batch_size=args.micro_batch_size,
                 forward_only=False)
 
+        timers.stop_timer('dit-time')
         # breakpoint()
         # Empty unused memory.
         if args.empty_unused_memory_level >= 1:
