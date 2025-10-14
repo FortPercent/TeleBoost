@@ -28,6 +28,7 @@ class TeleLoggerMixin:
         grad_norm,
         params_norm,
         num_zeros_in_grad,
+        dit_time,
     ):
         """Log training information such as losses, timing, ...."""
         args = get_args()
@@ -199,6 +200,7 @@ class TeleLoggerMixin:
                 iteration, args.train_iters)
             log_string += ' consumed samples: {:12d} |'.format(
                 args.consumed_train_samples)
+            log_string += ' dit_time (ms): {:.2f} |'.format(dit_time * 1000)
             # log_string += ' elapsed time per iteration (ms): {:.1f} |'.format(
             #     elapsed_time_per_iteration * 1000.0)
             # if args.log_throughput:

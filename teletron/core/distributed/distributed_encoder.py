@@ -13,7 +13,7 @@ import json
 import numpy as np
 import logging 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
-from teletron.utils import get_args
+from teletron.utils import get_args, get_timers
 from teletron.train.checkpoint import ensure_directory_exists
 from teletron.models.encoder_registry import get_encoder
 
@@ -96,6 +96,7 @@ class DistDataProducer:
         self.valid_ds_preloaded = valid_ds
         
         self.step = 0
+        self.iteration = 0
         self.batch_size = 1
         
         self.modes = [TRAIN_MODE]
@@ -115,6 +116,10 @@ class DistDataProducer:
         self._create_data_iterators()
         self._initialize_queues_and_trackers()
         self._setup_profiler()
+
+        # init timers
+        self.timers = get_timers()
+        self.timers.get_timer('encoder-once-time')
 
         self.logger.info("初始化完成")
 
@@ -250,15 +255,18 @@ class DistDataProducer:
             return
         self.logger.debug(f"POST-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
         self.logger.debug(f"PRE-ENCODE: {self._get_gpu_memory_usage()}")
-        s_t = datetime.now()
+
+        self.timers.start_timer('encoder-once-time')
         tensors_to_send = self.encoder.encode(raw_batch)
-        encode_time = (datetime.now() - s_t).total_seconds()
+        self.timers.stop_timer('encoder-once-time')
+        encode_time = self.timers.get_elapsed_time('encoder-once-time')
+        
         self.logger.debug(f"POST-ENCODE: {self._get_gpu_memory_usage()}")
         
         self.produced_count[mode][first_consumer] += 1
         item_index = self.produced_count[mode][first_consumer]
         
-        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded in {encode_time:.3f}s")
+        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded {raw_batch['images'].shape} data cost {encode_time:.3f}s")
 
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)
@@ -309,26 +317,24 @@ class DistDataProducer:
         for cp in self.comm_pairs:
             self._send_data_from_queue(cp, mode_to_process)
         self.logger.debug(f"End send data")
+        self.iteration += 1
 
     def run(self):
         """运行主循环，直到满足停止条件 """
         try:
             self.logger.info("主循环开始")
-            if self.profiler and self.step >= self.args.profile_step_start:
-                self.logger.info("启动性能分析器...")
-                self.profiler.start()
 
             while any(self.sended_count[TRAIN_MODE][cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in self.comm_pairs):
-                self._main_loop_step()
-                
                 if self.profiler:
-                    if not self.profiler.enabled and self.step >= self.args.profile_step_start:
+                    if self.iteration == self.args.profile_step_start:
                         self.logger.info("启动性能分析器...")
                         self.profiler.start()
-                    if self.profiler.enabled and self.step >= self.args.profile_step_end:
+                    if self.iteration == self.args.profile_step_end:
                         self.logger.info("停止性能分析器...")
                         self.profiler.stop()
                         self.logger.info(f"性能分析数据已保存")
+
+                self._main_loop_step()
                 
                 time.sleep(0.001)
 

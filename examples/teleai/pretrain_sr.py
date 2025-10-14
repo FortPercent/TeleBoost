@@ -4,7 +4,7 @@ import torch.distributed as dist
 from megatron.core import mpu
 from teletron.models.teleai.schedulers.flow_match import FlowMatchScheduler
 from teletron.train.utils import get_batch, sr_loss_func
-
+from teletron.utils import get_timers
 
 
 def extra_args(parser):
@@ -17,7 +17,12 @@ def extra_args(parser):
 
 def forward_step(data_iterator, model, time_step=None):
     prompt_emb = {}
+
+    timers = get_timers()
+    timers.start_timer('get-data-time')
     batch = next(data_iterator)
+    timers.stop_timer('get-data-time')
+
     latents = batch["latents"]
     fake_latents = batch["fake_latents"]
     noise = torch.randn_like(latents) if "noise" not in batch else batch["noise"]
