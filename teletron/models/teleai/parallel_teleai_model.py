@@ -1,6 +1,8 @@
 from typing import Tuple, Optional
 import torch
 import torch.nn as nn
+
+from teletron.core.context_parallel.mappings import set_global_all_to_all_buffer
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.tensor_parallel import TensorParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
@@ -131,6 +133,8 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
         x = self.split_input(x, dim=1)
+        # 预分配alltoall buffer
+        set_global_all_to_all_buffer(x.numel())
         freqs = self.split_input(freqs, dim=0)
         # freqs = self.split_input(freqs, dim=-1)
         x = self.blocks(x, context_emb, t_mod, freqs)

@@ -20,13 +20,16 @@ class ContextParallelMixin:
     @staticmethod
     def cp_grad_reduce(grad):
         with torch.no_grad():
-            cp_size = mpu.get_context_parallel_world_size()
-            dim_size = list(grad.size())
-            dim_size[0] = dim_size[0] * cp_size
-            grad_list = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
-            torch.distributed._all_gather_base(grad_list, grad.contiguous(), group=mpu.get_context_parallel_group())
-            grad_list = grad_list.view(cp_size, -1, *grad_list.shape[1:])
-            reduced_grad = grad_list.sum(dim=0)
+            # cp_size = mpu.get_context_parallel_world_size()
+            # dim_size = list(grad.size())
+            # dim_size[0] = dim_size[0] * cp_size
+            # grad_list = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
+            # torch.distributed._all_gather_base(grad_list, grad.contiguous(), group=mpu.get_context_parallel_group())
+            # grad_list = grad_list.view(cp_size, -1, *grad_list.shape[1:])
+            # reduced_grad = grad_list.sum(dim=0)
+            # allreduce
+            reduced_grad = grad.contiguous()
+            torch.distributed.all_reduce(reduced_grad, group=mpu.get_context_parallel_group())
         
         return reduced_grad
 
@@ -92,9 +95,9 @@ class ContextParallelMixin:
 
         # qkv: b s/CP n d
         if mpu.get_context_parallel_world_size() > 1:
-            q = SeqAllToAll.apply(cp_group, q, 2, 1)
-            k = SeqAllToAll.apply(cp_group, k, 2, 1)
-            v = SeqAllToAll.apply(cp_group, v, 2, 1)
+            q = SeqAllToAll.apply(cp_group, q, 2, 1, True)
+            k = SeqAllToAll.apply(cp_group, k, 2, 1, True)
+            v = SeqAllToAll.apply(cp_group, v, 2, 1, True)
 
             # qkv: b s n/CP d
             q,k,v = map(
@@ -113,9 +116,9 @@ class ContextParallelMixin:
         if mpu.get_context_parallel_world_size() > 1:
             x = self.pad_for_context_parallel(x, 2)
             x = SeqAllToAll.apply(
-                cp_group, x, 2, 1
+                cp_group, x, 2, 1, True
             )  # b img_seq sub_n d
-            # torch.cuda.empty_cache()
+
             # x: b n s/CP d
         x = x.transpose(1, 2).flatten(2, 3).contiguous()
         # x: b s h
