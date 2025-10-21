@@ -9,6 +9,27 @@ from torch import Tensor
 from megatron.core import mpu
 
 
+ALL_TO_ALL_BUFFER = None
+
+def set_global_all_to_all_buffer(buffer_numel):
+    global ALL_TO_ALL_BUFFER
+    cp_size = mpu.get_context_parallel_world_size()
+    # define all_to_all input buffer
+    buffer_numel = buffer_numel // cp_size
+    ALL_TO_ALL_BUFFER = [torch.zeros(buffer_numel, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
+
+def get_all_to_all_buffer(loca_input):
+    global ALL_TO_ALL_BUFFER
+    # resize ALL_TO_ALL_BUFFER
+    cp_size = mpu.get_context_parallel_world_size()
+    input_numel = loca_input.numel() // cp_size
+    if input_numel > ALL_TO_ALL_BUFFER[0].numel():
+        ALL_TO_ALL_BUFFER = None
+        ALL_TO_ALL_BUFFER = [torch.zeros(input_numel, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
+    all_to_all_buffer = [t[:input_numel] for t in ALL_TO_ALL_BUFFER]
+    return all_to_all_buffer
+
+
 class SeqAllToAll(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -17,20 +38,22 @@ class SeqAllToAll(torch.autograd.Function):
         local_input: Tensor,
         scatter_dim: int,
         gather_dim: int,
+        use_buffer: bool = False,
         async_op: bool = False,
     ) -> Tensor:
         ctx.group = group
         ctx.scatter_dim = scatter_dim
         ctx.gather_dim = gather_dim
         ctx.async_op = async_op
-        return all_to_all_tensor(local_input, scatter_dim, gather_dim, group, async_op)
+        ctx.use_buffer = use_buffer
+        return all_to_all_tensor(local_input, scatter_dim, gather_dim, use_buffer, group, async_op)
 
     @staticmethod
     def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
         input_t = torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous() if ctx.async_op else grad_output[0]
         return (
             None,
-            all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.group, False),
+            all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.use_buffer, ctx.group, False),
             None,
             None,
             None,
@@ -41,13 +64,24 @@ def all_to_all_tensor(
     local_input: Tensor,
     scatter_dim: int,
     gather_dim: int,
+    use_buffer: bool,
     group: Optional[dist.ProcessGroup] = None,
     async_op: bool = False,
 ):
     group = mpu.get_context_parallel_group() if group is None else group
     cp_size = dist.get_world_size(group)
-    input_list = [t.contiguous() for t in torch.tensor_split(local_input, cp_size, scatter_dim)]
-    output_list = [torch.empty_like(input_list[0]) for _ in range(cp_size)]
+    input_shape = list(local_input.shape)
+    input_shape[scatter_dim] = input_shape[scatter_dim] // cp_size
+
+    if use_buffer:
+        all_to_all_buffer = get_all_to_all_buffer(local_input)
+        all_to_all_input = list(torch.tensor_split(local_input, cp_size, scatter_dim))
+        input_list = [a.copy_(b.reshape(-1)) for a,b in zip(all_to_all_buffer, all_to_all_input)]
+    else:
+        input_list = [t.contiguous() for t in torch.tensor_split(local_input, cp_size, scatter_dim)]
+    
+    # 创建输出buffer
+    output_list = [torch.empty(input_shape, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
     comm = dist.all_to_all(output_list, input_list, group=group, async_op=async_op)
     if async_op:
 
