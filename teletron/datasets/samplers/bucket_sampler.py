@@ -5,7 +5,7 @@ import itertools
 class BucketSampler(torch.utils.data.Sampler):
 
     def __init__(self, dataset, consumed_samples, micro_batch_size,
-                 data_parallel_rank, data_parallel_size, seed=42, drop_last=True, shuffle=True, infinite=True):
+                 data_parallel_rank, data_parallel_size, global_batch_size, seed=42, drop_last=True, shuffle=True, infinite=True):
         self.dataset = dataset
         self.total_samples = len(dataset)
         self.pre_consumed_samples = consumed_samples
@@ -27,6 +27,9 @@ class BucketSampler(torch.utils.data.Sampler):
         self.bucket_weights = torch.tensor(self.dataset.buckets_size_ratio, dtype=torch.float)
 
         self.bucket_indices_iters = [self.fixed_infinite_bucket_iter(bucket) for bucket in self.bucket_indices]
+        
+        self.global_batch_size = global_batch_size
+        self.iteration = 0
 
     def fixed_infinite_bucket_iter(self, bucket):
         while True:
@@ -61,6 +64,9 @@ class BucketSampler(torch.utils.data.Sampler):
             self.skip_consumed_batch()
 
         while True:
-            which_bucket_idx = torch.multinomial(self.bucket_weights, 1, replacement=True, generator=torch.Generator().manual_seed(self.seed+self.consumed_micro_batch)).item()
+            which_bucket_idx = torch.multinomial(self.bucket_weights, 1, replacement=True, generator=torch.Generator().manual_seed(self.seed+self.iteration)).item()
+            idx = next(self.bucket_indices_iters[which_bucket_idx])
             self.consumed_micro_batch += 1
-            yield next(self.bucket_indices_iters[which_bucket_idx])
+            if self.consumed_micro_batch % self.global_batch_size == 0:
+                self.iteration += 1
+            yield idx

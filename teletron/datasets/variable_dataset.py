@@ -251,7 +251,7 @@ class VariableClipDataset(BaseDataset):
             for i, clip in enumerate(valid_data_list):
                 bucket_index_list[clip.bucket_index].append(i)
             self.bucket_index_list = [
-                np.array(item) for item in bucket_index_list.values()
+                np.array(bucket_index_list[i]) for i in range(len(shape_list))
             ]
         else:
             valid_data_list = new_data_list
