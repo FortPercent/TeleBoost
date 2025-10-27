@@ -95,12 +95,9 @@ class DistDataProducer:
         self.train_ds_preloaded = train_ds
         self.valid_ds_preloaded = valid_ds
         
-        self.step = 0
         self.iteration = 0
         self.batch_size = 1
         
-        self.same_data_group = {}
-
         self.modes = [TRAIN_MODE]
         if self.args.eval_iters > 0:
             self.modes.append(VALID_MODE)
@@ -194,27 +191,30 @@ class DistDataProducer:
     def _create_data_iterators(self):
         """根据合并后的通信对创建数据迭代器 """
         self.logger.info("正在创建数据迭代器...")
-        self.data_iterators = {}
+        self.data_iterators = {mode: {} for mode in self.modes}
+        self.same_data_group = {}
         
         train_ds_current = self.train_ds_preloaded
         valid_ds_current = self.valid_ds_preloaded
+        
+        for idx, mcp in self.merged_comm_pairs.items():
+            dp_rank = idx
+            dp_size = len(self.merged_comm_pairs)
 
-        train_iter, valid_iter, _, train_ds_current, valid_ds_current = self.build_data_iterators_fn(
-            is_tp_first=True, dp_rank=0, dp_size=1,
-            train_ds_prev=train_ds_current, valid_ds_prev=valid_ds_current, return_ds=True
-        )
+            self.logger.info(f"为数据组 {idx} (dp_rank={dp_rank}, dp_size={dp_size}) 创建迭代器")
+            train_iter, valid_iter, _, train_ds_current, valid_ds_current = self.build_data_iterators_fn(
+                is_tp_first=True, dp_rank=dp_rank, dp_size=dp_size,
+                train_ds_prev=train_ds_current, valid_ds_prev=valid_ds_current, return_ds=True
+            )
+            self.data_iterators[TRAIN_MODE][idx] = train_iter
+            if VALID_MODE in self.modes:
+                self.data_iterators[VALID_MODE][idx] = valid_iter
 
-        self.data_iterators[TRAIN_MODE] = train_iter
-        if VALID_MODE in self.modes:
-            self.data_iterators[VALID_MODE] = valid_iter
-
+            first_consumer = mcp.consumer[0]
+            self.same_data_group[first_consumer] = mcp.consumer
         self.logger.info("数据迭代器创建完成")
 
     def _initialize_queues_and_trackers(self):
-        self.same_data_group = {}
-        for idx, mcp in self.merged_comm_pairs.items():
-            first_consumer = mcp.consumer[0]
-            self.same_data_group[first_consumer] = mcp.consumer
         """初始化数据队列和发送/生产计数器 """
         self.logger.info("正在初始化队列和计数器...")
         all_consumer_ranks = [cp.consumer for cp in self.comm_pairs]
@@ -242,18 +242,16 @@ class DistDataProducer:
             )
             self.logger.info(f"Profiler已设置，结果将保存到: {prof_save_path}")
 
-    def _produce_and_enqueue_data(self, idx: int, mcp: CommPair, mode: str, raw_batch=None):
+    def _produce_and_enqueue_data(self, idx: int, mcp: CommPair, mode: str):
         """从数据迭代器生产数据，编码后放入队列 """
         first_consumer = mcp.consumer[0]
         
-        if raw_batch is None:
-            try:
-                self.logger.debug(f"PRE-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
-                raw_batch = next(self.data_iterators[mode])
-            except StopIteration:
-                self.logger.warning(f"警告: {mode} 模式的数据迭代器 {idx} 已耗尽")
-                return
-        
+        try:
+            self.logger.debug(f"PRE-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
+            raw_batch = next(self.data_iterators[mode][idx])
+        except StopIteration:
+            self.logger.warning(f"警告: {mode} 模式的数据迭代器 {idx} 已耗尽")
+            return
         self.logger.debug(f"POST-GET-RAW-DATA for mode [{mode}] iter [{idx}]")
         self.logger.debug(f"PRE-ENCODE: {self._get_gpu_memory_usage()}")
 
@@ -272,9 +270,6 @@ class DistDataProducer:
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)
             self.logger.debug(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
-
-        if mode == TRAIN_MODE:
-            self.step += 1
 
     def _send_data_from_queue(self, cp: CommPair, mode: str):
         """从队列中取出数据，并使用同步方式发送 """
@@ -298,38 +293,34 @@ class DistDataProducer:
         dist.send(tensor=packed_tensor, dst=consumer_rank)
         self.logger.debug(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
 
-    def _main_loop_step(self):
-        """执行一个主循环步骤：生产和发送数据 """
+    def _get_mode(self):
+        """确定当前步骤应处理的模式（训练或验证）"""
         if VALID_MODE in self.modes:
             train_data_count = self.args.eval_interval
             eval_data_count = self.args.eval_iters
-            first_consumer = self.comm_pairs[0].consumer
-            num_sended_in_cycle = self.sended_count[TRAIN_MODE][first_consumer] % ((train_data_count+eval_data_count)*len(self.merged_comm_pairs))
-            mode_to_process = TRAIN_MODE if num_sended_in_cycle < train_data_count*len(self.merged_comm_pairs) else VALID_MODE
+            num_sended_in_cycle = self.iteration % (train_data_count+eval_data_count)
+            return TRAIN_MODE if num_sended_in_cycle < train_data_count else VALID_MODE
         else:
-            mode_to_process = TRAIN_MODE
+            return TRAIN_MODE
 
+    def _main_loop_step(self):
+        """执行一个主循环步骤：生产和发送数据 """
+        # 1. Get current mode to process
+        mode_to_process = self._get_mode()
+
+        # 2. Produce data and enqueue
         self.logger.debug(f"Start produce data for mode: {mode_to_process}")
-
-        # 先取一个数据
-        raw_batch = next(self.data_iterators[mode_to_process])
-        raw_batch_shape = raw_batch['images'].shape
+        for idx, mcp in self.merged_comm_pairs.items():
+            self._produce_and_enqueue_data(idx, mcp, mode_to_process)
+        self.logger.debug(f"End produce data")
         
-        num_micro_batchs = self.args.global_batch_size // self.args.data_parallel_size
-        for i in range(num_micro_batchs):
-            self.logger.debug(f"Start num_micro_batch {i} produce data for mode: {mode_to_process}")
-            for idx, mcp in self.merged_comm_pairs.items():
-                if i == 0 and idx == 0:
-                    self._produce_and_enqueue_data(idx, mcp, mode_to_process, raw_batch)
-                else:
-                    self._produce_and_enqueue_data(idx, mcp, mode_to_process)
-            self.logger.debug(f"End num_micro_batch {i} produce data ")
-            
-            self.logger.debug(f"Start num_micro_batch {i} send data for mode: {mode_to_process}")
-            for cp in self.comm_pairs:
-                self._send_data_from_queue(cp, mode_to_process)
-            self.logger.debug(f"End num_micro_batch {i} send data")
-            self.iteration += 1
+        self.logger.debug(f"Start send data for mode: {mode_to_process}")
+        for cp in self.comm_pairs:
+            self._send_data_from_queue(cp, mode_to_process)
+        self.logger.debug(f"End send data")
+
+        # 3. Increase iteration count
+        self.iteration += 1
 
     def run(self):
         """运行主循环，直到满足停止条件 """
