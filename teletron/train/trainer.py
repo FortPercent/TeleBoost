@@ -43,7 +43,7 @@ from teletron.train.utils import (
     calc_params_l2_norm,
     get_grad_norm
 )
-from teletron.core.parallel_state import get_transformer_model_group
+from teletron.core.parallel_state import get_transformer_model_group, get_world_group
 from teletron.train.dataloader import DataloaderMixin
 from teletron.models.build import build_model
 from teletron.train.checkpoint import CheckPointMixin, unwrap_model, ensure_directory_exists, EMAModel
@@ -450,6 +450,7 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
                                     self.test_itrt, self.model,
                                     iteration, process_non_loss_data_func, self.config,
                                     verbose=True, write_to_tensorboard=not args.skip_train)
+        dist.barrier(group=get_world_group())
 
     def train(
         self,

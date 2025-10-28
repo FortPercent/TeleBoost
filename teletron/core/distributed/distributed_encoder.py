@@ -96,6 +96,8 @@ class DistDataProducer:
         self.valid_ds_preloaded = valid_ds
         
         self.iteration = 0
+        self.train_iteration = 0
+        self.target_train_iters = self.args.train_iters
         self.batch_size = 1
         
         self.same_data_group = {}
@@ -103,6 +105,7 @@ class DistDataProducer:
         self.modes = [TRAIN_MODE]
         if self.args.eval_iters > 0:
             self.modes.append(VALID_MODE)
+        self.in_train_epilogue = False
         self.logger.info(f"运行模式: {self.modes}")
 
         self.encoder.setup()
@@ -294,8 +297,11 @@ class DistDataProducer:
         dist.send(tensor=packed_tensor, dst=consumer_rank)
         self.logger.debug(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
 
-    def _get_mode_to_process(self):
+    def _get_mode_to_process(self, in_train_epilogue=False):
         """确定当前步骤要处理的模式（训练或验证）"""
+        if self.in_train_epilogue:
+            assert getattr(self, "train_or_valid_mode", None) is not None 
+            return self.train_or_valid_mode
         if VALID_MODE in self.modes:
             train_data_count = self.args.eval_interval
             eval_data_count = self.args.eval_iters
@@ -334,13 +340,21 @@ class DistDataProducer:
 
         # 3. 迭代计数器加一，每个iteration对应一个global batch
         self.iteration += 1
+        if mode_to_process == TRAIN_MODE:
+            self.train_iteration += 1
+            
+    def train_epilogue(self):
+        if VALID_MODE in self.modes:
+            self.in_train_epilogue = True 
+            self.train_or_valid_mode = VALID_MODE
+            self._main_loop_step()
 
     def run(self):
         """运行主循环，直到满足停止条件 """
         try:
             self.logger.info("主循环开始")
 
-            while any(self.sended_count[TRAIN_MODE][cp.consumer] < NUM_ITEMS_PER_CONSUMER for cp in self.comm_pairs):
+            while self.train_iteration < self.target_train_iters:
                 if self.profiler:
                     if self.iteration == self.args.profile_step_start:
                         self.logger.info("启动性能分析器...")
@@ -355,7 +369,7 @@ class DistDataProducer:
                 time.sleep(0.001)
 
             self.logger.info("所有 Consumer 已达到目标数据量. 主循环结束.")
-            
+            self.train_epilogue()
             self.logger.info("等待所有进程到达屏障...")
             dist.barrier(group=get_world_group())
             self.logger.info("所有进程已同步")
