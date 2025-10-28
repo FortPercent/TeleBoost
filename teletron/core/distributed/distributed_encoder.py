@@ -347,8 +347,9 @@ class DistDataProducer:
         if VALID_MODE in self.modes:
             self.in_train_epilogue = True 
             self.train_or_valid_mode = VALID_MODE
-            self._main_loop_step()
-
+            for _ in range(self.args.eval_iters):
+                self._main_loop_step()
+            
     def run(self):
         """运行主循环，直到满足停止条件 """
         try:
