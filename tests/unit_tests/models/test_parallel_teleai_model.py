@@ -101,22 +101,25 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
         )
     
     teleaiConfig = TeleaiParams()
+
     torch.manual_seed(1234)
-    
+    os.environ['USE_CUSTOM_RMSNORM'] = "0"
     teleai_model = TeleaiModel(**asdict(teleaiConfig)).cuda(cuda_rank).to(torch.bfloat16)
     torch.manual_seed(1234)
+    os.environ['USE_CUSTOM_RMSNORM'] = "1"
     parallel_teleai_model = ParallelTeleaiModel(cfg).cuda(cuda_rank).to(torch.bfloat16)
     
-    parallel_teleai_model.load_state_dict(tp_load_state_dict(teleai_model))
     
+    parallel_teleai_model.load_state_dict(tp_load_state_dict(teleai_model))
     input_dict = torch.load("/nvfile-heatstorage/ai_infra/data/lit117/teletron-testing/test_data/saved_inputs_360/input_dict_iter0_rank0.pt", map_location=f"cuda:{cuda_rank}")
-
+   
     teleai_model_output = teleai_model(x=input_dict['noisy_latents'],
-                                    timestep=input_dict['timestep'],
+                                       timestep=input_dict['timestep'],
                                     context=input_dict['prompt_emb']['context'],
                                     clip_feature = input_dict['image_emb']['clip_feature'],
                                     y=input_dict['image_emb']['y'])  
     
+
     parallel_teleai_model_output = parallel_teleai_model(x=input_dict['noisy_latents'],
                                     timestep=input_dict['timestep'],
                                     context=input_dict['prompt_emb']['context'],
@@ -135,6 +138,8 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     grad_allclose = True
     
     tp_rank = mpu.get_tensor_model_parallel_rank()
+    
+    # print(parallel_teleai_model)
     for name in model_grads:
         norm_euclid_dist = tp_normalized_euclid_dist(tp_rank, name, model_grads[name], parallel_model_grads[name])
         if norm_euclid_dist < 0.02:
@@ -307,8 +312,8 @@ class testParallelWanModel(TestCase):
         
     
 if __name__ == "__main__":
-    tensor_model_parallel_world_size = 2
-    world_size = 4
+    tensor_model_parallel_world_size = 1
+    world_size = 1
     cp_size = world_size // tensor_model_parallel_world_size
     responses = launch_multiprocess_testing(world_size, tensor_model_parallel_world_size, cp_size)
     

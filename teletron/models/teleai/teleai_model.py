@@ -6,6 +6,8 @@ from typing import Tuple, Optional
 from einops import rearrange
 from dataclasses import dataclass
 from typing import Tuple, Union, Dict, Any
+from teletron.core.cuda.fused_rmsnorm import Fused_RMSNorm
+import os
 
 try:
     import flash_attn_interface
@@ -115,6 +117,13 @@ class RMSNorm(nn.Module):
         return output
 
 
+
+def switch_rmsnorm(dim,eps=1e-6):
+    if os.getenv("USE_CUSTOM_RMSNORM") in ("1", "true", "TRUE"):
+        return Fused_RMSNorm(dim,eps)
+    else:
+        return RMSNorm(dim,eps)
+    
 class AttentionModule(nn.Module):
     def __init__(self, num_heads):
         super().__init__()
@@ -136,8 +145,8 @@ class SelfAttention(nn.Module):
         self.key = nn.Linear(dim, dim)
         self.value = nn.Linear(dim, dim)
         self.out_proj = nn.Linear(dim, dim)
-        self.norm_query = RMSNorm(dim, eps=eps)
-        self.norm_key = RMSNorm(dim, eps=eps)
+        self.norm_query = switch_rmsnorm(dim, eps=eps)
+        self.norm_key = switch_rmsnorm(dim, eps=eps)
 
         self.attn = AttentionModule(self.num_heads)
 
@@ -162,13 +171,13 @@ class CrossAttention(nn.Module):
         self.key = nn.Linear(dim, dim)
         self.value = nn.Linear(dim, dim)
         self.out_proj = nn.Linear(dim, dim)
-        self.norm_query = RMSNorm(dim, eps=eps)
-        self.norm_key = RMSNorm(dim, eps=eps)
+        self.norm_query = switch_rmsnorm(dim, eps=eps)
+        self.norm_key = switch_rmsnorm(dim, eps=eps)
         self.has_image_input = has_image_input
         if has_image_input:
             self.img_key = nn.Linear(dim, dim)
             self.img_value = nn.Linear(dim, dim)
-            self.norm_image_key = RMSNorm(dim, eps=eps)
+            self.norm_image_key = switch_rmsnorm(dim, eps=eps)
 
         self.attn = AttentionModule(self.num_heads)
         self.attn2 = AttentionModule(self.num_heads)

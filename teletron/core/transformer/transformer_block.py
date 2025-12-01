@@ -1,99 +1,144 @@
-
-from abc import abstractmethod
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-# from megatron.core.tensor_parallel import checkpoint
+from typing import List, Union
+from teletron.core.transformer.memory_manager import get_memory_manager
+from torch.autograd.graph import saved_tensors_hooks
+from typing import Tuple
+from functools import partial
+
+
+class save_on_cpu(saved_tensors_hooks):
+
+    def __init__(self, pin_memory: bool = False, device_type: str = "cuda") -> None:
+        device_module = getattr(torch, device_type, torch.cuda)
+
+        def pack_to_cpu(tensor: torch.Tensor) -> Tuple[torch.device, torch.Tensor]:
+            
+            if not pin_memory:
+                manager = get_memory_manager()
+                tensor_buffer = manager.get_buffer(tensor.size(), tensor.dtype)
+                tensor_buffer.copy_(tensor, non_blocking=False)
+                return (tensor.device, tensor_buffer)
+            packed = torch.empty(
+                tensor.size(),
+                dtype=tensor.dtype,
+                layout=tensor.layout,
+                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+            )
+            packed.copy_(tensor)
+            return (tensor.device, packed)
+ 
+        def unpack_from_cpu(packed: Tuple[torch.device, torch.Tensor]) -> torch.Tensor:
+            device, tensor = packed
+            manager = get_memory_manager()
+            reloaded_t = torch.empty(tensor.size(), dtype=tensor.dtype, device=device)
+            reloaded_t.copy_(tensor, non_blocking=pin_memory)
+            manager.return_buffer(tensor)
+            return tensor.to(device, non_blocking=pin_memory)
+
+        super().__init__(pack_to_cpu, unpack_from_cpu)
+
+# class CheckpointWrapper(nn.Module):
+#     """
+#     一个包裹模块，用于对单个 Transformer Block 应用激活重计算 (Activation Checkpointing)。
+#     它的 `forward` 方法会通过 `torch.utils.checkpoint.checkpoint` 来调用被包裹的模块。
+#     """
+#     def __init__(self, module_to_wrap: nn.Module):
+#         super().__init__()
+#         self.module_to_wrap = module_to_wrap
+
+#     def forward(self, *args, **kwargs):
+#         """
+#         通过 checkpoint 调用被包裹的模块。
+#         - checkpoint 会在前向传播时不保存中间激活值，在反向传播时重新计算它们 [citation: 3][citation: 10]。
+#         - use_reentrant=False 是推荐的现代用法，通常效率更高。
+#         """
+#         return checkpoint(self.module_to_wrap, *args, **kwargs, use_reentrant=False)
+
+# class OffloadWrapper(nn.Module):
+#     """
+#     一个包裹模块，用于将激活值卸载 (Offload) 到 CPU。
+#     它利用 `torch.autograd.graph.save_on_cpu` 上下文管理器来实现。
+#     """
+#     def __init__(self, module_to_wrap: nn.Module):
+#         super().__init__()
+#         self.module_to_wrap = module_to_wrap
+
+#     def forward(self, *args, **kwargs):
+#         with save_on_cpu():
+#             return self.module_to_wrap(*args, **kwargs)
+        
+def offload(forward_func):
+
+    def wrapped_forward(self, *args, **kwargs):
+        with save_on_cpu():
+            return forward_func(self, *args, **kwargs)
+    return wrapped_forward
+
+
+
+
+# --- 步骤 2: 重构 TransformerGeneralMixin ---
 
 class TransformerGeneralMixin:
-    def enable_activation_offload(self, blocks):
-        self.enable_activation_checkpointing(blocks)
-        blocks.forward = self.activation_offload_forward_transformer_blocks(blocks)
+    """
+    一个提供高级内存优化功能的 Mixin 类。
+    它采用模块化包裹的方式来启用激活重计算和卸载，避免了直接修改方法。
+    """
 
-    def activation_offload_forward_transformer_blocks(self, blocks):
-        origin_forward = blocks.forward
-        def wrap_blocks_with_offload(*args):
-            return self._activation_offload_forward(origin_forward, *args)
-        return wrap_blocks_with_offload
+    def enable_activation_optimizations(
+        self,
+        blocks: nn.ModuleList,
+        enable_checkpointing: bool = True,
+        enable_offloading: bool = False
+    ):
+        """
+        统一的入口函数，用于启用激活优化。
 
-    def _activation_offload_forward(self, forward_blocks, *args):
-        with torch.autograd.graph.save_on_cpu():
-            return forward_blocks(*args)
-
-    def enable_activation_checkpointing(self, blocks):
+        Args:
+            blocks (nn.ModuleList): 包含所有 Transformer 层的 ModuleList。
+            enable_checkpointing (bool): 是否启用激活重计算。
+            enable_offloading (bool): 是否启用激活卸载。
+        """
+        # if not (enable_checkpointing or enable_offloading):
+        #     return
+        enable_offloading = False
+        # 从配置中获取详细参数
         from teletron.utils import get_args
         args = get_args()
-        self.activation_recompute_method = args.recompute_method
-        self.recompute_granularity = args.recompute_granularity
-        self.recompute_num_layers = args.recompute_num_layers
-        blocks.forward = self.checkpointed_forward_transformer_blocks(blocks)
 
-    # todo: kwargs are not updated
-    def checkpointed_forward_transformer_blocks(self, blocks):
-        def wrap_blocks(*args):
-            if self.recompute_granularity == "full"  and self.training:
-                output = self._checkpointed_forward(blocks, *args)
-            else:
-                for block in blocks:
-                    output = block(*args)
-                    args = self._update_args(output, args)
-            return output
-        return wrap_blocks
+        # Checkpointing 相关配置
+        recompute_method = getattr(args, 'recompute_method', 'block')
+        recompute_num_layers = getattr(args, 'recompute_num_layers', 0) if enable_checkpointing else 0
 
-    def _get_block(self, blocks, layer_number: int):
-        return blocks[layer_number]    
+        print("Applying activation optimizations...")
+        if enable_checkpointing:
+            print(f"  - Checkpointing enabled: method='{recompute_method}', num_layers={recompute_num_layers}")
+        if enable_offloading:
+            print("  - Offloading enabled for all layers.")
 
-    def _update_args(self, output, args):
-        if isinstance(output, tuple):
-            return output + args[len(output):]
-        else:
-            return (output,) + args[1:]
-
-    def _checkpointed_forward(self, blocks, *args):
-
-        def create_custom_forward(start, end, blocks):
-            def custom_forward(*args):
-                for index in range(start, end):
-                    block = self._get_block(blocks, index)
-                    output = block(*args)
-                    args = self._update_args(output, args)
-                return output
-            return custom_forward
-
-        if self.activation_recompute_method == "uniform":
-            # Uniformly divide the total number of Transformer layers and
-            # checkpoint the input activation of each divided chunk.
-            # A method to further reduce memory usage reducing checkpoints.
-            _layer_num = 0
-            assert self.recompute_num_layers <= len(blocks)
-            while _layer_num < len(blocks):
-                output = checkpoint(
-                    create_custom_forward(_layer_num, _layer_num + self.recompute_num_layers, blocks),
-                    *args,
-                    use_reentrant=False,
-                )
-                args = self._update_args(output, args)
-                _layer_num += self.recompute_num_layers
-
-        elif self.activation_recompute_method == "block":
-            # Checkpoint the input activation of only a set number of individual
-            # Transformer layers and skip the rest.
-            # A method fully use the device memory removing redundant re-computation.
-            for _layer_num in range(len(blocks)):
-                if _layer_num < self.recompute_num_layers:
-                    output = checkpoint(
-                        create_custom_forward(_layer_num, _layer_num + 1, blocks),
-                        *args,
-                        use_reentrant=False,
-                    )
+        for i in range(len(blocks)):
+            module_to_wrap = blocks[i]
+            should_checkpoint_this_layer = False
+            if enable_checkpointing and recompute_num_layers > 0:
+                if recompute_method == 'block':
+                    if i < recompute_num_layers:
+                        should_checkpoint_this_layer = True
+                elif recompute_method == 'uniform':
+                    should_checkpoint_this_layer = True
                 else:
-                    block = self._get_block(blocks, _layer_num)
-                    output = block(*args)
-                args = self._update_args(output, args)
-        else:
-            raise ValueError(f"Invalid activation recompute method {self.activation_recompute_method}.")
+                    raise ValueError(f"Invalid activation recompute method {recompute_method}.")
+            if should_checkpoint_this_layer:
+                if enable_offloading :
+                    module_to_wrap.forward = partial(checkpoint, module_to_wrap.forward, use_reentrant=False)
+                    module_to_wrap.forward = offload(module_to_wrap.forward)
 
-        return output 
+                else:
+                    module_to_wrap.forward = partial(checkpoint, module_to_wrap.forward, use_reentrant=False)
+            
+            if module_to_wrap is not blocks[i]:
+                blocks[i] = module_to_wrap
 
     def set_input_tensor(self, x):
         return None
