@@ -103,10 +103,8 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     teleaiConfig = TeleaiParams()
 
     torch.manual_seed(1234)
-    os.environ['USE_CUSTOM_RMSNORM'] = "0"
     teleai_model = TeleaiModel(**asdict(teleaiConfig)).cuda(cuda_rank).to(torch.bfloat16)
     torch.manual_seed(1234)
-    os.environ['USE_CUSTOM_RMSNORM'] = "1"
     parallel_teleai_model = ParallelTeleaiModel(cfg).cuda(cuda_rank).to(torch.bfloat16)
     
     
@@ -139,7 +137,7 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     
     tp_rank = mpu.get_tensor_model_parallel_rank()
     
-    # print(parallel_teleai_model)
+
     for name in model_grads:
         norm_euclid_dist = tp_normalized_euclid_dist(tp_rank, name, model_grads[name], parallel_model_grads[name])
         if norm_euclid_dist < 0.02:

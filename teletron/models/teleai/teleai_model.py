@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Tuple, Union, Dict, Any
 from teletron.core.cuda.fused_rmsnorm import Fused_RMSNorm
 import os
+from teletron.utils import get_args
 
 try:
     import flash_attn_interface
@@ -119,7 +120,8 @@ class RMSNorm(nn.Module):
 
 
 def switch_rmsnorm(dim,eps=1e-6):
-    if os.getenv("USE_CUSTOM_RMSNORM") in ("1", "true", "TRUE"):
+    args = get_args()
+    if args.use_fused_rmsnorm:
         return Fused_RMSNorm(dim,eps)
     else:
         return RMSNorm(dim,eps)

@@ -39,36 +39,7 @@ class save_on_cpu(saved_tensors_hooks):
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
-# class CheckpointWrapper(nn.Module):
-#     """
-#     一个包裹模块，用于对单个 Transformer Block 应用激活重计算 (Activation Checkpointing)。
-#     它的 `forward` 方法会通过 `torch.utils.checkpoint.checkpoint` 来调用被包裹的模块。
-#     """
-#     def __init__(self, module_to_wrap: nn.Module):
-#         super().__init__()
-#         self.module_to_wrap = module_to_wrap
 
-#     def forward(self, *args, **kwargs):
-#         """
-#         通过 checkpoint 调用被包裹的模块。
-#         - checkpoint 会在前向传播时不保存中间激活值，在反向传播时重新计算它们 [citation: 3][citation: 10]。
-#         - use_reentrant=False 是推荐的现代用法，通常效率更高。
-#         """
-#         return checkpoint(self.module_to_wrap, *args, **kwargs, use_reentrant=False)
-
-# class OffloadWrapper(nn.Module):
-#     """
-#     一个包裹模块，用于将激活值卸载 (Offload) 到 CPU。
-#     它利用 `torch.autograd.graph.save_on_cpu` 上下文管理器来实现。
-#     """
-#     def __init__(self, module_to_wrap: nn.Module):
-#         super().__init__()
-#         self.module_to_wrap = module_to_wrap
-
-#     def forward(self, *args, **kwargs):
-#         with save_on_cpu():
-#             return self.module_to_wrap(*args, **kwargs)
-        
 def offload(forward_func):
 
     def wrapped_forward(self, *args, **kwargs):
