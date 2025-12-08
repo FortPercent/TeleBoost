@@ -10,7 +10,7 @@ config = dict(
         type="ClipDataset",
         serialize_data=False,
         data_path_list=[
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            "/nvfile-heatstorage/AIGC_H100/basemodel_exp/dataset/istock/istock_0.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_2.json",
             # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_3.json",

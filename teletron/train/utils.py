@@ -1284,6 +1284,7 @@ def _add_transformer_engine_args(parser):
     group.add_argument('--transformer-impl', default='transformer_engine',
                        choices=['local', 'transformer_engine'],
                        help='Which Transformer implementation to use.')
+    group.add_argument('--use-fused-rmsnorm',action='store_true',help='Enable fused rmsnorm kernel')
 
     return parser
 

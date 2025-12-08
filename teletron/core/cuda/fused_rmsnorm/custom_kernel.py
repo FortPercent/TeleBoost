@@ -96,7 +96,6 @@ class Fused_RMSNorm(nn.Module):
 
     def forward(self, x):
 
-
         cols = self.hidden_size
         if x.shape[-1] != cols:
              raise ValueError(f"Last dim of input x must be hidden_size {cols}, got {x.shape[-1]}")

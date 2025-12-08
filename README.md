@@ -4,7 +4,7 @@ Teletron 是一个专为训练长上下文多模态Transformer模型而设计的
 
 ## News
 * 2025-09-18：可以使用torch compile加速encoder编码了，各分辨率下有20-40%不等的encoder时延下降。详见config_guide.md中的vae配置部分。
-
+* 2025-12-08：可以使用--use-fused-rmsnorm参数来使用fused rmsnorm算子加速RMSNORM计算，支持各种模型大小，在1.3B模型下测试dit总体时间减少10%左右，没有精度损失
 
 ## QuickStart
 

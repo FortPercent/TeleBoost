@@ -43,8 +43,7 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
         normed_x3 = self.norm3(gated_x1)
         cross_attn_output = self.cross_attn(normed_x3, context)
         
-        # cross_attn_output = self.cross_attn(x, context)
-        # return cross_attn_output
+
         x = gated_x1 + cross_attn_output
 
         normed_x2 = self.norm2(x)
@@ -76,20 +75,8 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         # from TransformerGeneralMixin
         from teletron.utils import get_args
         args = get_args()
-        # print("hello",args.activation_offload)
-        # def forward(x, context_emb, t_mod, freqs):
-        #     breakpoint()
-        #     for block in self.models:
-        #         x = block(x, context_emb, t_mod, freqs)
-        #     return x
-        # self.blocks.forward = forward    
-        # if args.activation_offload:
-        #     # self.enable_activation_offload(self.blocks)
-        #     pass
-        # else:
-        #     self.enable_activation_checkpointing(self.blocks)
-        #     pass
-        self.enable_activation_optimizations(self.blocks,enable_checkpointing=True,enable_offloading=False)
+
+        self.enable_activation_optimizations(self.blocks,enable_checkpointing=True,enable_offloading=args.activation_offload)
         # from ContextParallelMixin
         self.register_cp_grad_reduce_hook()
 
@@ -149,7 +136,6 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         set_global_all_to_all_buffer(x.numel())
         freqs = self.split_input(freqs, dim=0)
         # freqs = self.split_input(freqs, dim=-1)
-        # x = self.blocks(x, context_emb, t_mod, freqs)
         
         for block in self.blocks:
             x = block(x, context_emb, t_mod, freqs)

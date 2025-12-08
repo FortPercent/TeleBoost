@@ -31,7 +31,7 @@ EXPR_NAME=f1fn2v_1.3B
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_i2v.py"}
-CONFIG_PATH=${2:-"config.teleai_i2v.config"}
+CONFIG_PATH=${2:-"config.debug_i2v.config"}
 shift
 echo "Launching: $TRAIN_SCRIPT"
 
@@ -93,6 +93,7 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
+    --use-fused-rmsnorm
 )
 
 MODEL_PARALLEL_ARGS=(
