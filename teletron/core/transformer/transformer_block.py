@@ -72,9 +72,6 @@ class TransformerGeneralMixin:
             enable_checkpointing (bool): 是否启用激活重计算。
             enable_offloading (bool): 是否启用激活卸载。
         """
-        # if not (enable_checkpointing or enable_offloading):
-        #     return
-        enable_offloading = False
         # 从配置中获取详细参数
         from teletron.utils import get_args
         args = get_args()
