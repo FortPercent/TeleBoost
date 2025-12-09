@@ -86,7 +86,7 @@ TRAINING_ARGS=(
     --lr-warmup-fraction 0
     --recompute-granularity full 
     --recompute-method block 
-    # --activation-offload
+    #--activation-offload
     --use-distributed-optimizer
     --recompute-num-layers 40
     --no-rope-fusion
