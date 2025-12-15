@@ -8,7 +8,6 @@ from teletron.models.teleai.models.dit import TeleaiTextEncoder
 from teletron.models.teleai.models.dit import TeleaiVideoVAE
 from teletron.models.teleai.models.dit import TeleaiVideoVAE_2_2
 from teletron.models.teleai.models.dit import TeleaiImageEncoder
-from video_depth_anything.video_depth import VideoDepthAnything
 from teletron.models.teleai.teleai_encoder_utils import (
     get_context,
     get_img_clip_feature,
@@ -129,6 +128,7 @@ class TeleaiEncoder(BaseEncoder):
 
         if self.depth_model_path is not None:
             print(f"加载 Depth Model 模型... {self.depth_model_path}")
+            from video_depth_anything.video_depth import VideoDepthAnything
             self.depth_model = VideoDepthAnything().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
             self.depth_model.load_state_dict(torch.load(self.depth_model_path, map_location='cpu', weights_only=False), strict=True)
 
