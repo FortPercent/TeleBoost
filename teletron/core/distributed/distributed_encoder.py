@@ -146,6 +146,63 @@ class DistDataProducer:
 
         self.logger.propagate = False
 
+    def _summarize_raw_batch(self, obj, max_items=10, max_depth=3):
+        """Return a JSON-serializable summary of raw batch structure."""
+        if max_depth <= 0:
+            return {"type": type(obj).__name__}
+        if torch.is_tensor(obj):
+            return {
+                "type": "torch.Tensor",
+                "dtype": str(obj.dtype),
+                "shape": list(obj.shape),
+                "device": str(obj.device),
+            }
+        if isinstance(obj, np.ndarray):
+            return {
+                "type": "np.ndarray",
+                "dtype": str(obj.dtype),
+                "shape": list(obj.shape),
+            }
+        if isinstance(obj, dict):
+            items = list(obj.items())
+            summarized = {
+                str(k): self._summarize_raw_batch(v, max_items=max_items, max_depth=max_depth - 1)
+                for k, v in items[:max_items]
+            }
+            if len(items) > max_items:
+                summarized["_truncated"] = len(items) - max_items
+            return {"type": "dict", "items": summarized}
+        if isinstance(obj, (list, tuple)):
+            items = list(obj)
+            summarized = [
+                self._summarize_raw_batch(v, max_items=max_items, max_depth=max_depth - 1)
+                for v in items[:max_items]
+            ]
+            if len(items) > max_items:
+                summarized.append({"_truncated": len(items) - max_items})
+            return {"type": type(obj).__name__, "items": summarized}
+        if isinstance(obj, (str, int, float, bool)) or obj is None:
+            return {"type": type(obj).__name__, "value": obj}
+        return {"type": type(obj).__name__, "repr": repr(obj)[:200]}
+
+    def _dump_raw_batch_debug(self, raw_batch, mode):
+        """Persist raw batch format/type info to a jsonl file for debugging."""
+        try:
+            base_dir = getattr(self.args, "profile_path", ".")
+            debug_path = os.path.join(base_dir, f"producer/raw_batch_debug_rank_{self.rank}.jsonl")
+            ensure_directory_exists(debug_path)
+            payload = {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "rank": self.rank,
+                "mode": mode,
+                "iteration": self.iteration,
+                "summary": self._summarize_raw_batch(raw_batch),
+            }
+            with open(debug_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        except Exception as e:
+            self.logger.debug(f"Raw batch debug dump failed: {e}")
+
     def _get_gpu_memory_usage(self) -> str:
         """获取并格式化当前GPU显存使用情况"""
         try:
@@ -321,7 +378,8 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
-        print(raw_batch)
+        self._dump_raw_batch_debug(raw_batch, mode_to_process)
+        
         raw_batch_shape = raw_batch['images'].shape
         
         num_micro_batchs = self.args.global_batch_size // self.args.data_parallel_size
