@@ -128,7 +128,7 @@ config = dict(
         ),
         encoder=dict(
             type="teleai_encoder", # teleai_encoder
-            encoder_schema=['context', 'img_clip_feature', 'img_emb_y', 'latents'],
+            encoder_schema=['context', 'img_emb_y', 'latents'],
             vae=dict(
                 path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
                 tiler_kwargs=dict(
