@@ -89,64 +89,119 @@ def forward_step(data_iterator, model, time_step=None):
     timers.start_timer('get-data-time')
     batch = next(data_iterator)
     timers.stop_timer('get-data-time')
-    chosen_latents = batch["chosen_input_latents"]
-    reject_latents = batch["reject_input_latents"]
-    context = batch["context"]  # text encoder output
-    clip_feature = batch.get("clip_feature", batch.get("img_clip_feature"))
-    y = batch.get("img_emb_y")
+    context = batch["context"]  # shared text context
 
-    # timestep
-    diffusion_config = set_config().get("model_config",{}).get("training",{}).get("diffusion",{})
-    min_timestep_boundary = int(diffusion_config.get("min_timestep_boundary") * flow_scheduler.num_train_timesteps)
-    max_timestep_boundary = int(diffusion_config.get("max_timestep_boundary") * flow_scheduler.num_train_timesteps)
-    timestep_range = [min_timestep_boundary, max_timestep_boundary]
-    timestep_id = torch.randint(timestep_range[0], timestep_range[1], (1,))
-    timestep = flow_scheduler.timesteps[timestep_id].to(
-        dtype=torch.bfloat16, device=torch.cuda.current_device()
+    chosen_latents = batch["chosen"]["latents"]
+    reject_latents = batch["rejected"]["latents"]
+
+    # clip feature / img_emb_y（正负样本各自的）
+    chosen_clip_feature = batch["chosen"].get(
+        "img_clip_feature", batch["chosen"].get("clip_feature")
+    )
+    reject_clip_feature = batch["rejected"].get(
+        "img_clip_feature", batch["rejected"].get("clip_feature")
     )
 
-    def broadcast_timesteps(input: torch.Tensor):
+    chosen_y = batch["chosen"].get("img_emb_y")
+    reject_y = batch["rejected"].get("img_emb_y")
+
+    # =========================
+    # timestep sampling
+    # =========================
+    diffusion_config = (
+        set_config()
+        .get("model_config", {})
+        .get("training", {})
+        .get("diffusion", {})
+    )
+
+    min_timestep_boundary = int(
+        diffusion_config.get("min_timestep_boundary")
+        * flow_scheduler.num_train_timesteps
+    )
+    max_timestep_boundary = int(
+        diffusion_config.get("max_timestep_boundary")
+        * flow_scheduler.num_train_timesteps
+    )
+
+    timestep_range = [min_timestep_boundary, max_timestep_boundary]
+    timestep_id = torch.randint(
+        timestep_range[0], timestep_range[1], (1,)
+    )
+    timestep = flow_scheduler.timesteps[timestep_id].to(
+        dtype=torch.bfloat16,
+        device=torch.cuda.current_device(),
+    )
+
+    def broadcast_tensor(input: torch.Tensor):
         tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
         if mpu.get_tensor_context_parallel_world_size() > 1:
-            dist.broadcast(input, tp_cp_src_rank, group=mpu.get_tensor_context_parallel_group())
+            dist.broadcast(
+                input,
+                tp_cp_src_rank,
+                group=mpu.get_tensor_context_parallel_group(),
+            )
 
     if time_step is not None:
-        timestep = torch.tensor([time_step], dtype=torch.bfloat16, device=torch.cuda.current_device())
+        timestep = torch.tensor(
+            [time_step],
+            dtype=torch.bfloat16,
+            device=torch.cuda.current_device(),
+        )
 
-    broadcast_timesteps(timestep)
+    broadcast_tensor(timestep)
 
-    # simulate WanVideoUnit_NoiseInitializer
+    # =========================
+    # noise (正负样本独立)
+    # =========================
     noise_chosen = torch.randn_like(chosen_latents)
     noise_reject = torch.randn_like(reject_latents)
-    broadcast_timesteps(noise_chosen)
-    broadcast_timesteps(noise_reject)
 
-    loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = _compute_single_loss(
-        chosen_latents,
-        context,
-        clip_feature,
-        y,
-        flow_scheduler,
-        model,
-        timestep,
-        noise_chosen,
+    broadcast_tensor(noise_chosen)
+    broadcast_tensor(noise_reject)
+
+    # =========================
+    # forward & loss
+    # =========================
+    loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
+        _compute_single_loss(
+            chosen_latents,
+            context,
+            chosen_clip_feature,
+            chosen_y,
+            flow_scheduler,
+            model,
+            timestep,
+            noise_chosen,
+        )
     )
-    loss_reject, loss_wo_w_reject, first_frame_loss_reject = _compute_single_loss(
-        reject_latents,
-        context,
-        clip_feature,
-        y,
-        flow_scheduler,
-        model,
-        timestep,
-        noise_reject,
+
+    loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
+        _compute_single_loss(
+            reject_latents,
+            context,
+            reject_clip_feature,
+            reject_y,
+            flow_scheduler,
+            model,
+            timestep,
+            noise_reject,
+        )
     )
-    beta = float(set_config().get("model_config").get("dit").get("train").get("dpo").get("beta"))
-    advantage = (loss_reject - loss_chosen).clamp(-20,20)
-    dpo_loss = -F.logsigmoid( beta * advantage).mean()
-    return [
-     dpo_loss
-    ], dpo_loss_func
+
+    beta = float(
+        set_config()
+        .get("model_config")
+        .get("dit")
+        .get("train")
+        .get("dpo")
+        .get("beta")
+    )
+
+    advantage = (loss_reject - loss_chosen).clamp(-20, 20)
+    dpo_loss = -F.logsigmoid(beta * advantage).mean()
+
+    return [dpo_loss], dpo_loss_func
 
 
 if __name__ == "__main__":
