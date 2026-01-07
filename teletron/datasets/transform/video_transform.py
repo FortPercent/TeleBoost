@@ -236,7 +236,7 @@ class LoadInputImageAsFirstFrame:
             image = self.lmdb_client.get(path)
         else:
             image = self.file_client.get(path)
-
+        print(f"LoadInputImageAsFirstFrame: load image from {path} ")
         # 2. PIL → resize / crop
         image = self.resize_op(image)
 
