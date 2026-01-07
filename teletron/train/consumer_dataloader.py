@@ -47,9 +47,16 @@ class BaseBatchLoader(ABC):
     def __iter__(self):
         return self
 
+
     def __next__(self):
+        device = torch.cuda.current_device()
+        from utils import build_meta_tree, allocate_from_meta, broadcast_tensor_tree, recv_tensor_tree
         if self.rank == 0:
+            # =========================
+            # Rank 0: 准备 batch
+            # =========================
             batch = self._prepare_batch_on_rank_zero()
+
             dump_object_summary(
                 batch,
                 self._get_debug_dump_path(),
@@ -59,26 +66,19 @@ class BaseBatchLoader(ABC):
                     "stage": "consumer_batch_prepare",
                 },
             )
-            if batch is None: 
+
+            if batch is None:
                 self._broadcast_object([None])
                 raise StopIteration
 
-            meta_info = {}
-            for key, value in batch.items():
-                if isinstance(value, torch.Tensor):
-                    meta_info[key] = {'shape': value.shape, 'dtype': value.dtype}
-                elif isinstance(value, list):
-                    meta_info[key] = {'shape': len(value), 'dtype': list}
-                else:
-                    raise TypeError(f"Unsupported type {type(value)} for broadcasting in batch.")
-            
-            self._broadcast_object([meta_info])
+            # 1. 构造 meta tree
+            meta_tree = build_meta_tree(batch)
 
-            for key, value in batch.items():
-                if isinstance(value, torch.Tensor):
-                    self._broadcast_tensor(value)
-                elif isinstance(value, list):
-                    self._broadcast_object(value)
+            # 2. broadcast meta
+            self._broadcast_object([meta_tree])
+
+            # 3. 递归 broadcast Tensor
+            broadcast_tensor_tree(batch, self._broadcast_tensor)
 
             dump_object_summary(
                 batch,
@@ -89,31 +89,27 @@ class BaseBatchLoader(ABC):
                     "stage": "consumer_batch",
                 },
             )
+
             self.iteration += 1
             return batch
-        else:
-            meta_info_list = [None]
-            self._broadcast_object(meta_info_list)
-            meta_info = meta_info_list[0]
 
-            if meta_info is None:
+        else:
+            # =========================
+            # Non-rank0: 接收 batch
+            # =========================
+            meta_list = [None]
+            self._broadcast_object(meta_list)
+            meta_tree = meta_list[0]
+
+            if meta_tree is None:
                 raise StopIteration
 
-            batch = {}
-            for key, info in meta_info.items():
-                dtype = info['dtype']
-                shape = info['shape']
-                if dtype is list:
-                    batch[key] = [None] * shape
-                else:
-                    batch[key] = torch.empty(shape, dtype=dtype, device=torch.cuda.current_device())
-            
-            # 3. 接收广播的数据填充容器
-            for key, value in batch.items():
-                if isinstance(value, torch.Tensor):
-                    self._broadcast_tensor(value)
-                elif isinstance(value, list):
-                    self._broadcast_object(value)
+            # 1. 根据 meta 构造空 batch
+            batch = allocate_from_meta(meta_tree, device)
+
+            # 2. 递归接收 Tensor
+            recv_tensor_tree(batch, self._broadcast_tensor)
+
             dump_object_summary(
                 batch,
                 self._get_debug_dump_path(),
@@ -123,8 +119,88 @@ class BaseBatchLoader(ABC):
                     "stage": "consumer_batch",
                 },
             )
+
             self.iteration += 1
             return batch
+
+    # def __next__(self):
+    #     if self.rank == 0:
+    #         batch = self._prepare_batch_on_rank_zero()
+    #         dump_object_summary(
+    #             batch,
+    #             self._get_debug_dump_path(),
+    #             meta={
+    #                 "rank": self.rank,
+    #                 "iteration": self.iteration,
+    #                 "stage": "consumer_batch_prepare",
+    #             },
+    #         )
+    #         if batch is None: 
+    #             self._broadcast_object([None])
+    #             raise StopIteration
+
+    #         meta_info = {}
+    #         for key, value in batch.items():
+    #             if isinstance(value, torch.Tensor):
+    #                 meta_info[key] = {'shape': value.shape, 'dtype': value.dtype}
+    #             elif isinstance(value, list):
+    #                 meta_info[key] = {'shape': len(value), 'dtype': list}
+    #             else:
+    #                 raise TypeError(f"Unsupported type {type(value)} for broadcasting in batch.")
+            
+    #         self._broadcast_object([meta_info])
+
+    #         for key, value in batch.items():
+    #             if isinstance(value, torch.Tensor):
+    #                 self._broadcast_tensor(value)
+    #             elif isinstance(value, list):
+    #                 self._broadcast_object(value)
+
+    #         dump_object_summary(
+    #             batch,
+    #             self._get_debug_dump_path(),
+    #             meta={
+    #                 "rank": self.rank,
+    #                 "iteration": self.iteration,
+    #                 "stage": "consumer_batch",
+    #             },
+    #         )
+    #         self.iteration += 1
+    #         return batch
+    #     else:
+    #         meta_info_list = [None]
+    #         self._broadcast_object(meta_info_list)
+    #         meta_info = meta_info_list[0]
+
+    #         if meta_info is None:
+    #             raise StopIteration
+
+    #         batch = {}
+    #         for key, info in meta_info.items():
+    #             dtype = info['dtype']
+    #             shape = info['shape']
+    #             if dtype is list:
+    #                 batch[key] = [None] * shape
+    #             else:
+    #                 batch[key] = torch.empty(shape, dtype=dtype, device=torch.cuda.current_device())
+            
+    #         # 3. 接收广播的数据填充容器
+    #         for key, value in batch.items():
+    #             if isinstance(value, torch.Tensor):
+    #                 self._broadcast_tensor(value)
+    #             elif isinstance(value, list):
+    #                 self._broadcast_object(value)
+    #         dump_object_summary(
+    #             batch,
+    #             self._get_debug_dump_path(),
+    #             meta={
+    #                 "rank": self.rank,
+    #                 "iteration": self.iteration,
+    #                 "stage": "consumer_batch",
+    #             },
+    #         )
+    #         self.iteration += 1
+    #         return batch
 
 def _unflatten_tensor_tree(paths, tensors):
     """

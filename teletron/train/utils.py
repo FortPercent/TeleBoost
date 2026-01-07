@@ -2138,3 +2138,74 @@ def _add_experimental_args(parser):
                        help = 'Config file to add additional arguments')
 
     return parser
+
+
+
+
+META_TYPE = "__type__"
+META_TENSOR = "tensor"
+META_DICT = "dict"
+
+
+def build_meta_tree(obj):
+    """
+    从 batch 构造 meta tree（不包含数据，只包含结构和 tensor 信息）
+    """
+    if isinstance(obj, torch.Tensor):
+        return {
+            META_TYPE: META_TENSOR,
+            "shape": tuple(obj.shape),
+            "dtype": obj.dtype,
+        }
+    elif isinstance(obj, dict):
+        return {
+            META_TYPE: META_DICT,
+            "items": {k: build_meta_tree(v) for k, v in obj.items()},
+        }
+    else:
+        raise TypeError(f"Unsupported type in batch meta: {type(obj)}")
+
+
+def allocate_from_meta(meta, device):
+    """
+    根据 meta tree 构造空 batch（Tensor 已分配但未填充）
+    """
+    if meta[META_TYPE] == META_TENSOR:
+        return torch.empty(
+            meta["shape"],
+            dtype=meta["dtype"],
+            device=device,
+        )
+    elif meta[META_TYPE] == META_DICT:
+        return {
+            k: allocate_from_meta(v, device)
+            for k, v in meta["items"].items()
+        }
+    else:
+        raise ValueError(f"Unknown meta type: {meta[META_TYPE]}")
+
+
+def broadcast_tensor_tree(obj, broadcast_tensor_fn):
+    """
+    Rank 0 使用：递归 broadcast Tensor
+    """
+    if isinstance(obj, torch.Tensor):
+        broadcast_tensor_fn(obj)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            broadcast_tensor_tree(v, broadcast_tensor_fn)
+    else:
+        raise TypeError(f"Unsupported type in broadcast: {type(obj)}")
+
+
+def recv_tensor_tree(obj, broadcast_tensor_fn):
+    """
+    非 Rank 0 使用：递归接收 Tensor
+    """
+    if isinstance(obj, torch.Tensor):
+        broadcast_tensor_fn(obj)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            recv_tensor_tree(v, broadcast_tensor_fn)
+    else:
+        raise TypeError(f"Unsupported type in recv: {type(obj)}")
