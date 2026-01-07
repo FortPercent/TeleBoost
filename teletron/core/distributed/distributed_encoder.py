@@ -4,16 +4,15 @@ import torch.distributed as dist
 import collections
 import time
 from typing import Callable, Any, Dict, List
-from datetime import datetime
 import psutil
 import traceback
 import copy
 import random
-import json
 import numpy as np
 import logging 
 from teletron.core.parallel_state import get_comm_pair, get_world_group, CommPair
 from teletron.utils import get_args, get_timers
+from teletron.utils.debug_utils import dump_object_summary
 from teletron.train.checkpoint import ensure_directory_exists
 from teletron.models.encoder_registry import get_encoder
 
@@ -146,62 +145,9 @@ class DistDataProducer:
 
         self.logger.propagate = False
 
-    def _summarize_raw_batch(self, obj, max_items=10, max_depth=3):
-        """Return a JSON-serializable summary of raw batch structure."""
-        if max_depth <= 0:
-            return {"type": type(obj).__name__}
-        if torch.is_tensor(obj):
-            return {
-                "type": "torch.Tensor",
-                "dtype": str(obj.dtype),
-                "shape": list(obj.shape),
-                "device": str(obj.device),
-            }
-        if isinstance(obj, np.ndarray):
-            return {
-                "type": "np.ndarray",
-                "dtype": str(obj.dtype),
-                "shape": list(obj.shape),
-            }
-        if isinstance(obj, dict):
-            items = list(obj.items())
-            summarized = {
-                str(k): self._summarize_raw_batch(v, max_items=max_items, max_depth=max_depth - 1)
-                for k, v in items[:max_items]
-            }
-            if len(items) > max_items:
-                summarized["_truncated"] = len(items) - max_items
-            return {"type": "dict", "items": summarized}
-        if isinstance(obj, (list, tuple)):
-            items = list(obj)
-            summarized = [
-                self._summarize_raw_batch(v, max_items=max_items, max_depth=max_depth - 1)
-                for v in items[:max_items]
-            ]
-            if len(items) > max_items:
-                summarized.append({"_truncated": len(items) - max_items})
-            return {"type": type(obj).__name__, "items": summarized}
-        if isinstance(obj, (str, int, float, bool)) or obj is None:
-            return {"type": type(obj).__name__, "value": obj}
-        return {"type": type(obj).__name__, "repr": repr(obj)[:200]}
-
-    def _dump_raw_batch_debug(self, raw_batch, mode):
-        """Persist raw batch format/type info to a jsonl file for debugging."""
-        try:
-            base_dir = getattr(self.args, "profile_path", None) or "."
-            debug_path = os.path.join(base_dir, f"producer/raw_batch_debug_rank_{self.rank}.jsonl")
-            ensure_directory_exists(debug_path)
-            payload = {
-                "ts": datetime.utcnow().isoformat() + "Z",
-                "rank": self.rank,
-                "mode": mode,
-                "iteration": self.iteration,
-                "summary": self._summarize_raw_batch(raw_batch),
-            }
-            with open(debug_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload, ensure_ascii=True) + "\n")
-        except Exception as e:
-            self.logger.debug(f"Raw batch debug dump failed: {e}")
+    def _get_debug_dump_path(self):
+        base_dir = getattr(self.args, "profile_path", None) or "."
+        return os.path.join(base_dir, f"producer/raw_batch_debug_rank_{self.rank}.jsonl")
 
     def _get_gpu_memory_usage(self) -> str:
         """获取并格式化当前GPU显存使用情况"""
@@ -328,6 +274,20 @@ class DistDataProducer:
         
         self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded {self._infer_batch_shape(raw_batch)} data cost {encode_time:.3f}s")
 
+        dump_object_summary(
+            tensors_to_send,
+            self._get_debug_dump_path(),
+            meta={
+                "rank": self.rank,
+                "mode": mode,
+                "iteration": self.iteration,
+                "stage": "encoded",
+                "idx": idx,
+                "item_index": item_index,
+            },
+            logger=self.logger,
+        )
+
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)
             self.logger.debug(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
@@ -388,7 +348,17 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
-        self._dump_raw_batch_debug(raw_batch, mode_to_process)
+        dump_object_summary(
+            raw_batch,
+            self._get_debug_dump_path(),
+            meta={
+                "rank": self.rank,
+                "mode": mode_to_process,
+                "iteration": self.iteration,
+                "stage": "raw",
+            },
+            logger=self.logger,
+        )
         
         raw_batch_shape = self._infer_batch_shape(raw_batch)
         
