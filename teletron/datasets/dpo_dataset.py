@@ -332,7 +332,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 frame0 = video.get_frames_at([0]).data
                 data_dict["video_height"] = frame0.shape[-2]
                 data_dict["video_width"] = frame0.shape[-1]
-
+        data_dict["video_info"] = (data_dict["video_width"], data_dict["video_height"])
         return data_dict
 
 
