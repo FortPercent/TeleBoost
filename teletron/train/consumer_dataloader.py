@@ -50,7 +50,7 @@ class BaseBatchLoader(ABC):
 
     def __next__(self):
         device = torch.cuda.current_device()
-        from utils import build_meta_tree, allocate_from_meta, broadcast_tensor_tree, recv_tensor_tree
+        from .utils import build_meta_tree, allocate_from_meta, broadcast_tensor_tree, recv_tensor_tree
         if self.rank == 0:
             # =========================
             # Rank 0: 准备 batch
