@@ -34,6 +34,32 @@ config = dict(
 
         # 可选
         max_pixels=400000,
+        
+
+        transforms=[
+            dict(
+                type="SampleImages",
+                num_frames=dst_num_frames,
+            ),
+            dict(
+                type="PromptGenerator",
+                clean_prompt=True,
+                default_prompt_prob=0.1,
+            ),
+            dict(
+                type="GenerateRawFirstRefImage",
+            ),
+            dict(
+                type="PackInputs",
+                deterministic=True,
+                image_keys=[
+                    "images",
+                ],
+                embedding_keys=[
+                    "raw_first_image", 
+                ],  
+            ),
+        ],
     ),
     eval=dict(
         data_path_list=[
