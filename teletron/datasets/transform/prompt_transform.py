@@ -136,3 +136,45 @@ class PromptToTransformerEmbedding:
         if prompt_masks is not None:
             data_dict["prompt_masks"] = prompt_masks[0]
         return data_dict
+
+
+
+
+class InjectDPOPrompt:
+    def __init__(self, prompt_key="prompt", target_keys=("struct_prompt","short_prompt","dense_prompt")):
+        self.prompt_key = prompt_key
+        self.target_keys = target_keys
+
+    def _inject(self, d: dict):
+        p = d.get(self.prompt_key, None)
+        if p is None:
+            return d
+        for k in self.target_keys:
+            d[k] = p
+        return d
+
+    def __call__(self, data_dict: dict):
+        # DPO: {"chosen": {...}, "rejected": {...}}
+        if "chosen" in data_dict and "rejected" in data_dict:
+            # prompt 通常在外层或两个分支之一
+            # 1) 外层 prompt 优先
+            outer_p = data_dict.get(self.prompt_key, None)
+            if outer_p is not None:
+                for branch in ("chosen", "rejected"):
+                    for k in self.target_keys:
+                        data_dict[branch][k] = outer_p
+                return data_dict
+
+            # 2) 否则从 chosen 取
+            p = data_dict["chosen"].get(self.prompt_key, None)
+            if p is None:
+                p = data_dict["rejected"].get(self.prompt_key, None)
+
+            if p is not None:
+                for branch in ("chosen", "rejected"):
+                    for k in self.target_keys:
+                        data_dict[branch][k] = p
+            return data_dict
+
+        # 非 DPO：单样本
+        return self._inject(data_dict)
