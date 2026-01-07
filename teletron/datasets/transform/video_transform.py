@@ -225,9 +225,11 @@ class LoadInputImageAsFirstFrame:
 
     def __call__(self, data_dict):
         if self.key not in data_dict:
+            print(data_dict.keys())
             return data_dict
 
         path = data_dict[self.key]
+        print(f"LoadInputImageAsFirstFrame: load image from {path} ")
         if path is None:
             return data_dict
 
@@ -236,7 +238,6 @@ class LoadInputImageAsFirstFrame:
             image = self.lmdb_client.get(path)
         else:
             image = self.file_client.get(path)
-        print(f"LoadInputImageAsFirstFrame: load image from {path} ")
         # 2. PIL → resize / crop
         image = self.resize_op(image)
 
