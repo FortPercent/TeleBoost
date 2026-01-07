@@ -406,7 +406,8 @@ class UnifiedDataset(torch.utils.data.Dataset):
             # 跑 dict-level pipeline
             if self.pipeline is not None:
                 data_i = self.pipeline(data_i)
-
+            for k, v in shared_fields.items():
+                data_i.setdefault(k, v)
             out[key] = data_i
 
         # print(out.keys())
