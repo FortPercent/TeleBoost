@@ -140,41 +140,24 @@ class PromptToTransformerEmbedding:
 
 
 
-class InjectDPOPrompt:
-    def __init__(self, prompt_key="prompt", target_keys=("struct_prompt","short_prompt","dense_prompt")):
+class InjectPromptToTopLevel:
+    def __init__(self, prompt_key="prompt",
+                 target_keys=("struct_prompt", "short_prompt", "dense_prompt"),
+                 force_list=True):
         self.prompt_key = prompt_key
         self.target_keys = target_keys
-
-    def _inject(self, d: dict):
-        p = d.get(self.prompt_key, None)
-        if p is None:
-            return d
-        for k in self.target_keys:
-            d[k] = p
-        return d
+        self.force_list = force_list
 
     def __call__(self, data_dict: dict):
-        # DPO: {"chosen": {...}, "rejected": {...}}
-        if "chosen" in data_dict and "rejected" in data_dict:
-            # prompt 通常在外层或两个分支之一
-            # 1) 外层 prompt 优先
-            outer_p = data_dict.get(self.prompt_key, None)
-            if outer_p is not None:
-                for branch in ("chosen", "rejected"):
-                    for k in self.target_keys:
-                        data_dict[branch][k] = outer_p
-                return data_dict
-
-            # 2) 否则从 chosen 取
-            p = data_dict["chosen"].get(self.prompt_key, None)
-            if p is None:
-                p = data_dict["rejected"].get(self.prompt_key, None)
-
-            if p is not None:
-                for branch in ("chosen", "rejected"):
-                    for k in self.target_keys:
-                        data_dict[branch][k] = p
+        p = data_dict.get(self.prompt_key, None)
+        if p is None:
             return data_dict
 
-        # 非 DPO：单样本
-        return self._inject(data_dict)
+        # 保持和你 dump 里一致：batch=1 时也用 List[str]
+        if self.force_list and isinstance(p, str):
+            p = [p]
+
+        for k in self.target_keys:
+            data_dict[k] = p
+
+        return data_dict

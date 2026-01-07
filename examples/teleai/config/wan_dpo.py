@@ -42,11 +42,12 @@ config = dict(
                 num_frames=dst_num_frames,
             ),
             dict(
-                type="InjectDPOPrompt",
+                type="InjectPromptToTopLevel",
+                prompt_key="prompt"
             ),
             dict(
                 type="GenerateRawFirstRefImage",
-                prompt_key="prompt"
+                
             ),
             dict(
                 type="PackInputs",
