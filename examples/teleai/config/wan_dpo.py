@@ -49,7 +49,7 @@ config = dict(
 
     model_config=dict(
         dit=dict(
-            type="WanTrainingModule", # ParallelTeleaiModel
+            type="ParallelTeleaiModel", # ParallelTeleaiModel
 
             # 这里需要修改 TODO
             config=dict(
