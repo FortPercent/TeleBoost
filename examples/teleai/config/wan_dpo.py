@@ -57,6 +57,7 @@ config = dict(
                 ],
                 embedding_keys=[
                     "raw_first_image", 
+                    "input_image"  # 保留data_dict --> input_dict新建的这个
                 ],  
             ),
             dict(
