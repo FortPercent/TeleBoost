@@ -326,7 +326,7 @@ class DistDataProducer:
         self.produced_count[mode][first_consumer] += 1
         item_index = self.produced_count[mode][first_consumer]
         
-        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded {raw_batch['images'].shape} data cost {encode_time:.3f}s")
+        self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded {self._infer_batch_shape(raw_batch)} data cost {encode_time:.3f}s")
 
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)

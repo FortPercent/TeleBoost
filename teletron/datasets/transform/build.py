@@ -3,6 +3,7 @@ from .prompt_transform import (
     PromptToClipEmbedding,
     PromptToTransformerEmbedding,
     PromptGenerator,
+    InjectPromptToTopLevel
 )
 from .video_transform import (
     SampleImages, 
@@ -33,7 +34,7 @@ TRANSFORMS.register_module(GenerateRefImagesWithMask)
 TRANSFORMS.register_module(GenerateRawFirstRefImage)
 TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
-
+TRANSFORMS.register_module(InjectPromptToTopLevel)
 
 def build_transform(params_or_type, *args, **kwargs):
     return build_module(TRANSFORMS, params_or_type, *args, **kwargs)
