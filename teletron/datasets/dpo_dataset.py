@@ -405,12 +405,14 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
             # 跑 dict-level pipeline
             if self.pipeline is not None:
+                # print(f"before pp = {data_i.keys()}")
                 data_i = self.pipeline(data_i)
+                # print(f"after pp = {data_i.keys()}")
             for k, v in shared_fields.items():
                 data_i.setdefault(k, v)
             out[key] = data_i
 
-        # print(out.keys())
+        print(out.keys())
         return out
 
     def __len__(self):
