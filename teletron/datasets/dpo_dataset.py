@@ -333,13 +333,44 @@ class UnifiedDataset(torch.utils.data.Dataset):
             data = self.cached_data[data_id % len(self.cached_data)]
             data = self.cached_data_operator(data)
         else:
-            data = self.data[data_id % len(self.data)].copy()
+            raw = self.data[data_id % len(self.data)].copy()
+
+            # 1️⃣ 先用 main_data_operator 把 path → VideoDecoder
             for key in self.data_file_keys:
-                if key in data:
-                    if key in self.special_operator_map:
-                        data[key] = self.special_operator_map[key]
-                    elif key in self.data_file_keys:
-                        data[key] = self.pipeline(self.main_data_operator(data[key]))
+                if key not in raw:
+                    continue
+
+                if key in self.special_operator_map:
+                    raw[key] = self.special_operator_map[key](raw[key])
+                else:
+                    raw[key] = self.main_data_operator(raw[key])
+
+            # 2️⃣ chosen / rejected 各自独立跑 pipeline
+            out = {}
+
+            for key in self.data_file_keys:
+                if key not in raw:
+                    continue
+
+                # ---- 核心：隔离 data_dict ----
+                data_i = raw.copy()
+                data_i["video"] = raw[key]
+
+                if self.pipeline is not None:
+                    data_i = self.pipeline(data_i)
+
+                out[key] = data_i
+
+            # 3️⃣ 你可以选择性合并公共字段（如 prompt）
+            # 例如：
+            if "chosen" in out and "rejected" in out:
+                for k, v in out["chosen"].items():
+                    if k not in ("video", "images"):
+                        out["rejected"].setdefault(k, v)
+
+            return out
+
+
         return data
 
     def __len__(self):
