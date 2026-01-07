@@ -90,49 +90,111 @@ class BaseBatchLoader(ABC):
                     self._broadcast_object(value)
             return batch
 
+def _unflatten_tensor_tree(paths, tensors):
+    """
+    paths: List[str], e.g. ["chosen/latents", "context"]
+    tensors: List[Tensor], same order
+    return: nested dict
+    """
+    root = {}
+    for path, t in zip(paths, tensors):
+        cur = root
+        parts = path.split("/")
+        for p in parts[:-1]:
+            if p not in cur:
+                cur[p] = {}
+            cur = cur[p]
+        cur[parts[-1]] = t
+    return root
+
+
+
 class VastDistBatchLoader(BaseBatchLoader):
 
+    # def _prepare_batch_on_rank_zero(self):
+    #     # if self.data_iterator is None:
+    #     #     return None
+        
+    #     # 1. 从数据迭代器获取原始数据（如果需要的话）
+    #     # data = next(self.data_iterator)
+        
+    #     # 2. 从 producer rank 接收 Tensors
+    #     # breakpoint()
+    #     comm_pair = get_comm_pair()
+    #     args = get_args()
+
+    #     meta_info = [None]
+    #     dist.recv_object_list(meta_info, comm_pair.producer)
+    #     meta_info = meta_info[0]
+
+
+    #     batch = {}
+    #     # unpack
+    #     if args.distributed_vae:
+    #         intervals = [0]
+            
+    #         for data_to_get in TeleaiEncoder.get_output_schema():
+    #             data_size = 1
+    #             for dim in meta_info[data_to_get]:
+    #                 data_size *= dim 
+    #             intervals.append(intervals[-1] + data_size)
+            
+    #         total_size = intervals[-1]
+    #         recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
+    #         dist.recv(recv_tensor, comm_pair.producer, tag=0)
+    #         unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+
+    #         for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):
+    #             tensor_shape = meta_info[data_to_get]
+    #             reshaped_data = unpacked_data[i].view(*tensor_shape)
+    #             batch[data_to_get] = reshaped_data
+    #     else:
+    #         # 如果 distributed_vae 为 False，需要定义相应的行为
+    #         # 例如，返回空的或默认的 tensors
+    #         raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
+
+    #     return batch
+
     def _prepare_batch_on_rank_zero(self):
-        # if self.data_iterator is None:
-        #     return None
-        
-        # 1. 从数据迭代器获取原始数据（如果需要的话）
-        # data = next(self.data_iterator)
-        
-        # 2. 从 producer rank 接收 Tensors
-        # breakpoint()
         comm_pair = get_comm_pair()
         args = get_args()
 
+        # ========== 1️⃣ recv meta ==========
         meta_info = [None]
         dist.recv_object_list(meta_info, comm_pair.producer)
         meta_info = meta_info[0]
 
+        paths = meta_info["paths"]
+        shapes = meta_info["shapes"]
 
-        batch = {}
-        # unpack
-        if args.distributed_vae:
-            intervals = [0]
-            
-            for data_to_get in TeleaiEncoder.get_output_schema():
-                data_size = 1
-                for dim in meta_info[data_to_get]:
-                    data_size *= dim 
-                intervals.append(intervals[-1] + data_size)
-            
-            total_size = intervals[-1]
-            recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-            dist.recv(recv_tensor, comm_pair.producer, tag=0)
-            unpacked_data = unpack_tensors(recv_tensor, intervals, TeleaiEncoder.get_output_schema())
+        # ========== 2️⃣ 计算 flat intervals ==========
+        intervals = [0]
+        for p in paths:
+            size = 1
+            for d in shapes[p]:
+                size *= d
+            intervals.append(intervals[-1] + size)
 
-            for i, data_to_get in enumerate(TeleaiEncoder.get_output_schema()):
-                tensor_shape = meta_info[data_to_get]
-                reshaped_data = unpacked_data[i].view(*tensor_shape)
-                batch[data_to_get] = reshaped_data
-        else:
-            # 如果 distributed_vae 为 False，需要定义相应的行为
-            # 例如，返回空的或默认的 tensors
-            raise NotImplementedError("distributed_vae=False case not implemented in this refactoring.")
+        total_size = intervals[-1]
+
+        # ========== 3️⃣ recv packed tensor ==========
+        recv_tensor = torch.empty(
+            (total_size,),
+            device=torch.cuda.current_device(),
+            dtype=torch.bfloat16,   # 和 producer 保持一致
+        )
+        dist.recv(recv_tensor, comm_pair.producer, tag=0)
+
+        # ========== 4️⃣ unpack flat tensors ==========
+        flat_tensors = unpack_tensors(recv_tensor, intervals)
+
+        # reshape
+        flat_named = []
+        for p, t in zip(paths, flat_tensors):
+            flat_named.append(t.view(*shapes[p]))
+
+        # ========== 5️⃣ unflatten to nested batch ==========
+        batch = _unflatten_tensor_tree(paths, flat_named)
 
         return batch
 
