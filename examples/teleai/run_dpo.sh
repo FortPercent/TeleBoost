@@ -93,7 +93,7 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    --use-fused-rmsnorm
+    # --use-fused-rmsnorm
 )
 
 MODEL_PARALLEL_ARGS=(

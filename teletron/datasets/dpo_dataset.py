@@ -395,6 +395,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
 
                 if self.pipeline is not None:
+                    # print(f"self.pipeline = {self.pipeline}")
                     data_i = self.pipeline(data_i)
 
                 out[key] = data_i
