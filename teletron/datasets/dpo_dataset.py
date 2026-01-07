@@ -309,7 +309,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
             elif subpath.endswith(".pth"):
                 self.cached_data.append(subpath)
     
-    def inject_video_meta(data_dict):
+    def inject_video_meta(self, data_dict):
         video = data_dict["video"]
 
         # 1. video_length（帧数）

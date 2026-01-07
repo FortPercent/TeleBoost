@@ -41,11 +41,11 @@ config = dict(
                 type="SampleImages",
                 num_frames=dst_num_frames,
             ),
-            dict(
-                type="PromptGenerator",
-                clean_prompt=True,
-                default_prompt_prob=0.1,
-            ),
+            # dict(
+            #     type="PromptGenerator",
+            #     clean_prompt=True,
+            #     default_prompt_prob=0.1,
+            # ),
             dict(
                 type="GenerateRawFirstRefImage",
             ),
