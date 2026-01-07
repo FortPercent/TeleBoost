@@ -377,7 +377,8 @@ class DistDataProducer:
 
         except Exception as e:
             # [MODIFICATION] 使用 logger.exception 记录异常，它会自动包含堆栈跟踪
-            self.logger.exception("!!!--- 主循环中发生严重异常 ---!!!")
+            self.logger.exception(f"!!!--- 主循环中发生严重异常 ---!!! e = {e}")
+            
             dist.abort(group=get_world_group())
         finally:
             self.logger.info("开始清理...")
