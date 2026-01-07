@@ -188,7 +188,7 @@ class DistDataProducer:
     def _dump_raw_batch_debug(self, raw_batch, mode):
         """Persist raw batch format/type info to a jsonl file for debugging."""
         try:
-            base_dir = getattr(self.args, "profile_path", ".")
+            base_dir = getattr(self.args, "profile_path", None) or "."
             debug_path = os.path.join(base_dir, f"producer/raw_batch_debug_rank_{self.rank}.jsonl")
             ensure_directory_exists(debug_path)
             payload = {
