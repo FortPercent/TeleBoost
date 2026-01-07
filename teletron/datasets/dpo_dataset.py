@@ -332,7 +332,10 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 frame0 = video.get_frames_at([0]).data
                 data_dict["video_height"] = frame0.shape[-2]
                 data_dict["video_width"] = frame0.shape[-1]
-        data_dict["video_info"] = (data_dict["video_width"], data_dict["video_height"])
+        from teletron.utils import set_config
+        ds_config = set_config().get("dataset",{})
+
+        data_dict["video_info"] = (ds_config["width"], ds_config["height"])
 
         data_dict.setdefault("struct_prompt", "")
         data_dict.setdefault("short_prompt", "")
