@@ -4,7 +4,7 @@ from PIL import Image
 from einops import repeat, reduce
 from typing import Optional, Union
 from dataclasses import dataclass
-from modelscope import snapshot_download
+
 import numpy as np
 from PIL import Image
 from typing import Optional
@@ -196,6 +196,7 @@ class ModelConfig:
                 self.local_model_path = "./models"
             if not skip_download:
                 downloaded_files = glob.glob(self.origin_file_pattern, root_dir=os.path.join(self.local_model_path, self.model_id))
+                from modelscope import snapshot_download
                 snapshot_download(
                     self.model_id,
                     local_dir=os.path.join(self.local_model_path, self.model_id),
