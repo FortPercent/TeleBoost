@@ -1,8 +1,10 @@
+import os
 import torch
 import torch.distributed as dist
 from abc import ABC, abstractmethod
 from megatron.core import mpu, tensor_parallel
 from teletron.utils import (get_args,)
+from teletron.utils.debug_utils import dump_object_summary
 from teletron.core.parallel_state import get_comm_pair
 from teletron.models.wan.encoder.wan_encoder import WanVideoEncoder
 from teletron.models.teleai.teleai_encoder import TeleaiEncoder, PROPERTY_DIMS
@@ -22,9 +24,14 @@ class BaseBatchLoader(ABC):
         self.rank = mpu.get_tensor_context_parallel_rank()
         self.src_rank = mpu.get_tensor_context_parallel_src_rank()
         self.group = mpu.get_tensor_context_parallel_group()
+        self.iteration = 0
         
         if self.rank == self.src_rank and self.data_iterator is None:
             print("Warning: data_iterator is None on the source rank.")
+
+    def _get_debug_dump_path(self):
+        base_dir = getattr(get_args(), "profile_path", None) or "."
+        return os.path.join(base_dir, f"consumer/batch_debug_rank_{self.rank}.jsonl")
 
     def _broadcast_tensor(self, tensor):
         if tensor is not None:
@@ -43,6 +50,15 @@ class BaseBatchLoader(ABC):
     def __next__(self):
         if self.rank == 0:
             batch = self._prepare_batch_on_rank_zero()
+            dump_object_summary(
+                batch,
+                self._get_debug_dump_path(),
+                meta={
+                    "rank": self.rank,
+                    "iteration": self.iteration,
+                    "stage": "consumer_batch_prepare",
+                },
+            )
             if batch is None: 
                 self._broadcast_object([None])
                 raise StopIteration
@@ -64,6 +80,16 @@ class BaseBatchLoader(ABC):
                 elif isinstance(value, list):
                     self._broadcast_object(value)
 
+            dump_object_summary(
+                batch,
+                self._get_debug_dump_path(),
+                meta={
+                    "rank": self.rank,
+                    "iteration": self.iteration,
+                    "stage": "consumer_batch",
+                },
+            )
+            self.iteration += 1
             return batch
         else:
             meta_info_list = [None]
@@ -88,6 +114,16 @@ class BaseBatchLoader(ABC):
                     self._broadcast_tensor(value)
                 elif isinstance(value, list):
                     self._broadcast_object(value)
+            dump_object_summary(
+                batch,
+                self._get_debug_dump_path(),
+                meta={
+                    "rank": self.rank,
+                    "iteration": self.iteration,
+                    "stage": "consumer_batch",
+                },
+            )
+            self.iteration += 1
             return batch
 
 def _unflatten_tensor_tree(paths, tensors):
