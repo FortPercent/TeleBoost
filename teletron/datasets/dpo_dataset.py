@@ -337,6 +337,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
                         data[key] = self.special_operator_map[key]
                     elif key in self.data_file_keys:
                         data[key] = self.main_data_operator(data[key])
+                        print(f"{data[key]}")
         return data
 
     def __len__(self):
