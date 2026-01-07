@@ -18,7 +18,7 @@ TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
-N_GPU_FOR_TRAIN=1
+N_GPU_FOR_TRAIN=2
 N_GPU_FOR_DATA=1
 
 # Single-node config 
