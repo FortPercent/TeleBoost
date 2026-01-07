@@ -59,6 +59,11 @@ config = dict(
                     "raw_first_image", 
                 ],  
             ),
+            dict(
+                type="LoadInputImageAsFirstFrame",
+                key="input_image",
+                output_key="raw_first_image",
+            )
         ],
     ),
     eval=dict(

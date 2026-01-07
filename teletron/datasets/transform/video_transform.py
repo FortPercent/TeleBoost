@@ -189,6 +189,68 @@ class GenerateRawFirstLastRefImage:
         data_dict["raw_last_image"] = raw_last_image
         return data_dict
     
+
+
+class LoadInputImageAsFirstFrame:
+    def __init__(
+        self,
+        base_path="",
+        height=None,
+        width=None,
+        max_pixels=None,
+        height_division_factor=16,
+        width_division_factor=16,
+        key="input_image",
+        output_key="raw_first_image",
+        data_format="file",  # file / lmdb
+    ):
+        from teleai_data_tool.file.file_client import FileClient
+        from teleai_data_tool.file.lmdb_client import LmdbClient
+
+        self.key = key
+        self.output_key = output_key
+        self.file_client = FileClient()
+        self.lmdb_client = LmdbClient()
+        self.base_path = base_path
+
+        from teletron.datasets.dpo_dataset import ImageCropAndResize
+        self.resize_op = ImageCropAndResize(
+            height=height,
+            width=width,
+            max_pixels=max_pixels,
+            height_division_factor=height_division_factor,
+            width_division_factor=width_division_factor,
+        )
+        self.data_format = data_format
+
+    def __call__(self, data_dict):
+        if self.key not in data_dict:
+            return data_dict
+
+        path = data_dict[self.key]
+        if path is None:
+            return data_dict
+
+        # 1. 读取 image（PIL）
+        if self.data_format == "lmdb":
+            image = self.lmdb_client.get(path)
+        else:
+            image = self.file_client.get(path)
+
+        # 2. PIL → resize / crop
+        image = self.resize_op(image)
+
+        # 3. PIL → Tensor
+        image = torch.from_numpy(np.array(image)).permute(2, 0, 1).contiguous()
+
+        # 4. 加 batch & time 维度
+        image = image.unsqueeze(0).unsqueeze(0)
+        # [1, 1, 3, H, W]
+
+        data_dict[self.output_key] = image
+        return data_dict
+
+
 @func_set_timeout(60)
 class SampleImages:
     def __init__(
