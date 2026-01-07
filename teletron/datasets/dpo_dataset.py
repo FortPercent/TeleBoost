@@ -1,7 +1,8 @@
 import torch, torchvision, imageio, os, json, pandas
 import imageio.v3 as iio
 from PIL import Image
-
+from teleai_data_tool.file.file_client import FileClient
+from teleai_data_tool.file.lmdb_client import LmdbClient
 
 
 class DataProcessingPipeline:
@@ -112,6 +113,23 @@ class ToList(DataProcessingOperator):
     def __call__(self, data):
         return [data]
     
+
+
+
+class LoadVideoWithFileClient(DataProcessingOperator):
+    def __init__(self, data_format="file"):
+        """
+        data_format: "file" or "lmdb"
+        """
+        self.data_format = data_format
+        self.file_client = FileClient()
+        self.lmdb_client = LmdbClient()
+
+    def __call__(self, path: str):
+        if self.data_format == "lmdb":
+            return self.lmdb_client.get(path)
+        else:
+            return self.file_client.get(path)
 
 
 class LoadVideo(DataProcessingOperator):
@@ -367,17 +385,22 @@ class WanDPODataset(UnifiedDataset):
     ):
         data_file_keys = (chosen_video_key, rejected_video_key)
 
-        main_data_operator = UnifiedDataset.default_video_operator(
-            base_path=dataset_base_path,
-            max_pixels=max_pixels,
-            height=height,
-            width=width,
-            height_division_factor=height_division_factor,
-            width_division_factor=width_division_factor,
-            num_frames=num_frames,
-            time_division_factor=time_division_factor,
-            time_division_remainder=time_division_remainder,
+        main_data_operator = (
+            ToAbsolutePath(dataset_base_path)
+            >> LoadVideoWithFileClient(data_format="file")
         )
+        
+        # UnifiedDataset.default_video_operator(
+        #     base_path=dataset_base_path,
+        #     max_pixels=max_pixels,
+        #     height=height,
+        #     width=width,
+        #     height_division_factor=height_division_factor,
+        #     width_division_factor=width_division_factor,
+        #     num_frames=num_frames,
+        #     time_division_factor=time_division_factor,
+        #     time_division_remainder=time_division_remainder,
+        # )
 
         # 可选：保持和原脚本一致
         special_operator_map = {
@@ -391,6 +414,7 @@ class WanDPODataset(UnifiedDataset):
                         512, 512, None, 16, 16
                     )
                 )
+                >> LoadVideoWithFileClient(data_format="file"),
         }
 
         super().__init__(

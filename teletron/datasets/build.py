@@ -52,6 +52,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         num_samples = len(all_data_paths)
         base_samples = (num_samples + args.distributed_vae_world_size -1) // args.distributed_vae_world_size
 
+        # 这段逻辑只负责对于config.dataset.data_path_list进行各个producer的划分
         big_producer_count = args.distributed_vae_world_size - (args.distributed_vae_world_size *  base_samples - num_samples)
         if global_rank < big_producer_count + args.dit_world_size:
             start_idx = (global_rank - args.dit_world_size) * base_samples
