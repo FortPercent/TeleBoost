@@ -309,6 +309,31 @@ class UnifiedDataset(torch.utils.data.Dataset):
             elif subpath.endswith(".pth"):
                 self.cached_data.append(subpath)
     
+    def inject_video_meta(data_dict):
+        video = data_dict["video"]
+
+        # 1. video_length（帧数）
+        if "video_length" not in data_dict:
+            data_dict["video_length"] = len(video)
+
+        # 2. frame_interval（ClipDataset 默认就是 1）
+        if "frame_interval" not in data_dict:
+            data_dict["frame_interval"] = 1
+
+        # 3. fps（可选，但推荐）
+        if "fps" not in data_dict:
+            try:
+                data_dict["fps"] = video.fps
+            except Exception:
+                data_dict["fps"] = None
+
+        # 4. video_valid_range（可选）
+        if "video_valid_range" not in data_dict:
+            data_dict["video_valid_range"] = (0, data_dict["video_length"])
+
+        return data_dict
+
+
     def load_metadata(self, metadata_path):
         if metadata_path is None:
             print("No metadata_path. Searching for cached data files.")
@@ -355,6 +380,9 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 # ---- 核心：隔离 data_dict ----
                 data_i = raw.copy()
                 data_i["video"] = raw[key]
+
+                data_i = self.inject_video_meta(data_i)
+
 
                 if self.pipeline is not None:
                     data_i = self.pipeline(data_i)
