@@ -63,7 +63,7 @@ def _compute_single_loss(
             clip_feature=clip_feature,
             y=y,
         )
-
+    print(f"noisy_latents = {noisy_latents.shape},output_tensor_list = {output_tensor_list.shape} training_target = {training_target.shape}")
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
     )

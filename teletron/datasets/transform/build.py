@@ -12,6 +12,7 @@ from .video_transform import (
     GenerateFirstRefImage,
     GenerateRefImagesWithMask, 
     GenerateRawFirstRefImage,
+    LoadInputImageAsFirstFrame,
     GenerateRawFirstLastRefImage,
     GenerateRefImagesWithTimeMask,
     SampleDynamicFPSVideo,
@@ -35,6 +36,6 @@ TRANSFORMS.register_module(GenerateRawFirstRefImage)
 TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
 TRANSFORMS.register_module(InjectPromptToTopLevel)
-
+TRANSFORMS.register_module(LoadInputImageAsFirstFrame)
 def build_transform(params_or_type, *args, **kwargs):
     return build_module(TRANSFORMS, params_or_type, *args, **kwargs)
