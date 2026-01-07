@@ -93,3 +93,16 @@ def dump_object_summary(
         if logger is not None:
             logger.debug(f"Object summary dump failed: {exc}")
         return False
+
+
+def dump_tensor_shape(tensor, output_path, name, meta=None, logger=None):
+    """Append a tensor shape record to a JSONL file."""
+    payload_meta = {"name": name, "kind": "tensor_shape"}
+    if meta:
+        payload_meta.update(meta)
+    return dump_object_summary(
+        tensor,
+        output_path,
+        meta=payload_meta,
+        logger=logger,
+    )
