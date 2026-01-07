@@ -3,7 +3,7 @@ import torch
 import torch.distributed as dist
 import collections
 import time
-from typing import Callable, Any, Dict, List
+from typing import Callable, Any, Dict, List, Tuple
 import psutil
 import traceback
 import copy
@@ -293,24 +293,42 @@ class DistDataProducer:
             self.logger.debug(f"QUEUE for Consumer {consumer_rank}: push {item_index} data")
 
     def _send_data_from_queue(self, cp: CommPair, mode: str):
-        """从队列中取出数据，并使用同步方式发送 """
         consumer_rank = cp.consumer
-        
+
         self.sended_count[mode][consumer_rank] += 1
         item_index = self.sended_count[mode][consumer_rank]
-        
+
         tensors_to_send = self.data_queues[mode][consumer_rank].popleft()
         self.logger.debug(f"QUEUE for Consumer {consumer_rank}: get {item_index} data for sending")
-        
-        meta_info = {key: val.shape for key,val in tensors_to_send.items()}
-        packed_tensor = self.encoder._pack_tensors([tensors_to_send[key] for key in tensors_to_send.keys()])
+
+        # ✅ 1) flatten
+        flat = self._flatten_tensor_tree(tensors_to_send)
+        paths = [p for p, _ in flat]
+        tensors = [t for _, t in flat]
+
+        # ✅ 2) pack（沿用你现有 pack 逻辑）
+        packed_tensor = self.encoder._pack_tensors(tensors)
+
+        # ✅ 3) meta：包含路径 + shape（至少要这俩）
+        meta_info = {
+            "paths": paths,
+            "shapes": {p: list(t.shape) for p, t in flat},
+            # 可选
+            "dtypes": {p: str(t.dtype) for p, t in flat},
+        }
 
         resource_status = f"{self._get_gpu_memory_usage()} | {self._get_shm_usage()}"
-        self.logger.debug(f"PRE-SEND-META to Consumer {consumer_rank} (item {item_index}): {meta_info}. Status: {resource_status}")
+        self.logger.debug(
+            f"PRE-SEND-META to Consumer {consumer_rank} (item {item_index}): "
+            f"num_tensors={len(tensors)}, keys={paths}. Status: {resource_status}"
+        )
         dist.send_object_list([meta_info], dst=consumer_rank)
         self.logger.debug(f"POST-SEND-META to Consumer {consumer_rank} (item {item_index}): success")
 
-        self.logger.debug(f"PRE-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): shape={packed_tensor.shape}, dtype={packed_tensor.dtype}")
+        self.logger.debug(
+            f"PRE-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): "
+            f"shape={packed_tensor.shape}, dtype={packed_tensor.dtype}"
+        )
         dist.send(tensor=packed_tensor, dst=consumer_rank)
         self.logger.debug(f"POST-SEND-TENSOR to Consumer {consumer_rank} (item {item_index}): success")
 
@@ -427,3 +445,33 @@ class DistDataProducer:
                 self.logger.error(f"清理阶段的异常信息: {exc_info}")
             cleanup_dist()
             self.logger.info("程序退出")
+
+
+    def _flatten_tensor_tree(self, obj: Any, prefix: str = "") -> List[Tuple[str, torch.Tensor]]:
+        """
+        把嵌套 dict 展平成 [(path, tensor), ...]，path 用 "chosen/latents" 这种形式。
+        保证顺序稳定：按 dict key 排序（或者保持插入顺序也行，但排序更稳）。
+        """
+        items: List[Tuple[str, torch.Tensor]] = []
+        if isinstance(obj, torch.Tensor):
+            items.append((prefix, obj))
+            return items
+        if isinstance(obj, dict):
+            for k in sorted(obj.keys()):
+                new_prefix = f"{prefix}/{k}" if prefix else str(k)
+                items.extend(self._flatten_tensor_tree(obj[k], new_prefix))
+            return items
+        raise TypeError(f"Unsupported type in tensors_to_send tree: {type(obj)} at prefix={prefix}")
+
+    def _meta_from_flat(self,  flat: List[Tuple[str, torch.Tensor]]) -> Dict[str, Dict[str, Any]]:
+        """
+        meta: {path: {"shape": ..., "dtype": ..., "device": ...}}
+        device 可以不发（接收端通常在自己的 device 上接收），但发了更好 debug。
+        """
+        meta = {}
+        for path, t in flat:
+            meta[path] = {
+                "shape": list(t.shape),
+                "dtype": str(t.dtype),
+            }
+        return meta
