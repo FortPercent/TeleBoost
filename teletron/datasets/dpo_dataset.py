@@ -333,6 +333,10 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 data_dict["video_height"] = frame0.shape[-2]
                 data_dict["video_width"] = frame0.shape[-1]
         data_dict["video_info"] = (data_dict["video_width"], data_dict["video_height"])
+
+        data_dict.setdefault("struct_prompt", "")
+        data_dict.setdefault("short_prompt", "")
+        data_dict.setdefault("dense_prompt", "")
         return data_dict
 
 

@@ -219,7 +219,13 @@ class SampleImages:
 
         frame_interval = data_dict["frame_interval"]
         sample_length = (num_frames - 1) * frame_interval + 1
-        start_idx = valid_range[0] + random.randint(0, video_length - sample_length - 1)
+
+        # print(f"video_length = {video_length}, sample_length = {sample_length}")
+        if video_length <= sample_length:
+            rand = 0
+        else:
+            rand = random.randint(0, video_length - sample_length - 1)
+        start_idx = valid_range[0] + rand
         sample_indexes = np.linspace(
             start_idx, start_idx + sample_length - 1, num_frames, dtype=int
         )

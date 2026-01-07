@@ -321,6 +321,7 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
+        print(raw_batch)
         raw_batch_shape = raw_batch['images'].shape
         
         num_micro_batchs = self.args.global_batch_size // self.args.data_parallel_size
