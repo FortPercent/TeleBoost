@@ -131,7 +131,7 @@ torchrun ${DISTRIBUTED_ARGS[@]} examples/wan/pretrain_wan_dpo.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
-    ${MOE_ARGS[@]} \
+    ${MOE_ARGS[@]} \ 
     ${DATA_ARGS[@]}    \
     ${EVAL_AND_LOGGING_ARGS[@]} \
     ${LORA_CFG[@]} \

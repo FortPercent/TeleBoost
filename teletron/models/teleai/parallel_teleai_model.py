@@ -112,6 +112,7 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         context_emb = self.text_emb(context)
 
         if y is not None:
+            # has image input
             x = torch.cat([x, y], dim=1)
 
         if self.has_image_input:
