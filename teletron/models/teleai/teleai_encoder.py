@@ -164,6 +164,58 @@ class TeleaiEncoder(BaseEncoder):
         else:
             return work_fn
     
+    def _is_dpo_batch(self, raw_batch: dict) -> bool:
+        return (
+            isinstance(raw_batch, dict)
+            and "chosen" in raw_batch
+            and "rejected" in raw_batch
+        )
+
+    def _encode_single(self, raw_batch: Dict[str, Any]) -> Dict[str, Any]:
+        schema = self.get_output_schema()
+        out = {}
+        for key in schema:
+            out[key] = self.work_fn[key](batch=raw_batch)
+        return out
+
+    def _encode_dpo(self, raw_batch: Dict[str, Any]) -> Dict[str, Any]:
+        schema = self.get_output_schema()
+        out = {}
+
+        # ========== 1️⃣ prompt / context：只算一次 ==========
+        shared_input = raw_batch["chosen"]  # chosen / rejected 共用 prompt
+
+        for key in schema:
+            if key in ["context", "prompt_emb", "unprompt_emb"]:
+                out[key] = self.work_fn[key](batch=shared_input)
+
+        # ========== 2️⃣ image / latent：CUDA stream 并行 ==========
+        streams = {
+            "chosen": torch.cuda.Stream(device=self.device),
+            "rejected": torch.cuda.Stream(device=self.device),
+        }
+
+        branch_outputs = {}
+
+        for branch in ["chosen", "rejected"]:
+            branch_outputs[branch] = {}
+            branch_input = raw_batch[branch]
+
+            for key in schema:
+                if key in ["context", "prompt_emb", "unprompt_emb"]:
+                    continue
+
+                with torch.cuda.stream(streams[branch]):
+                    branch_outputs[branch][key] = self.work_fn[key](batch=branch_input)
+
+        # ========== 3️⃣ 同步 ==========
+        for s in streams.values():
+            s.synchronize()
+
+        out.update(branch_outputs)
+        return out
+
+
     def encode(self, raw_batch: Union[Dict[str, Any]]) -> Union[List[Any], List[List[Any]]]:
         """
         使用teleai模型对数据批次进行编码。
@@ -175,10 +227,8 @@ class TeleaiEncoder(BaseEncoder):
             如果输入是单个样本，返回编码后的张量列表。
             如果输入是样本列表，返回一个包含两个列表的列表，分别对应每个样本的编码结果。
         """
-        schema = self.get_output_schema()
-        batch = {}
-        for data_to_produce in schema:
-            batch[data_to_produce] = self.work_fn[data_to_produce](batch=raw_batch)
-
-        return batch
+        if not self._is_dpo_batch(raw_batch):
+            return self._encode_single(raw_batch)
+        else:
+            return self._encode_dpo(raw_batch)
                 
