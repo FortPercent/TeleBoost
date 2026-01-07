@@ -7,12 +7,14 @@ export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/teleai_data_tool
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything
 ENCODER_MODEL_PATH=/workspace/Wan2___1-I2V-14B-480P
 ENCODER_TOKENIZER_PATH=/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl
 MERGE_FILE=/nvfile-heatstorage/teleai-infra/wxe/Megatron-LM/data/gpt_2_merge.txt
 DATA_PATH=./checkpoint
-CONFIG_PATH=config.prone10_lowerlr.config
+CONFIG_PATH=config.wan_dpo.config
 
 TP=1
 CP=2
@@ -68,7 +70,7 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --has-image-input
+    # --has-image-input
     --num-layers $N_LAYERS
     --hidden-size 5120        
     --num-attention-heads 40
@@ -107,7 +109,7 @@ MODEL_PARALLEL_ARGS=(
     --consumer-models-num $N_MOE
 )
 DATA_ARGS=(
-    --dataset-type VastDataset
+    # --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1

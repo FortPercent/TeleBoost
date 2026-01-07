@@ -6,6 +6,7 @@ from .pipeline.wan_video_pipeline import WanVideoPipeline
 class WanTrainingModule(DiffusionTrainingModule):
     def __init__(
         self,
+        config,
         model_paths=None, model_id_with_origin_paths=None,
         # trainable_models=None,
         # lora_base_model=None, lora_target_modules="q,k,v,o,ffn.0,ffn.2", lora_rank=32, lora_checkpoint=None,

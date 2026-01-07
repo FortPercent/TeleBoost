@@ -1,6 +1,6 @@
 import torch
 from ..wan_model import DiTBlock
-from .utils import hash_state_dict_keys
+
 
 class VaceWanAttentionBlock(DiTBlock):
     def __init__(self, has_image_input, dim, num_heads, ffn_dim, eps=1e-6, block_id=0):
@@ -97,6 +97,7 @@ class VaceWanModelDictConverter:
     
     def from_civitai(self, state_dict):
         state_dict_ = {name: param for name, param in state_dict.items() if name.startswith("vace")}
+        from .utils import hash_state_dict_keys
         if hash_state_dict_keys(state_dict_) == '3b2726384e4f64837bdf216eea3f310d': # vace 14B
             config = {
                 "vace_layers": (0, 5, 10, 15, 20, 25, 30, 35),

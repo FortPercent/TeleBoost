@@ -4,7 +4,6 @@ from PIL import Image
 from einops import repeat, reduce
 from typing import Optional, Union
 from dataclasses import dataclass
-from modelscope import snapshot_download
 from einops import rearrange
 import numpy as np
 from PIL import Image
@@ -13,7 +12,7 @@ from typing import Optional
 from typing_extensions import Literal
 
 from .utils import BasePipeline, ModelConfig, PipelineUnit, PipelineUnitRunner
-from .utils import ModelManager, load_state_dict
+# from .utils import ModelManager, load_state_dict
 from teletron.utils.diffsynth_utils import load_state_dict
 from teletron.models.wan.wan_model import WanModel, sinusoidal_embedding_1d, RMSNorm
 # from ..models.wan_video_dit import WanModel, RMSNorm, sinusoidal_embedding_1d
