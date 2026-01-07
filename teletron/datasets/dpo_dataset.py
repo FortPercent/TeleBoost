@@ -253,6 +253,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         data_file_keys=tuple(),
         main_data_operator=lambda x: x,
         special_operator_map=None,
+        pipeline = None,
     ):
         self.base_path = base_path
         self.metadata_path = metadata_path
@@ -264,6 +265,8 @@ class UnifiedDataset(torch.utils.data.Dataset):
         self.data = []
         self.cached_data = []
         self.load_from_cache = metadata_path is None
+        from teletron.datasets.base_dataset import Compose
+        self.pipeline = Compose(pipeline) if pipeline is not None else None
         self.load_metadata(metadata_path)
     
     @staticmethod
@@ -336,8 +339,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
                     if key in self.special_operator_map:
                         data[key] = self.special_operator_map[key]
                     elif key in self.data_file_keys:
-                        data[key] = self.main_data_operator(data[key])
-                        print(f"{data[key]}")
+                        data[key] = self.pipeline(self.main_data_operator(data[key]))
         return data
 
     def __len__(self):
@@ -364,6 +366,7 @@ class WanDPODataset(UnifiedDataset):
     def __init__(
         self,
         # === 对应 args / config ===
+        transforms,
         dataset_base_path="",
         dataset_metadata_path=None,
         dataset_repeat=1,
@@ -425,4 +428,5 @@ class WanDPODataset(UnifiedDataset):
             data_file_keys=data_file_keys,
             main_data_operator=main_data_operator,
             special_operator_map=special_operator_map,
+            pipeline = transforms
         )
