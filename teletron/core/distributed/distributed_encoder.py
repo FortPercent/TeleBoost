@@ -368,6 +368,16 @@ class DistDataProducer:
             mode_to_process = TRAIN_MODE
         return mode_to_process
     
+
+    def _infer_batch_shape(self, raw_batch):
+        if isinstance(raw_batch, dict):
+            if "images" in raw_batch:
+                return raw_batch["images"].shape
+            elif "chosen" in raw_batch and "images" in raw_batch["chosen"]:
+                return raw_batch["chosen"]["images"].shape
+        return None
+    
+
     def _main_loop_step(self):
         """执行一个主循环步骤：生产和发送数据 """
         #1. 确定当前要处理的模式
@@ -380,7 +390,7 @@ class DistDataProducer:
         raw_batch = next(self.data_iterators[mode_to_process])
         self._dump_raw_batch_debug(raw_batch, mode_to_process)
         
-        raw_batch_shape = raw_batch['images'].shape
+        raw_batch_shape = self._infer_batch_shape(raw_batch)
         
         num_micro_batchs = self.args.global_batch_size // self.args.data_parallel_size
         for i in range(num_micro_batchs):
