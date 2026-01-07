@@ -12,6 +12,9 @@ config = dict(
         # === 原来 args 里的 ===
         dataset_base_path="",
         dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        data_path_list=[
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
+        ],
         dataset_repeat=2,
 
         # === DPO 语义 ===
