@@ -274,19 +274,19 @@ class DistDataProducer:
         
         self.logger.info(f"mode [{mode}] iter [{idx}]: produced {item_index} data, encoded {self._infer_batch_shape(raw_batch)} data cost {encode_time:.3f}s")
 
-        dump_object_summary(
-            tensors_to_send,
-            self._get_debug_dump_path(),
-            meta={
-                "rank": self.rank,
-                "mode": mode,
-                "iteration": self.iteration,
-                "stage": "encoded",
-                "idx": idx,
-                "item_index": item_index,
-            },
-            logger=self.logger,
-        )
+        # dump_object_summary(
+        #     tensors_to_send,
+        #     self._get_debug_dump_path(),
+        #     meta={
+        #         "rank": self.rank,
+        #         "mode": mode,
+        #         "iteration": self.iteration,
+        #         "stage": "encoded",
+        #         "idx": idx,
+        #         "item_index": item_index,
+        #     },
+        #     logger=self.logger,
+        # )
 
         for consumer_rank in self.same_data_group[first_consumer]:
             self.data_queues[mode][consumer_rank].append(tensors_to_send)
@@ -366,17 +366,17 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
-        dump_object_summary(
-            raw_batch,
-            self._get_debug_dump_path(),
-            meta={
-                "rank": self.rank,
-                "mode": mode_to_process,
-                "iteration": self.iteration,
-                "stage": "raw",
-            },
-            logger=self.logger,
-        )
+        # dump_object_summary(
+        #     raw_batch,
+        #     self._get_debug_dump_path(),
+        #     meta={
+        #         "rank": self.rank,
+        #         "mode": mode_to_process,
+        #         "iteration": self.iteration,
+        #         "stage": "raw",
+        #     },
+        #     logger=self.logger,
+        # )
         
         raw_batch_shape = self._infer_batch_shape(raw_batch)
         
