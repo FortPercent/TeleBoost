@@ -367,49 +367,49 @@ class UnifiedDataset(torch.utils.data.Dataset):
         if self.load_from_cache:
             data = self.cached_data[data_id % len(self.cached_data)]
             data = self.cached_data_operator(data)
-        else:
-            raw = self.data[data_id % len(self.data)].copy()
+            return data
 
-            # 1️⃣ 先用 main_data_operator 把 path → VideoDecoder
-            for key in self.data_file_keys:
-                if key not in raw:
-                    continue
+        # ===== 0️⃣ 取原始样本（完整 dict）=====
+        raw = self.data[data_id % len(self.data)].copy()
 
-                if key in self.special_operator_map:
-                    raw[key] = self.special_operator_map[key](raw[key])
-                else:
-                    raw[key] = self.main_data_operator(raw[key])
+        # ===== 1️⃣ path → VideoDecoder（只处理 video key）=====
+        for key in self.data_file_keys:
+            if key not in raw:
+                continue
 
-            # 2️⃣ chosen / rejected 各自独立跑 pipeline
-            out = {}
+            if key in self.special_operator_map:
+                raw[key] = self.special_operator_map[key](raw[key])
+            else:
+                raw[key] = self.main_data_operator(raw[key])
 
-            for key in self.data_file_keys:
-                if key not in raw:
-                    continue
+        # ===== 2️⃣ 明确“公共字段”=====
+        # 除了 chosen / rejected，其它都视为公共字段
+        shared_fields = {
+            k: v for k, v in raw.items()
+            if k not in self.data_file_keys
+        }
 
-                # ---- 核心：隔离 data_dict ----
-                data_i = raw.copy()
-                data_i["video"] = raw[key]
+        out = {}
 
-                data_i = self.inject_video_meta(data_i)
+        # ===== 3️⃣ 分别构建 chosen / rejected 分支 =====
+        for key in self.data_file_keys:
+            if key not in raw:
+                continue
 
+            # ---- 核心：公共字段 + 私有 video ----
+            data_i = shared_fields.copy()
+            data_i["video"] = raw[key]
 
-                if self.pipeline is not None:
-                    data_i = self.pipeline(data_i)
+            # 注入 video meta（video_length / height / width / fps 等）
+            data_i = self.inject_video_meta(data_i)
 
-                out[key] = data_i
+            # 跑 dict-level pipeline
+            if self.pipeline is not None:
+                data_i = self.pipeline(data_i)
 
-            # 3️⃣ 你可以选择性合并公共字段（如 prompt）
-            # 例如：
-            if "chosen" in out and "rejected" in out:
-                for k, v in out["chosen"].items():
-                    if k not in ("video", "images"):
-                        out["rejected"].setdefault(k, v)
+            out[key] = data_i
 
-            return out
-
-
-        return data
+        return out
 
     def __len__(self):
         if self.load_from_cache:
