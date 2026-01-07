@@ -371,7 +371,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
         # ===== 0️⃣ 取原始样本（完整 dict）=====
         raw = self.data[data_id % len(self.data)].copy()
-
+        print(f"raw = {raw.keys()}")
         # ===== 1️⃣ path → VideoDecoder（只处理 video key）=====
         for key in self.data_file_keys:
             if key not in raw:
@@ -409,6 +409,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
             out[key] = data_i
 
+        # print(out.keys())
         return out
 
     def __len__(self):
