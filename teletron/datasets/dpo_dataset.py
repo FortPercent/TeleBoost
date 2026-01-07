@@ -312,26 +312,29 @@ class UnifiedDataset(torch.utils.data.Dataset):
     def inject_video_meta(data_dict):
         video = data_dict["video"]
 
-        # 1. video_length（帧数）
+        # --- 时间维度 ---
         if "video_length" not in data_dict:
             data_dict["video_length"] = len(video)
 
-        # 2. frame_interval（ClipDataset 默认就是 1）
         if "frame_interval" not in data_dict:
             data_dict["frame_interval"] = 1
 
-        # 3. fps（可选，但推荐）
-        if "fps" not in data_dict:
-            try:
-                data_dict["fps"] = video.fps
-            except Exception:
-                data_dict["fps"] = None
-
-        # 4. video_valid_range（可选）
         if "video_valid_range" not in data_dict:
             data_dict["video_valid_range"] = (0, data_dict["video_length"])
 
+        # --- 空间维度（关键） ---
+        if "video_height" not in data_dict or "video_width" not in data_dict:
+            try:
+                data_dict["video_height"] = video.height
+                data_dict["video_width"] = video.width
+            except Exception:
+                # 极端兜底（几乎不会走）
+                frame0 = video.get_frames_at([0]).data
+                data_dict["video_height"] = frame0.shape[-2]
+                data_dict["video_width"] = frame0.shape[-1]
+
         return data_dict
+
 
 
     def load_metadata(self, metadata_path):
