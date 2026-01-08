@@ -38,6 +38,71 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
     data.batch["advantages"] = advantages
     return data
 
+from typing import List
+import torch
+import numpy as np
+
+@staticmethod
+def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") -> DataProto:
+    """
+    拼接多个 DataProto。
+    对于每个数据键(key)，只拼接那些自身包含非零元素的 tensor/array。
+    完全由零组成的 tensor/array 会被忽略。
+    
+    Args:
+        data_list (List[DataProto]): 多个 DataProto
+        dummy_key (str): (此参数在当前逻辑中未使用)
+    
+    Returns:
+        DataProto: 拼接后的 DataProto
+    """
+    if not data_list:
+        return DataProto()
+    
+    # 1. 收集所有唯一的 key
+    all_batch_keys = set()
+    all_non_tensor_keys = set()
+    for dp in data_list:
+        if dp.batch is not None:
+            all_batch_keys.update(dp.batch.keys())
+        if dp.non_tensor_batch is not None:
+            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
+
+    # 2. 处理 batch (PyTorch tensors)
+    batch_dict = {}
+    for key in all_batch_keys:
+        # 准备一个列表，只存放“有意义的”（非全零）tensors
+        tensors_to_concat = []
+        for dp in data_list:
+            if dp.batch is not None and key in dp.batch:
+                tensor = dp.batch[key]
+                # 关键改动：检查这一个 tensor 是否包含非零元素
+                if torch.any(tensor != 0):
+                    # 如果包含，则将其加入待拼接列表
+                    tensors_to_concat.append(tensor)
+        
+        # 如果列表不为空（即至少有一个 tensor 是有意义的），则执行拼接
+        if tensors_to_concat:
+            batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
+            
+    # 3. 处理 non_tensor_batch (NumPy arrays)
+    non_tensor_dict = {}
+    for key in all_non_tensor_keys:
+        # 准备一个列表，只存放“有意义的”（非全零）arrays
+        arrays_to_concat = []
+        for dp in data_list:
+            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
+                arr = dp.non_tensor_batch[key]
+                # 关键改动：检查这一个 array 是否包含非零元素
+                if np.any(arr != 0):
+                    # 如果包含，则将其加入待拼接列表
+                    arrays_to_concat.append(arr)
+        
+        # 如果列表不为空，则执行拼接
+        if arrays_to_concat:
+            non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
+            
+    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
 
 class RayDanceGRPOTrainer(RayPPOTrainer):
     """
@@ -88,6 +153,40 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         batch = None
         num_prompt_in_batch = 0
         num_gen_batches = 0
+        
+        if self.config.reward_model.type=="joint":
+            import threading
+            reward_results = {}
+            thread_inputs = {}
+            ready_events = {}
+            done_events = {}
+
+            def thread_loop(name, worker):
+                while True:
+                    ready_events[name].wait()      # 等待主线程喂数据
+                    ready_events[name].clear()
+                    # 调用现有 worker 的 compute_rm_score
+                    reward_results[name] = worker.compute_rm_score(thread_inputs[name])
+                    done_events[name].set()        # 通知主线程完成
+
+            # 四个线程
+            workers = {
+                "aes": self.aes_rm_wg,
+                "raft": self.raft_rm_wg,
+                "videoclip": self.videoclip_rm_wg,
+                "videophy": self.videophy_rm_wg,
+            }
+
+            threads = []
+            for name, worker in workers.items():
+                reward_results[name] = None
+                thread_inputs[name] = None
+                ready_events[name] = threading.Event()
+                done_events[name] = threading.Event()
+                t = threading.Thread(target=thread_loop, args=(name, worker), daemon=True)
+                t.start()
+                threads.append(t)       
+            
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
                 metrics = {}
@@ -194,22 +293,99 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
                         if self.use_rm:
-                            # Calculate the HPS 自动混合精度计算
+                            print("begin to compute reward")
                             with torch.amp.autocast('cuda'):
-                                if self.config.reward_model.type=="qwen":
-                                    reward_batch_output=gen_batch_output.select(
-                                        batch_keys=['null_context'],
-                                        non_tensor_batch_keys=["caption","video_ids"])
-                                elif self.config.reward_model.type=="single":
-                                    reward_batch_output=gen_batch_output
-                    
-                                reward_tensor = self.rm_wg.compute_rm_score(reward_batch_output)
-                                gen_batch_output.pop(batch_keys=['video_frames'],non_tensor_batch_keys=["caption","video_ids"])
-                                
-                                gen_batch_output = gen_batch_output.union(reward_tensor)
-                                metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
-                                metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()                                
+                                if self.config.reward_model.type == "joint":
+                                    # ======================
+                                    # Joint Reward Models
+                                    # ======================
+                                    import time
+                                    start_time = time.time()
 
+                                    # 启动所有 RM 线程
+                                    for name in workers:
+                                        thread_inputs[name] = gen_batch_output
+                                        done_events[name].clear()
+                                        ready_events[name].set()
+
+                                    # 等待完成
+                                    for name in workers:
+                                        done_events[name].wait()
+
+                                    # 收集并 merge 结果
+                                    aes_tensor = merge_worker_results(reward_results["aes"])
+                                    raft_tensor = merge_worker_results(reward_results["raft"])
+                                    videoclip_tensor = merge_worker_results(reward_results["videoclip"])
+                                    videophy_tensor = merge_worker_results(reward_results["videophy"])
+
+                                    # 调试输出（可选）
+                                    # for idx, data in enumerate(videophy_tensor):
+                                    #     print(f"idx {idx}: {data.print_data_proto(f'videophy_data_{idx}')}")
+
+                                    # 合并所有 reward 到 batch
+                                    batch_with_rewards = (
+                                        gen_batch_output
+                                        .union(aes_tensor)
+                                        .union(raft_tensor)
+                                        .union(videoclip_tensor)
+                                        .union(videophy_tensor)
+                                    )
+
+                                    # 计算平均 reward（可配置权重）
+                                    avg_reward = (
+                                        batch_with_rewards.batch["aes_rewards"]
+                                        + batch_with_rewards.batch["raft_rewards"]
+                                        + batch_with_rewards.batch["videoclip_rewards"]
+                                        + batch_with_rewards.batch["videophy_rewards"]
+                                    )
+
+                                    # 构造最终 reward DataProto（带平均 reward）
+                                    from tensordict import TensorDict
+                                    avg_reward_td = TensorDict({"rewards": avg_reward}, batch_size=avg_reward.shape[0])
+                                    avg_reward_proto = DataProto(
+                                        batch=avg_reward_td,
+                                        non_tensor_batch=aes_tensor.non_tensor_batch  # 假设一致
+                                    )
+                                    final_batch = batch_with_rewards.union(avg_reward_proto)
+
+                                    # 更新指标
+                                    metrics["train/rewards"] = avg_reward.mean()
+                                    metrics["train/log_probs"] = final_batch.batch["log_probs"].mean()
+
+                                    # 替换 gen_batch_output（用于后续训练）
+                                    gen_batch_output = final_batch
+
+                                    print(f"reward time: {time.time() - start_time:.2f}s")
+
+                                elif self.config.reward_model.type in ("qwen", "single"):
+                                    # ======================
+                                    # Single / Qwen Reward Model
+                                    # ======================
+                                    if self.config.reward_model.type == "qwen":
+                                        reward_input = gen_batch_output.select(
+                                            batch_keys=['null_context'],
+                                            non_tensor_batch_keys=["caption", "video_ids"]
+                                        )
+                                    else:  # "single"
+                                        reward_input = gen_batch_output
+
+                                    # 调用统一的 rm_wg（仅 single/qwen 有）
+                                    reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+
+                                    # 清理原 batch（移除大 tensor 如 video_frames）
+                                    gen_batch_output = gen_batch_output.pop(
+                                        batch_keys=['video_frames'],
+                                        non_tensor_batch_keys=["caption", "video_ids"]
+                                    )
+                                    gen_batch_output = gen_batch_output.union(reward_tensor)
+
+                                    # 更新指标
+                                    metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
+                                    metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
+
+                                else:
+                                    raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
+                
                         else:
                             reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
                             gen_batch_output = gen_batch_output.union(reward_tensor)

@@ -10,18 +10,24 @@ from wan.configs import t2v_1_3B
 def preprocess_text_data(args):
     """预处理文本数据，将文本转换为T5编码并保存为npy文件"""
     
-    # 加载原始JSON数据
-    print(f"Loading data from {args.input_json}")
+    # # 加载原始JSON数据
+    # print(f"Loading data from {args.input_json}")
+    # with open(args.input_json, 'r', encoding='utf-8') as f:
+    #     data = json.load(f)
+    # 从txt文件加载prompt数据
+    print(f"Loading prompts from {args.input_json}")
     with open(args.input_json, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+        prompts = [line.strip() for line in f if line.strip()]  # 去除空行
+    
+    print(f"Found {len(prompts)} prompts")
     
     # 如果数据是字典格式，转换为列表
-    if isinstance(data, dict):
-        data_list = list(data.values())
-    else:
-        data_list = data
+    # if isinstance(data, dict):
+    #     data_list = list(data.values())
+    # else:
+    #     data_list = data
     
-    print(f"Found {len(data_list)} items")
+    # print(f"Found {len(data_list)} items")
     
     # 初始化T5编码器
     config = t2v_1_3B
@@ -53,8 +59,13 @@ def preprocess_text_data(args):
     new_data = []
     
     print("Processing texts...")
+<<<<<<< HEAD
     for i in tqdm(range(len(data_list)), desc="Encoding texts"):
         item = data_list[i]
+=======
+    for i in tqdm(range(len(prompts)), desc="Encoding texts"):
+        item = prompts[i]
+>>>>>>> srd/verl_multi
         
         # 提取文本
         if isinstance(item, dict):
