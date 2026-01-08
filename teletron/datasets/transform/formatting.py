@@ -62,6 +62,8 @@ class PackInputs:
             images = F.crop(images, y1, x1, dst_height, dst_width)
             data_dict[image_key] = images
         for embedding_key in self.embedding_keys:
+            if type(embedding_key) is str:
+                continue
             if embedding_key in ['ref_mask']:
                 msk = data_dict[embedding_key]
                 msk_height = dst_height // 8

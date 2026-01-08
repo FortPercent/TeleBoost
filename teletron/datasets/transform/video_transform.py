@@ -195,9 +195,9 @@ class LoadInputImageAsFirstFrame:
     def __init__(
         self,
         base_path="",
-        height=None,
-        width=None,
-        max_pixels=None,
+        height=832,
+        width=480,
+        max_pixels=20000000,
         height_division_factor=16,
         width_division_factor=16,
         key="input_image",
@@ -209,7 +209,7 @@ class LoadInputImageAsFirstFrame:
 
         self.key = key
         self.output_key = output_key
-        self.file_client = FileClient()
+        self.file_client = FileClient(data_type="image")
         self.lmdb_client = LmdbClient()
         self.base_path = base_path
 
@@ -244,9 +244,9 @@ class LoadInputImageAsFirstFrame:
         # 3. PIL → Tensor
         image = torch.from_numpy(np.array(image)).permute(2, 0, 1).contiguous()
 
-        # 4. 加 batch & time 维度
-        image = image.unsqueeze(0).unsqueeze(0)
-        # [1, 1, 3, H, W]
+        # # 4. 加 batch & time 维度
+        image = image.unsqueeze(0)
+        # # [1, 1, 3, H, W]
 
         data_dict[self.output_key] = image
         return data_dict
