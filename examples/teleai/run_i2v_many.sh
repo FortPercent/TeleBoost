@@ -66,13 +66,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-
 # 2. 并行配置（原样）
 ########################################
 
-CP=2
+CP=4
 TP=1
 
 N_MOE=1
-N_LAYERS=1
-N_GPU_FOR_TRAIN=4
-N_GPU_FOR_DATA=2
+# N_LAYERS=1
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=4
 
 TENSORBOARD_LOGS_PATH=./logs
 CHECKPOINT_PATH=/nvfile-heatstorage/yuc/refactor/Teletron/test
