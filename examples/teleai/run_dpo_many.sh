@@ -80,7 +80,9 @@ EXPR_NAME=f1fn2v_1.3B
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
 CONFIG_PATH=${2:-"config.wan_dpo.config"}
-shift
+if [ $# -gt 0 ]; then
+    shift
+fi
 echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
