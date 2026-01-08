@@ -13,13 +13,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/t
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config 
-CP=4
+CP=8
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
 N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=4
+N_GPU_FOR_DATA=2
 
 # Single-node config 
 # N_MOE=1
@@ -64,7 +64,7 @@ echo '$MASTER_ADDR' $MASTER_ADDR
 echo '$NODE_RANK & $NNODES' $NODE_RANK $NNODES
 echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
-
+echo '$N_PROC' $N_PROC
 DISTRIBUTED_ARGS=(
     --nproc_per_node $N_PROC 
     --nnodes $NNODES 
