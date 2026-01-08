@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
@@ -44,7 +44,7 @@ mkdir -p $CHECKPOINT_PATH_SAVE
 
 MASTER_ADDR=${MASTER_ADDR:-'10.244.48.160'}
 MASTER_PORT='11322'
-NODE_RANK=${RANK:-'0'}
+NODE_RANK=${RANK:-'2'}
 
 MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
@@ -66,7 +66,7 @@ echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
 DISTRIBUTED_ARGS=(
-    --nproc_per_node $N_PROC 
+    --nproc_per_node 4 
     --nnodes $NNODES 
     --node_rank $NODE_RANK
     --master_addr $MASTER_ADDR 

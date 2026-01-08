@@ -44,7 +44,7 @@ mkdir -p $CHECKPOINT_PATH_SAVE
 
 MASTER_ADDR=${MASTER_ADDR:-'10.244.48.160'}
 MASTER_PORT='11322'
-NODE_RANK=${RANK:-'0'}
+NODE_RANK=${RANK:-'1'}
 
 MBS=1
 N_GPU=$((N_GPU_FOR_TRAIN+N_GPU_FOR_DATA))
@@ -66,7 +66,7 @@ echo '$N_GPU_FOR_TRAIN' $N_GPU_FOR_TRAIN
 echo '$N_GPU_FOR_DATA' $N_GPU_FOR_DATA
 
 DISTRIBUTED_ARGS=(
-    --nproc_per_node $N_PROC 
+    --nproc_per_node $N_GPU 
     --nnodes $NNODES 
     --node_rank $NODE_RANK
     --master_addr $MASTER_ADDR 
