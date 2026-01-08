@@ -290,7 +290,7 @@ def parse_args(extra_args=None):
     args = parser.parse_args()
     args.rank = int(os.getenv('RANK', '0'))
     args.world_size = int(os.getenv("WORLD_SIZE", '1'))
-
+    print(f"rank {args.rank} world_size {args.world_size}")
     if args.show_args is True:
         print_args(args)
         exit()
