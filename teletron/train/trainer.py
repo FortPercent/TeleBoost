@@ -352,14 +352,16 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             args.world_size = (args.world_size - args.distributed_vae_world_size)  //args.consumer_models_num
             args.dit_world_size = args.world_size * args.consumer_models_num
             rank = getattr(args, "rank", os.environ.get("RANK", "unknown"))
+            dist_world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else "unknown"
             print(
                 "[Init Debug] rank={}, world_size={}, distributed_vae_world_size={}, "
-                "consumer_models_num={}, dit_world_size={}".format(
+                "consumer_models_num={}, dit_world_size={}, dist_world_size={}".format(
                     rank,
                     args.world_size,
                     args.distributed_vae_world_size,
                     args.consumer_models_num,
                     args.dit_world_size,
+                    dist_world_size,
                 )
             )
         validate_args(args)
