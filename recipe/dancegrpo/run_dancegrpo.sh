@@ -2,6 +2,8 @@
 set -xeuo pipefail
 
 project_name='Dancegrpo'
+export PYTHONPATH=${PYTHONPATH:+$PYTHONPATH:}/gfs/space/chatrl/users/wxe/Wan-AI
+
 export TIMESTAMP=$(date +"%m-%d_%H-%M-%S")
 exp_name=${project_name}_Dancegrpo_Wan_14B_720P_129_${TIMESTAMP}
 
@@ -25,7 +27,7 @@ filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=8 # same with dp
 gen_prompt_bsz=$((train_prompt_bsz * 3))
-n_resp_per_prompt=8
+n_resp_per_prompt=3
 
 # Ray
 WORKING_DIR=${WORKING_DIR:-"${PWD}"}
@@ -35,8 +37,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/gemini/space/wuxuaner/Dancegrpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/gfs/space/chatrl/users/wxe/Dancegrpo-verl/data/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/gfs/space/chatrl/users/wxe/Dancegrpo-verl/data/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 export TENSORBOARD_DIR=/nvfile-heatstorage/ai_infra/code/lit117/wxy/Dancegrpo/tensorboard_log/${exp_name}
@@ -67,13 +69,13 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/Wan2___1-T2V-14B' \
-    actor_rollout_ref.model.vae_model_path='/Wan2___1-T2V-14B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.path='/gfs/space/chatrl/users/wxe/Wan-AI/Wan2.1-T2V-1.3B' \
+    actor_rollout_ref.model.vae_model_path='/gfs/space/chatrl/users/wxe/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=5.0 \
     actor_rollout_ref.h=480 \
     actor_rollout_ref.w=832 \
-    actor_rollout_ref.num_frames=81 \
-    actor_rollout_ref.sampling_steps=16 \
+    actor_rollout_ref.num_frames=49 \
+    actor_rollout_ref.sampling_steps=3 \
     actor_rollout_ref.actor.eta=0.25 \
     actor_rollout_ref.lr_warmup_steps=0 \
     actor_rollout_ref.use_hpsv2=True \
@@ -124,15 +126,17 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     reward_model.enable=True \
-    reward_model.type=qwen \
-    reward_model.model.path='/gemini/space/Qwen/Qwen2___5-VL-72B-Instruct' \
+    reward_model.type="joint" \
     reward_model.micro_batch_size_per_gpu=1 \
+    reward_model.aesthetic.clip_model_path=/gfs/space/chatrl/users/wxe/ViT-L-14.pt \
+    reward_model.aesthetic.aes_model_path=/gfs/space/chatrl/users/wxe/sa_0_4_vit_l_14_linear.pth \
+    reward_model.raft.model_path=/gfs/space/chatrl/users/wxe/raft-things.pth \
+    reward_model.videoclip.model_path=/gfs/space/chatrl/users/wxe/VideoCLIP-XL.bin \
+    reward_model.videophy.model_path=/gfs/space/chatrl/users/wxe/videocon_physics \
     reward_model.model.input_tokenizer=null \
-    reward_model.rollout.gpu_memory_utilization=0.9 \
     reward_model.rollout.max_model_len=$((max_prompt_length + max_response_length)) \
     reward_model.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
-    reward_model.rollout.load_format="auto" \
-    trainer.logger=tensorboard \
+    trainer.logger="tensorboard" \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.total_training_steps=1000 \

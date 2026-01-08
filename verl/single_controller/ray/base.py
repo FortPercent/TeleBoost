@@ -172,6 +172,19 @@ class RayClassWithInitArgs(ClassWithInitArgs):
         super().__init__(cls, *args, **kwargs)
         self._options = {}
         self._additional_resource = {}
+        self._runtime_env = {}
+        
+    def update_runtime_env_vars(self, env_vars: Dict[str, str]):
+        """
+        更新 actor 的运行时环境变量。
+        此方法是累加式的，不会覆盖其他 runtime_env 设置或先前已设置的环境变量。
+
+        Args:
+            env_vars: 一个包含要添加或更新的环境变量的字典。
+        """
+        if "env_vars" not in self._runtime_env:
+            self._runtime_env["env_vars"] = {}
+        self._runtime_env["env_vars"].update(env_vars)
 
     def set_additional_resource(self, additional_resource):
         """Set additional resource requirements for the actor.
@@ -207,6 +220,8 @@ class RayClassWithInitArgs(ClassWithInitArgs):
             target_node_id = ray.get(sharing_with.get_node_id.remote())
             cuda_visible_devices = ray.get(sharing_with.get_cuda_visible_devices.remote())
             options = {"scheduling_strategy": NodeAffinitySchedulingStrategy(node_id=target_node_id, soft=False)}
+            if self._runtime_env:
+                options["runtime_env"] = self._runtime_env
             return self.cls.options(**options).remote(*self.args, cuda_visible_devices=cuda_visible_devices, **self.kwargs)
 
         options = {"scheduling_strategy": PlacementGroupSchedulingStrategy(placement_group=placement_group, placement_group_bundle_index=placement_group_bundle_idx)}
@@ -217,9 +232,22 @@ class RayClassWithInitArgs(ClassWithInitArgs):
         if use_gpu and device_name == "npu":
             options["resources"] = {"NPU": num_gpus}
 
-        if len(self._additional_resource) > 1:
-            for k, v in self._additional_resource.items():
-                options[k] = v
+        # if len(self._additional_resource) > 1:
+        #     for k, v in self._additional_resource.items():
+        #         options[k] = v
+                
+        if self._additional_resource:
+            options.setdefault("resources", {}).update(self._additional_resource)
+        
+        # 将已配置的 runtime_env 添加到 actor 选项中
+        if self._runtime_env:
+            # 确保不会覆盖已有的 runtime_env 设置
+            if "runtime_env" in options:
+                options["runtime_env"].setdefault("env_vars", {}).update(self._runtime_env.get("env_vars", {}))
+            else:
+                options["runtime_env"] = self._runtime_env
+
+        # return self.cls.options(**options).remote(*self.args, **self.kwargs)
 
         # print("cls:", self.cls)
         # print("args: ", self.args)

@@ -1423,7 +1423,11 @@ class RewardModelWorker(Worker, WorkerProfilerExtension):
         if self.config.micro_batch_size is not None:
             self.config.micro_batch_size //= torch.distributed.get_world_size()
             self.config.micro_batch_size_per_gpu = self.config.micro_batch_size
-
+        
+    def get_mps_percentage(self):
+        """获取并返回当前 actor 的 CUDA_MPS_ACTIVE_THREAD_PERCENTAGE 环境变量。"""
+        return os.environ.get("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE", "未设置")
+    
     def _build_model(self, config):
         # the following line is necessary
         from torch.distributed.fsdp import CPUOffload
