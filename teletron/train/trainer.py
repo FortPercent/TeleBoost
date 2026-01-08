@@ -89,6 +89,9 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             )
             producer.run()
             exit()        
+        # from teletron.core.parallel_state import get_transformer_model_group
+        # consumer_group = get_transformer_model_group()
+        # print(f"consumer world size = {torch.distributed.get_world_size(consumer_group)}")
         global _TRAIN_START_TIME
         start_time_tensor = torch.tensor([_TRAIN_START_TIME],
                                         dtype=torch.double,
@@ -385,8 +388,8 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             # Compile dependencies.
             from teletron.core.parallel_state import get_transformer_model_group
             isConsumerRank = get_transformer_model_group()
-            if isConsumerRank is not None:
-                _compile_dependencies()
+            # if isConsumerRank is not None:
+            #     _compile_dependencies()
             if args.tp_comm_overlap:
                 _initialize_tp_communicators()
             # No continuation function

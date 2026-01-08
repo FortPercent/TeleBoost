@@ -1168,21 +1168,22 @@ def _compile_dependencies():
                 " back to unfused kernel invocations.",
                 flush=True,
             )
-
+    from teletron.core.parallel_state import get_transformer_model_group
+    consumer_group = get_transformer_model_group()
     # Always build on rank zero first.
     if torch.distributed.get_rank() == 0:
         start_time = time.time()
         print("> compiling and loading fused kernels ...", flush=True)
         fused_kernel_load(args)
-        torch.distributed.barrier()
+        torch.distributed.barrier(consumer_group)
     else:
-        torch.distributed.barrier()
+        torch.distributed.barrier(consumer_group)
         fused_kernel_load(args)
     # Simple barrier to make sure all ranks have passed the
     # compilation phase successfully before moving on to the
     # rest of the program. We think this might ensure that
     # the lock is released.
-    torch.distributed.barrier()
+    torch.distributed.barrier(consumer_group)
     if torch.distributed.get_rank() == 0:
         print(
             ">>> done with compiling and loading fused kernels. "
