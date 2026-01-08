@@ -22,9 +22,9 @@ config = dict(
         rejected_video_key="rejected",
 
         # === 视频尺寸 & 时序 ===
-        height=720,
-        # height=480,
-        width=1280,
+        # height=720,
+        height=480,
+        width=832,
         num_frames=81,
 
         # === 这些原脚本是写死的，现在 config 化 ===
