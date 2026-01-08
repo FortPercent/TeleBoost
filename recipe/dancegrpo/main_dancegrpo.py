@@ -94,23 +94,57 @@ class TaskRunner:
         if config.reward_model.enable:
             if config.reward_model.strategy == "fsdp":
                 from .fsdp_worker import RewardModelWorker
+                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                mapping[Role.RewardModel] = global_pool_id
+                print(f"Mapping type {Role.RewardModel} to be the reward model")
+
             elif config.reward_model.strategy == "megatron":
                 from verl.workers.megatron_workers import RewardModelWorker
+                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                mapping[Role.RewardModel] = global_pool_id
+                print(f"Mapping type {Role.RewardModel} to be the reward model")
+
             elif config.reward_model.strategy == "diffusion":
                 if config.reward_model.type == "qwen":
                     from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                    mapping[Role.RewardModel] = global_pool_id
+                    print(f"Mapping type {Role.RewardModel} to be the Qwen reward model")
+
                 elif config.reward_model.type == "single":
                     from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
-            else:
-                raise NotImplementedError
-            print(f"Mapping type{Role.RewardModel} to be the reward model")
-            role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
-            mapping[Role.RewardModel] = global_pool_id
+                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                    mapping[Role.RewardModel] = global_pool_id
+                    print(f"Mapping type {Role.RewardModel} to be the single diffusion reward model")
 
-        # reference model
-        if config.algorithm.use_kl_in_reward or config.actor_rollout_ref.actor.use_kl_loss:
-            role_worker_mapping[Role.RefPolicy] = ray.remote(ActorRolloutRefWorker)
-            mapping[Role.RefPolicy] = global_pool_id
+                elif config.reward_model.type == "joint":
+                    from .dancegrpo_fsdp_worker import (
+                        AestheticRewardModelWorker,
+                        RAFTRewardModelWorker,
+                        VideoclipRewardModelWorker,
+                        VideophyRewardModelWorker,
+                    )
+                    # 注意：joint 模式下可能不需要单一的 RewardModelWorker
+                    # 而是注册多个具体角色的 worker
+                    role_worker_mapping[Role.AestheticRewardModel] = ray.remote(AestheticRewardModelWorker)
+                    mapping[Role.AestheticRewardModel] = global_pool_id
+
+                    role_worker_mapping[Role.RAFTRewardModel] = ray.remote(RAFTRewardModelWorker)
+                    mapping[Role.RAFTRewardModel] = global_pool_id
+
+                    role_worker_mapping[Role.VideoclipRewardModel] = ray.remote(VideoclipRewardModelWorker)
+                    mapping[Role.VideoclipRewardModel] = global_pool_id
+
+                    role_worker_mapping[Role.VideophyRewardModel] = ray.remote(VideophyRewardModelWorker)
+                    mapping[Role.VideophyRewardModel] = global_pool_id
+                    
+                    print("Mapping multiple reward models for 'joint' type",role_worker_mapping)
+
+                else:
+                    raise NotImplementedError(f"Unknown diffusion reward model type: {config.reward_model.type}")
+
+            else:
+                raise NotImplementedError(f"Unknown reward model strategy: {config.reward_model.strategy}")
 
         from verl.workers.reward_manager import get_reward_manager_cls
 

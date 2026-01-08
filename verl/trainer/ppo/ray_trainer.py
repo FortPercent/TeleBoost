@@ -74,6 +74,11 @@ class Role(Enum):
     RefPolicy = 4
     RewardModel = 5
     ActorRolloutRef = 6
+    AestheticRewardModel = 7
+    RAFTRewardModel = 8
+    VideoclipRewardModel = 9
+    VideophyRewardModel = 10
+    MultiRewardModel = 11
 
 
 @dataclass
@@ -92,7 +97,7 @@ class ResourcePoolManager:
             # For FSDP backend, we recommend using max_colocate_count=1 that merge all WorkerGroups into one.
             # For Megatron backend, we recommend using max_colocate_count>1
             # that can utilize different WorkerGroup for differnt models
-            resource_pool = RayResourcePool(process_on_nodes=process_on_nodes, use_gpu=True, max_colocate_count=1, name_prefix=resource_pool_name)
+            resource_pool = RayResourcePool(process_on_nodes=process_on_nodes, use_gpu=True, max_colocate_count=5, name_prefix=resource_pool_name)
             self.resource_pool_dict[resource_pool_name] = resource_pool
 
         self._check_resource_available()
@@ -329,7 +334,9 @@ class RayPPOTrainer:
         self.role_worker_mapping = role_worker_mapping
         self.resource_pool_manager = resource_pool_manager
         self.use_reference_policy = Role.RefPolicy in role_worker_mapping
-        self.use_rm = Role.RewardModel in role_worker_mapping
+        # self.use_rm = Role.RewardModel in role_worker_mapping
+        if (self.config.reward_model.enable and self.config.reward_model.type=="joint") or Role.RewardModel in role_worker_mapping:
+            self.use_rm=True
         self.ray_worker_group_cls = ray_worker_group_cls
         self.device_name = device_name
         self.validation_generations_logger = ValidationGenerationsLogger()
@@ -751,31 +758,173 @@ class RayPPOTrainer:
             self.resource_pool_to_cls[resource_pool]["ref"] = ref_policy_cls
 
         # create a reward model if reward_fn is None
-        if self.use_rm:
-            # we create a RM here
-            resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
-            rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
-            self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
+        # if self.use_rm:
+            # if self.config.reward_model.type=="joint":
+            #     resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
+            
+            #     # rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
+            #     aes_rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.AestheticRewardModel], config=self.config.reward_model)
+            #     raft_rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RAFTRewardModel], config=self.config.reward_model)
+            #     videoclip_rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.VideoclipRewardModel], config=self.config.reward_model)
+            #     videophy_rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.VideophyRewardModel], config=self.config.reward_model)
+            #     # multi_rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.MultiRewardModel], config=self.config.reward_model)
+                
+            #     # self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
+            #     self.resource_pool_to_cls[resource_pool]["aes_rm"] = aes_rm_cls
+            #     self.resource_pool_to_cls[resource_pool]["raft_rm"] = raft_rm_cls
+            #     self.resource_pool_to_cls[resource_pool]["videoclip_rm"] = videoclip_rm_cls
+            #     self.resource_pool_to_cls[resource_pool]["videophy_rm"] = videophy_rm_cls
+            #     # self.resource_pool_to_cls[resource_pool]["multi_rm"]=multi_rm_cls
 
-        # initialize WorkerGroup
-        # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
-        # you should not use `create_colocated_worker_cls`.
-        # Instead, directly pass different resource pool to different worker groups.
-        # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
+            #     # initialize WorkerGroup
+            #     # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
+            #     # you should not use `create_colocated_worker_cls`.
+            #     # Instead, directly pass different resource pool to different worker groups.
+            #     # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
+            #     all_wg = {}
+            #     wg_kwargs = {}  # Setting up kwargs for RayWorkerGroup
+            #     if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
+            #         wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
+            #     if OmegaConf.select(self.config.trainer, "profile_steps") is not None:
+            #         wg_kwargs["profile_steps"] = OmegaConf.select(self.config.trainer, "profile_steps")
+            #         assert OmegaConf.select(self.config.trainer, "worker_nsight_options") is not None, "worker_nsight_options must be set when profile_steps is set"
+            #         wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(OmegaConf.select(self.config.trainer, "worker_nsight_options"))
+
+            #     worker_percentages = {
+            #         "aes_rm": "50",
+            #         "raft_rm": "50",
+            #         "videoclip_rm": "75",
+            #         "videophy_rm": "25",
+            #     }
+
+            #     for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            #         # 遍历该资源池中的每一个 worker 类 (例如 'actor', ActorCls)
+            #         for worker_name, worker_cls in class_dict.items():            
+            #             # --- USAGE: Configure the environment for the current worker ---
+            #             # Get the percentage for the current worker, defaulting to 100 if not specified
+            #             percentage = worker_percentages.get(worker_name, "100")
+                        
+            #             # Set the environment variable using the new method
+            #             worker_cls.update_runtime_env_vars({
+            #                 "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE": percentage
+            #             })
+                        
+            #             # Now, create the WorkerGroup with the configured worker_cls.
+            #             # The configuration will be picked up when the actor is spawned.
+            #             wg = self.ray_worker_group_cls(
+            #                 resource_pool=resource_pool,
+            #                 ray_cls_with_init=worker_cls, # This instance now holds the env config
+            #                 device_name=self.device_name,
+            #                 **wg_kwargs
+            #             )
+                        
+            #             # Spawn the worker group
+            #             spawn_wg = wg.spawn(prefix_set={worker_name})
+                        
+            #             # Update the main dictionary of worker groups
+            #             all_wg.update(spawn_wg)
+            # else:
+            #     # we create a RM here
+            #     resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
+            #     rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
+            #     self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
+
+            #     # initialize WorkerGroup
+            #     # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
+            #     # you should not use `create_colocated_worker_cls`.
+            #     # Instead, directly pass different resource pool to different worker groups.
+            #     # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
+            #     all_wg = {}
+            #     wg_kwargs = {}  # Setting up kwargs for RayWorkerGroup
+            #     if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
+            #         wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
+            #     if OmegaConf.select(self.config.trainer, "profile_steps") is not None:
+            #         wg_kwargs["profile_steps"] = OmegaConf.select(self.config.trainer, "profile_steps")
+            #         assert OmegaConf.select(self.config.trainer, "worker_nsight_options") is not None, "worker_nsight_options must be set when profile_steps is set"
+            #         wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(OmegaConf.select(self.config.trainer, "worker_nsight_options"))
+
+            #     for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            #         worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
+            #         wg_dict = self.ray_worker_group_cls(resource_pool=resource_pool, ray_cls_with_init=worker_dict_cls, device_name=self.device_name, **wg_kwargs)
+            #         spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
+            #         all_wg.update(spawn_wg)
+            # --- Step 1: 构建 resource_pool_to_cls 映射 ---
+        if self.use_rm:
+            if self.config.reward_model.type == "joint":
+                resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
+                # 注册多个 reward model 子类
+                print(self.role_worker_mapping[Role.AestheticRewardModel])
+                self.resource_pool_to_cls[resource_pool]["aes_rm"] = RayClassWithInitArgs(
+                    self.role_worker_mapping[Role.AestheticRewardModel], config=self.config.reward_model
+                )
+                self.resource_pool_to_cls[resource_pool]["raft_rm"] = RayClassWithInitArgs(
+                    self.role_worker_mapping[Role.RAFTRewardModel], config=self.config.reward_model
+                )
+                self.resource_pool_to_cls[resource_pool]["videoclip_rm"] = RayClassWithInitArgs(
+                    self.role_worker_mapping[Role.VideoclipRewardModel], config=self.config.reward_model
+                )
+                self.resource_pool_to_cls[resource_pool]["videophy_rm"] = RayClassWithInitArgs(
+                    self.role_worker_mapping[Role.VideophyRewardModel], config=self.config.reward_model
+                )
+            else:
+                # 单一 RM
+                resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
+                rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
+                self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
+
+        # --- Step 2: 统一初始化 all_wg 和 wg_kwargs ---
         all_wg = {}
-        wg_kwargs = {}  # Setting up kwargs for RayWorkerGroup
+        wg_kwargs = {}
         if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
             wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
         if OmegaConf.select(self.config.trainer, "profile_steps") is not None:
-            wg_kwargs["profile_steps"] = OmegaConf.select(self.config.trainer, "profile_steps")
-            assert OmegaConf.select(self.config.trainer, "worker_nsight_options") is not None, "worker_nsight_options must be set when profile_steps is set"
-            wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(OmegaConf.select(self.config.trainer, "worker_nsight_options"))
+            wg_kwargs["profile_steps"] = self.config.trainer.profile_steps
+            assert OmegaConf.select(self.config.trainer, "worker_nsight_options") is not None, \
+                "worker_nsight_options must be set when profile_steps is set"
+            wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(self.config.trainer.worker_nsight_options)
 
-        for resource_pool, class_dict in self.resource_pool_to_cls.items():
-            worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
-            wg_dict = self.ray_worker_group_cls(resource_pool=resource_pool, ray_cls_with_init=worker_dict_cls, device_name=self.device_name, **wg_kwargs)
-            spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
-            all_wg.update(spawn_wg)
+        # --- Step 3: 根据模式决定如何创建 WorkerGroup ---
+        if self.use_rm and self.config.reward_model.type == "joint":
+            # ✅ Joint 模式：每个 RM 独立 WorkerGroup，支持不同 resource allocation 和 env vars
+            worker_percentages = {
+                "aes_rm": "50",
+                "raft_rm": "50",
+                "videoclip_rm": "75",
+                "videophy_rm": "25",
+            }
+
+            for resource_pool, class_dict in self.resource_pool_to_cls.items():
+                for worker_name, worker_cls in class_dict.items():
+                    # 设置 MPS 百分比（仅 joint RM）
+                    percentage = worker_percentages.get(worker_name, "100")
+                    worker_cls.update_runtime_env_vars({
+                        "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE": percentage
+                    })
+                    
+                    wg = self.ray_worker_group_cls(
+                        resource_pool=resource_pool,
+                        ray_cls_with_init=worker_cls,
+                        device_name=self.device_name,
+                        **wg_kwargs
+                    )
+                    
+                    spawn_wg = wg.spawn(prefix_set={worker_name})
+                    all_wg.update(spawn_wg)
+
+        else:
+            # ✅ 非 joint 模式（包括 use_rm=False）：使用 colocated 合并所有角色
+            for resource_pool, class_dict in self.resource_pool_to_cls.items():
+                if not class_dict:
+                    continue
+                worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
+                wg_dict = self.ray_worker_group_cls(
+                    resource_pool=resource_pool,
+                    ray_cls_with_init=worker_dict_cls,
+                    device_name=self.device_name,
+                    **wg_kwargs
+                )
+                spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
+                all_wg.update(spawn_wg)
 
         if self.use_critic:
             self.critic_wg = all_wg["critic"]
@@ -786,8 +935,22 @@ class RayPPOTrainer:
             self.ref_policy_wg.init_model()
         
         if self.use_rm:
-            self.rm_wg = all_wg["rm"]
-            self.rm_wg.init_model()
+            if self.config.reward_model.type=="joint":
+                self.aes_rm_wg = all_wg.get("aes_rm")
+                self.raft_rm_wg = all_wg.get("raft_rm")
+                self.videoclip_rm_wg = all_wg.get("videoclip_rm")
+                self.videophy_rm_wg = all_wg.get("videophy_rm")
+                # self.multi_rm_wg = all_wg.get("multi_rm")
+                self.aes_rm_wg.init_model() 
+                self.raft_rm_wg.init_model()
+                self.videoclip_rm_wg.init_model()
+                self.videophy_rm_wg.init_model()
+            else:
+                self.rm_wg = all_wg["rm"]
+                self.rm_wg.init_model()
+                
+            
+                # self.multi_rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg["actor_rollout"]
