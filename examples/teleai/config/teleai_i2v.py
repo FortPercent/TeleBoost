@@ -169,7 +169,8 @@ config = dict(
     ),
     eval=dict(
         data_path_list=[
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            "/nvfile-heatstorage/AIGC_H100/basemodel_exp/dataset/istock/istock_0.json", 
         ],
         eval_time_steps=[200,400,600,800,1000]
     ),
