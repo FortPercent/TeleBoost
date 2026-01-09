@@ -571,14 +571,26 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             
             if os.environ.get("MEMORY_SNAPSHOT"):
                 torch.cuda.memory._record_memory_history(max_entries=80000)
-            loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
-                self.train_step(forward_step_func,
-                        train_data_iterator,
-                        model,
-                        optimizer,
-                        opt_param_scheduler,
-                        config,
-                        ema_models)
+            try:
+                loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
+                    self.train_step(forward_step_func,
+                            train_data_iterator,
+                            model,
+                            optimizer,
+                            opt_param_scheduler,
+                            config,
+                            ema_models)
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    save_dir = os.environ.get("PROF_SAVE_PATH", ".")
+                    time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+                    file_name = os.path.join(
+                        save_dir,
+                        f"memory_{time_str}_iter{iteration}_rank{torch.distributed.get_rank()}_oom.pt",
+                    )
+                    torch.cuda.memory._dump_snapshot(file_name)
+                    torch.cuda.memory._record_memory_history(enabled=None)
+                raise
             
             dit_time = timers.get_elapsed_time('dit-time')
             get_data_time = timers.get_elapsed_time('get-data-time')
