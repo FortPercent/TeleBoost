@@ -63,7 +63,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/teleai_data_tool
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
-
+export MEMORY_SNAPSHOT=1
+export PROF_SAVE_PATH="./dpo_train_profile"
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
 CP=4
@@ -143,7 +144,7 @@ echo '$N_PROC' $N_PROC
 #######################################
 
 DISTRIBUTED_ARGS=(
-    --nproc_per_node 8
+    --nproc_per_node $N_PROC
     --nnodes $NNODES
     --node_rank $NODE_RANK
     --master_addr $MASTER_ADDR
