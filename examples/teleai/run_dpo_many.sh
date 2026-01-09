@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.67.241"
+MASTER_ADDR="10.244.104.187"
 MASTER_PORT="11324"
 
 while [[ $# -gt 0 ]]; do
@@ -66,13 +66,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/V
 
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=8
+CP=4
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=2
+N_GPU_FOR_TRAIN=12
+N_GPU_FOR_DATA=3
 
 # EXPR_NAME=sr_720p
 EXPR_NAME=f1fn2v_1.3B
@@ -127,7 +127,7 @@ echo '$N_PROC' $N_PROC
 #######################################
 
 DISTRIBUTED_ARGS=(
-    --nproc_per_node $N_PROC
+    --nproc_per_node 8
     --nnodes $NNODES
     --node_rank $NODE_RANK
     --master_addr $MASTER_ADDR
