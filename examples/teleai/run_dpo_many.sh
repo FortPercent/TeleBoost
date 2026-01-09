@@ -102,15 +102,31 @@ WORLD_SIZE=$N_GPU_FOR_TRAIN
 N_VAE=$N_GPU_FOR_DATA
 GBS=$(($WORLD_SIZE * $MBS / $CP / $TP))
 
+GPUS_PER_NODE=8
+
+# 训练占满的整节点数
+FULL_TRAIN_NODES=$((N_GPU_FOR_TRAIN / GPUS_PER_NODE))
+
+# 训练在下一个节点剩余的 GPU 数
+REMAIN_TRAIN_GPU=$((N_GPU_FOR_TRAIN % GPUS_PER_NODE))
+
 if [ "$NNODES" -eq 1 ]; then
-    N_PROC=$N_GPU
-elif [ "$NODE_RANK" -eq $((NNODES - 1)) ]; then
-    # 最后一个节点：VAE / Data
-    N_PROC=$N_VAE
+    # 单节点：训练 + VAE 全上
+    N_PROC=$((N_GPU_FOR_TRAIN + N_GPU_FOR_DATA))
+
+elif [ "$NODE_RANK" -lt "$FULL_TRAIN_NODES" ]; then
+    # 完全被训练占满的节点
+    N_PROC=$GPUS_PER_NODE
+
+elif [ "$NODE_RANK" -eq "$FULL_TRAIN_NODES" ]; then
+    # 训练剩余 + VAE 共存节点
+    N_PROC=$((REMAIN_TRAIN_GPU + N_GPU_FOR_DATA))
+
 else
-    # 训练 / MOE 节点
-    N_PROC=8
+    # 后续节点不用启动进程
+    N_PROC=0
 fi
+
 
 #######################################
 # Debug 输出（原样）
