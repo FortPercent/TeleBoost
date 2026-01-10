@@ -59,13 +59,8 @@ def preprocess_text_data(args):
     new_data = []
     
     print("Processing texts...")
-<<<<<<< HEAD
-    for i in tqdm(range(len(data_list)), desc="Encoding texts"):
-        item = data_list[i]
-=======
     for i in tqdm(range(len(prompts)), desc="Encoding texts"):
         item = prompts[i]
->>>>>>> srd/verl_multi
         
         # 提取文本
         if isinstance(item, dict):
