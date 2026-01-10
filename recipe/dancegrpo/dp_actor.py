@@ -43,6 +43,29 @@ def save_input_hook(name):
         }, file_name)
     return hook
 
+def _normalize_wan22_timestep(t, sigma):
+    if sigma is not None:
+        if torch.is_tensor(sigma):
+            return sigma.detach().flatten()[0].float().item()
+        return float(sigma)
+    if t is None:
+        return None
+    if torch.is_tensor(t):
+        t_val = t.detach().flatten()[0].float().item()
+    else:
+        t_val = float(t)
+    if t_val > 1.0:
+        t_val = t_val / 1000.0
+    return t_val
+
+def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
+    if isinstance(guide_scale, (list, tuple)) and len(guide_scale) >= 2:
+        t_val = _normalize_wan22_timestep(t, sigma)
+        if t_val is None:
+            return guide_scale[0]
+        return guide_scale[1] if t_val >= boundary else guide_scale[0]
+    return guide_scale
+
 def register_all_hooks(model):
     for name, module in model.named_modules():
         print(f"[REGISTER] Hooking module: {name}")
@@ -297,9 +320,28 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         if latents.shape[0] != 16:
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
         
+        boundary = getattr(self.config, "wan22_boundary", 0.9)
+        sigma = sigma_schedule[i] if sigma_schedule is not None else None
+        sample_guide_scale = _select_wan22_guide_scale(guide_scale, timesteps, sigma, boundary)
         
         autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
+            with torch.no_grad():
+                pred_uncond = transformer(
+                    x=[latents],  # [(16, 7, 64, 64)]
+                    t=timesteps,
+                    context=context_null,
+                    seq_len=seq_len
+                )
+            
+            #处理无条件预测输出
+            if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
+                model_output_uncond = pred_uncond['rgb'][0].detach()
+            elif isinstance(pred_uncond, list):
+                model_output_uncond = pred_uncond[0].detach()
+            else:
+                model_output_uncond = pred_uncond.detach()
+            
             pred_cond = transformer(
                 x=[latents],
                 t=timesteps,
@@ -314,34 +356,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 model_output_cond = pred_cond[0]
             else:
                 model_output_cond = pred_cond
-                
-            # 立即清理
-            # del pred_cond
-            # torch.cuda.empty_cache()
-                
-            # 再计算无条件预测
-            # with torch.no_grad(): 
-            with torch.no_grad():
-                pred_uncond = transformer(
-                    x=[latents],  # [(16, 7, 64, 64)]
-                    t=timesteps,
-                    context=context_null,
-                    seq_len=seq_len
-                )
-            
-            #处理无条件预测输出
-            if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
-                model_output_uncond = pred_uncond['rgb'][0]
-            elif isinstance(pred_uncond, list):
-                model_output_uncond = pred_uncond[0]
-            else:
-                model_output_uncond = pred_uncond
                     
                 # del pred_uncond
                 # torch.cuda.empty_cache()
             
             # CFG组合
-            model_output = model_output_uncond + guide_scale * (model_output_cond - model_output_uncond)
+            model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
             # del model_output_cond, model_output_uncond
             # model_output = model_output_cond
 
@@ -394,9 +414,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         if grpo:
             # 计算log概率
             log_prob = (
-                -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2) / (2 * (std_dev_t**2))
-            )
-            - math.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
+                -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2)
+                / (2 * (std_dev_t**2))
+            ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
             # 在除batch维度外的所有维度上求平均
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))

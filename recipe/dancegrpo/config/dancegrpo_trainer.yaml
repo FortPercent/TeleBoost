@@ -15,6 +15,7 @@ data:
 
 actor_rollout_ref:
   type: diffusion
+  wan_version: wan21
   model:
     vae_model_path: data/flux
     data_json_path: data/rl_embeddings/videos2caption.json
