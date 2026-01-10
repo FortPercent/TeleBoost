@@ -40,6 +40,29 @@ import logging
 __all__ = ['DiffusionRollout']
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+
+def _normalize_wan22_timestep(t, sigma):
+    if sigma is not None:
+        if torch.is_tensor(sigma):
+            return sigma.detach().flatten()[0].float().item()
+        return float(sigma)
+    if t is None:
+        return None
+    if torch.is_tensor(t):
+        t_val = t.detach().flatten()[0].float().item()
+    else:
+        t_val = float(t)
+    if t_val > 1.0:
+        t_val = t_val / 1000.0
+    return t_val
+
+def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
+    if isinstance(guide_scale, (list, tuple)) and len(guide_scale) >= 2:
+        t_val = _normalize_wan22_timestep(t, sigma)
+        if t_val is None:
+            return guide_scale[0]
+        return guide_scale[1] if t_val >= boundary else guide_scale[0]
+    return guide_scale
 class DiffusionRollout(BaseRollout):
 
     def __init__(self, module: nn.Module, config):
@@ -213,6 +236,8 @@ class DiffusionRollout(BaseRollout):
             B = len(context) if isinstance(context, list) else context.shape[0]
             # 确保设备一致
             device = latents[0].device
+            boundary = getattr(self.config, "wan22_boundary", 0.9)
+            base_guide_scale = getattr(self.config, "guide_scale", 5.0)
             
             for i in progress_bar:
                 # 使用sigma值计算timestep
@@ -220,6 +245,7 @@ class DiffusionRollout(BaseRollout):
                 
                 timestep_value = int(sigma * 1000)
                 timestep = torch.full([B], timestep_value, device=device, dtype=torch.long)
+                sample_guide_scale = _select_wan22_guide_scale(base_guide_scale, timestep, sigma, boundary)
                 
                 # timestep_cond = timestep
                 # timestep_uncond = timestep
@@ -247,12 +273,13 @@ class DiffusionRollout(BaseRollout):
                     #         context=context,
                     #         seq_len=seq_len
                     #     )
-                    pred_cond = [transformer(
+                    with torch.no_grad():
+                        pred_cond = transformer(
                             x=latents,  # [(16, 7, 64, 64)]
                             t=timestep,
                             context=context,
                             seq_len=seq_len
-                        )[0].detach()]
+                        )
                     # with torch.no_grad():
                     #     pred_cond = transformer(
                     #         x=latents,  # [(16, 7, 64, 64)]
@@ -289,7 +316,7 @@ class DiffusionRollout(BaseRollout):
                     del pred_cond, pred_uncond
 
                     # CFG组合
-                    model_output = model_output_uncond + self.config.guide_scale * (model_output_cond - model_output_uncond)
+                    model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
                     del model_output_cond, model_output_uncond
                     torch.cuda.empty_cache()
 
@@ -340,7 +367,7 @@ class DiffusionRollout(BaseRollout):
         pred_original_sample = latents - sigma * model_output
         
         delta_t = sigma - sigmas[index + 1]  # 时间差分
-        std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
+        std_dev_t = eta * torch.sqrt(delta_t)  # 随机噪声的std
         
         if sde_solver:  # 使用SDE求解器（和FLUX相同）
             score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
@@ -353,13 +380,12 @@ class DiffusionRollout(BaseRollout):
         if grpo:
             # 计算log概率
             log_prob = (
-                -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2) / (2 * (std_dev_t**2))
-            )
-            - math.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
+                -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2)
+                / (2 * (std_dev_t**2))
+            ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
             # 在除batch维度外的所有维度上求平均
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             return prev_sample, pred_original_sample, log_prob
         else:
             return prev_sample_mean, pred_original_sample
-

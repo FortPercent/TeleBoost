@@ -317,45 +317,101 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                 from wan.modules.model import WanModel
                 actor_module_class = WanModel
 
-            actor_module = actor_module_class.from_pretrained(
-                local_path,
-                torch_dtype=torch_dtype,
-                trust_remote_code=trust_remote_code
-            )
+            compile_export_mode = "compile"
+            wan_version = self.config.model.get("wan_version", "wan21")
+            use_wan22 = wan_version == "wan22"
+            if actor_module_class.__name__ == "WanModel" and use_wan22:
+                wan22_high_path = self.config.model.get("high_noise_path", None)
+                if not wan22_high_path:
+                    wan22_high_path=os.path.join(local_path, "high_noise_model")
+                    wan22_low_path=os.path.join(local_path, "low_noise_model")
+                    if not os.path.exists(wan22_high_path):
+                        raise ValueError(
+                        "wan_version=wan22 requires model.high_noise_path/model.low_noise_path or existing "
+                        "low_noise_model and high_noise_model near model.path"
+                    )
 
-            # Apply Liger kernel to the model if use_liger is set to True
-            if use_liger:
-                from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
+            if actor_module_class.__name__ == "WanModel" and use_wan22:
+                from verl.models.transformers.wan22 import Wan22DualModel
+                from verl.utils.fs import copy_to_local
 
-                _apply_liger_kernel_to_instance(model=actor_module)
+                fused_kernel_options = self.config.model.get("fused_kernel_options", None)
+                fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
 
-            fused_kernel_options = self.config.model.get("fused_kernel_options", None)
-            fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
-            apply_monkey_patch(
-                model=actor_module,
-                use_remove_padding=use_remove_padding,
-                ulysses_sp_size=self.ulysses_sequence_parallel_size,
-                use_fused_kernels=use_fused_kernels,
-                fused_kernels_backend=fused_kernels_backend,
-            )
-            
-            # fhd compile dit
-            compile_export_mode = 'compile'
-            actor_module = self._enable_compile(actor_module, compile_export_mode)
-            
-            # some parameters may not in torch_dtype. TODO(zhangchi.usc1992) remove this after we switch to fsdp2
-            actor_module.to(torch_dtype)
-            if enable_gradient_checkpointing:
-                #TODO:selective
-                from wan.modules.model import WanAttentionBlock
-                self.apply_fsdp_checkpointing(actor_module, WanAttentionBlock, 1.0)
+                def build_wan_model(path):
+                    model = actor_module_class.from_pretrained(
+                        path,
+                        torch_dtype=torch_dtype,
+                        trust_remote_code=trust_remote_code
+                    )
 
-            if self._is_lora:
-                print("Applying LoRA to actor module")
-                actor_module.enable_input_require_grads()
-                # Convert config to regular Python types before creating PEFT model
-                lora_config = {"task_type": TaskType.CAUSAL_LM, "r": self.config.model.lora_rank, "lora_alpha": self.config.model.lora_alpha, "target_modules": convert_to_regular_types(self.config.model.target_modules), "bias": "none"}
-                actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))
+                    if use_liger:
+                        from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
+
+                        _apply_liger_kernel_to_instance(model=model)
+
+                    apply_monkey_patch(
+                        model=model,
+                        use_remove_padding=use_remove_padding,
+                        ulysses_sp_size=self.ulysses_sequence_parallel_size,
+                        use_fused_kernels=use_fused_kernels,
+                        fused_kernels_backend=fused_kernels_backend,
+                    )
+
+                    model = self._enable_compile(model, compile_export_mode)
+                    model.to(torch_dtype)
+                    if enable_gradient_checkpointing:
+                        from wan.modules.model import WanAttentionBlock
+                        self.apply_fsdp_checkpointing(model, WanAttentionBlock, 1.0)
+                    return model
+
+                low_model = build_wan_model(wan22_low_path)
+                high_local_path = copy_to_local(wan22_high_path, use_shm=self.config.model.get("use_shm", False))
+                high_model = build_wan_model(high_local_path)
+                boundary = self.config.model.get("wan22_boundary", 0.9)
+                actor_module = Wan22DualModel(low_model, high_model, boundary=boundary)
+
+                if self._is_lora:
+                    print("LoRA is not supported for Wan2.2 dual-model setup; skipping.")
+            else:
+                actor_module = actor_module_class.from_pretrained(
+                    local_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=trust_remote_code
+                )
+
+                # Apply Liger kernel to the model if use_liger is set to True
+                if use_liger:
+                    from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
+
+                    _apply_liger_kernel_to_instance(model=actor_module)
+
+                fused_kernel_options = self.config.model.get("fused_kernel_options", None)
+                fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
+                apply_monkey_patch(
+                    model=actor_module,
+                    use_remove_padding=use_remove_padding,
+                    ulysses_sp_size=self.ulysses_sequence_parallel_size,
+                    use_fused_kernels=use_fused_kernels,
+                    fused_kernels_backend=fused_kernels_backend,
+                )
+                
+                # fhd compile dit
+                actor_module = self._enable_compile(actor_module, compile_export_mode)
+                
+                # some parameters may not in torch_dtype. TODO(zhangchi.usc1992) remove this after we switch to fsdp2
+                actor_module.to(torch_dtype)
+                if enable_gradient_checkpointing:
+                    #TODO:selective
+                    from wan.modules.model import WanAttentionBlock
+                    self.apply_fsdp_checkpointing(actor_module, WanAttentionBlock, 1.0)
+
+                if self._is_lora:
+                    print("Applying LoRA to actor module")
+                    actor_module.enable_input_require_grads()
+                    # Convert config to regular Python types before creating PEFT model
+                    lora_config = {"task_type": TaskType.CAUSAL_LM, "r": self.config.model.lora_rank, "lora_alpha": self.config.model.lora_alpha, "target_modules": convert_to_regular_types(self.config.model.target_modules), "bias": "none"}
+                    actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))                    
                     
         torch.distributed.barrier()
         if self.rank == 0:
@@ -525,11 +581,18 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         # exit(0) 
         # print("--------  begin torch.compile ---------------")
         from wan.modules.model import WanAttentionBlock
-        for i, block in enumerate(model.blocks):
-            if isinstance(block, WanAttentionBlock):
-                compiled_forward = torch.compile(block.forward, mode="max-autotune-no-cudagraphs")
-                # compiled_forward = torch.compile(block.forward, mode="max-autotune", fullgraph=True, dynamic=True if self.is_hip() else None)
-                block.forward = compiled_forward
+        def compile_blocks(target):
+            for block in target.blocks:
+                if isinstance(block, WanAttentionBlock):
+                    compiled_forward = torch.compile(block.forward, mode="max-autotune-no-cudagraphs")
+                    # compiled_forward = torch.compile(block.forward, mode="max-autotune", fullgraph=True, dynamic=True if self.is_hip() else None)
+                    block.forward = compiled_forward
+
+        if hasattr(model, "low_noise_model") and hasattr(model, "high_noise_model"):
+            compile_blocks(model.low_noise_model)
+            compile_blocks(model.high_noise_model)
+        else:
+            compile_blocks(model)
         # from wan.modules.model import WanAttentionBlock
 
         # import os
