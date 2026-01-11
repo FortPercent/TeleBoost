@@ -581,13 +581,12 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
 
     # Backward pass.
     if output_tensor_grad[0] is None and config.grad_scale_func is not None:
-        # grad scale 也需要支持 list
-        if isinstance(output_tensor[0], (list, tuple)):
-            output_tensor[0] = [config.grad_scale_func(t) for t in output_tensor[0]]
-        else:
-            output_tensor[0] = config.grad_scale_func(output_tensor[0])
-
-    loss_obj = output_tensor[0]  # 这里拿到的是 loss 或 [loss1, loss2]
+        # output_tensor 现在一定是 list（上面已经 wrap 过或本来就是）
+        output_tensor = [
+            config.grad_scale_func(t) if torch.is_tensor(t) else t
+            for t in output_tensor
+        ]
+    loss_obj = output_tensor  # 这里拿到的是 loss 或 [loss1, loss2]
 
     if isinstance(loss_obj, (list, tuple)):
         # 两个 GraphTask：分别 backward（retain_graph=False）
