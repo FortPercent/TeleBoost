@@ -537,12 +537,15 @@ def deepspeed_forward_step(
     else:
         loss = loss / num_microbatches
     forward_data_store.append(loss_reduced)
-
+    output_tensor = loss
     if config.timers is not None:
         config.timers('forward-compute').stop()
 
     if unwrap_output_tensor:
         return output_tensor
+    
+    if isinstance(output_tensor, (list, tuple)):
+        return list(output_tensor)   # [loss_reject_scaled, loss_chosen_scaled]
     return [output_tensor]
 
 
