@@ -8,10 +8,24 @@ from teletron.utils import get_timers, set_config
 import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
-    loss = output_tensor[0].mean()
-    averaged_loss = average_losses_across_data_parallel_group([loss])
-    loss = loss.unsqueeze(0)
-    return loss, {"loss": averaged_loss[0]}
+    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled]
+    if not isinstance(output_tensor, (list, tuple)):
+        output_tensor = [output_tensor]
+
+    # 这两个 loss 已经是标量（你 forward 里 .sum() 了），这里不需要 .mean()
+    # 但为了安全，还是统一成 scalar
+    losses = [t if t.dim() == 0 else t.mean() for t in output_tensor]
+
+    # 返回给 deepspeed_forward_step 的 "loss" 应该是一个 Tensor（或 list），用于 backward
+    # 我们让它保持 list（长度2），后面 backward_step 里循环两次 backward。
+    loss_for_backward = losses
+
+    # 日志：给一个总的 dpo_loss（只是显示用，不参与反传）
+    loss_total = sum(losses).detach()
+    averaged = average_losses_across_data_parallel_group([loss_total])[0]
+
+    return loss_for_backward, {"loss": averaged}
+
 
 
 def extra_args(parser):
@@ -199,9 +213,21 @@ def forward_step(data_iterator, model, time_step=None):
     )
 
     advantage = (loss_reject - loss_chosen).clamp(-20, 20)
-    dpo_loss = -F.logsigmoid(beta * advantage).mean()
+    # 只用 advantage 的数值算系数，不让系数本身反传（很关键）
+    with torch.no_grad():
+        # d/dadv [-logsigmoid(beta*adv)] = beta * sigmoid(-beta*adv)
+        coeff = beta * torch.sigmoid(-beta * advantage)
+        # 对应你 dpo_loss 的 mean()
+        coeff = coeff / coeff.numel()
 
-    return [dpo_loss], dpo_loss_func
+    # 两个“等价”的反传项： +coeff*loss_reject  和  -coeff*loss_chosen
+    loss_reject_scaled = (coeff * loss_reject).sum()
+    loss_chosen_scaled = (-coeff * loss_chosen).sum()
+
+    # 这个只是用来日志/显示，不参与反传（可选）
+    dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
+
+    return [loss_reject_scaled, loss_chosen_scaled], dpo_loss_func
 
 
 if __name__ == "__main__":

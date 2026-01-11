@@ -531,7 +531,11 @@ def deepspeed_forward_step(
 
     output_tensor = loss_func(output_tensor)
     loss, loss_reduced = output_tensor
-    output_tensor = loss / num_microbatches
+    # loss 可能是 Tensor，也可能是 [Tensor, Tensor]
+    if isinstance(loss, (list, tuple)):
+        loss = [l / num_microbatches for l in loss]
+    else:
+        loss = loss / num_microbatches
     forward_data_store.append(loss_reduced)
 
     if config.timers is not None:
@@ -574,10 +578,22 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
 
     # Backward pass.
     if output_tensor_grad[0] is None and config.grad_scale_func is not None:
-        output_tensor[0] = config.grad_scale_func(output_tensor[0])
+        # grad scale 也需要支持 list
+        if isinstance(output_tensor[0], (list, tuple)):
+            output_tensor[0] = [config.grad_scale_func(t) for t in output_tensor[0]]
+        else:
+            output_tensor[0] = config.grad_scale_func(output_tensor[0])
 
-    zero_optimizer.backward(output_tensor[0], retain_graph=False)
-    zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
+    loss_obj = output_tensor[0]  # 这里拿到的是 loss 或 [loss1, loss2]
+
+    if isinstance(loss_obj, (list, tuple)):
+        # 两个 GraphTask：分别 backward（retain_graph=False）
+        for t in loss_obj:
+            zero_optimizer.backward(t, retain_graph=False)
+            zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
+    else:
+        zero_optimizer.backward(loss_obj, retain_graph=False)
+        zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
     # torch.autograd.backward(output_tensor[0], grad_tensors=output_tensor_grad[0])
 
     # Collect the grad of the input_tensor.
