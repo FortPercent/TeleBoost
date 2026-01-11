@@ -585,7 +585,7 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
             output_tensor[0] = config.grad_scale_func(output_tensor[0])
 
     loss_obj = output_tensor[0]  # 这里拿到的是 loss 或 [loss1, loss2]
-
+    print(output_tensor)
     if isinstance(loss_obj, (list, tuple)):
         # 两个 GraphTask：分别 backward（retain_graph=False）
         for t in loss_obj:

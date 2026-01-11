@@ -67,13 +67,13 @@ export MEMORY_SNAPSHOT=1
 export PROF_SAVE_PATH="./dpo_train_profile"
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=4
+CP=1
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=12
-N_GPU_FOR_DATA=3
+N_GPU_FOR_TRAIN=6
+N_GPU_FOR_DATA=2
 
 # EXPR_NAME=sr_720p
 EXPR_NAME=f1fn2v_1.3B
