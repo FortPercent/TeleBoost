@@ -5,13 +5,15 @@ export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NVTE_FUSED_ATTN=0
 export NVTE_FLASH_ATTN=1
-export CUDA_VISIBLE_DEVICES=2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
 # TODO, change to your own path
 # export PYTHONPATH=
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/teleai_data_tool
+export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
 # export MEMORY_SNAPSHOT=True
 # export PROF_SAVE_PATH="./log_memory_0607_2"
 
@@ -21,13 +23,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-
 # TODO: Constrain: N_GPU_FOR_TRAIN = N_MOE * CP * N
 
 # Parallel config 
-CP=2
+CP=1
 TP=1 # not support
 
 # Multi-node config 
 N_MOE=1
 N_LAYERS=1
-N_GPU_FOR_TRAIN=4
+N_GPU_FOR_TRAIN=6
 N_GPU_FOR_DATA=2
 
 # Single-node config 
@@ -109,7 +111,7 @@ GPT_MODEL_ARGS=(
     --num-layers $N_LAYERS
     --hidden-size 5120        
     --num-attention-heads 40
-    --has-image-input
+    # --has-image-input
     --seq-length 512          
     --max-position-embeddings 4096
     --tokenizer-type NullTokenizer
@@ -145,7 +147,7 @@ MODEL_PARALLEL_ARGS=(
     --producer-batch-size 1
 )
 DATA_ARGS=(
-    --dataset-type VastDataset
+    # --dataset-type VastDataset
     --data-path $DATA_PATH 
     --merge-file $MERGE_FILE 
     --split 949,50,1
