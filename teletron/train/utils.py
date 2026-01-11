@@ -591,9 +591,22 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
 
     if isinstance(loss_obj, (list, tuple)):
         # 两个 GraphTask：分别 backward（retain_graph=False）
-        for t in loss_obj:
+        # for t in loss_obj:
+        #     zero_optimizer.backward(t, retain_graph=False)
+        #     zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
+        for idx, t in enumerate(loss_obj):
+            torch.cuda.synchronize()
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+
+            start.record()
             zero_optimizer.backward(t, retain_graph=False)
             zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
+            end.record()
+
+            torch.cuda.synchronize()
+            elapsed_ms = start.elapsed_time(end)
+            print(f"[DPO backward {idx}] time = {elapsed_ms:.3f} ms")
     else:
         zero_optimizer.backward(loss_obj, retain_graph=False)
         zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
