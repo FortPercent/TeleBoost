@@ -57,15 +57,15 @@ class BaseBatchLoader(ABC):
             # =========================
             batch = self._prepare_batch_on_rank_zero()
 
-            dump_object_summary(
-                batch,
-                self._get_debug_dump_path(),
-                meta={
-                    "rank": self.rank,
-                    "iteration": self.iteration,
-                    "stage": "consumer_batch_prepare",
-                },
-            )
+            # dump_object_summary(
+            #     batch,
+            #     self._get_debug_dump_path(),
+            #     meta={
+            #         "rank": self.rank,
+            #         "iteration": self.iteration,
+            #         "stage": "consumer_batch_prepare",
+            #     },
+            # )
 
             if batch is None:
                 self._broadcast_object([None])
@@ -80,15 +80,15 @@ class BaseBatchLoader(ABC):
             # 3. 递归 broadcast Tensor
             broadcast_tensor_tree(batch, self._broadcast_tensor)
 
-            dump_object_summary(
-                batch,
-                self._get_debug_dump_path(),
-                meta={
-                    "rank": self.rank,
-                    "iteration": self.iteration,
-                    "stage": "consumer_batch",
-                },
-            )
+            # dump_object_summary(
+            #     batch,
+            #     self._get_debug_dump_path(),
+            #     meta={
+            #         "rank": self.rank,
+            #         "iteration": self.iteration,
+            #         "stage": "consumer_batch",
+            #     },
+            # )
 
             self.iteration += 1
             return batch
@@ -110,15 +110,15 @@ class BaseBatchLoader(ABC):
             # 2. 递归接收 Tensor
             recv_tensor_tree(batch, self._broadcast_tensor)
 
-            dump_object_summary(
-                batch,
-                self._get_debug_dump_path(),
-                meta={
-                    "rank": self.rank,
-                    "iteration": self.iteration,
-                    "stage": "consumer_batch",
-                },
-            )
+            # dump_object_summary(
+            #     batch,
+            #     self._get_debug_dump_path(),
+            #     meta={
+            #         "rank": self.rank,
+            #         "iteration": self.iteration,
+            #         "stage": "consumer_batch",
+            #     },
+            # )
 
             self.iteration += 1
             return batch
