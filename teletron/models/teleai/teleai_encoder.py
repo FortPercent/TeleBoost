@@ -183,11 +183,16 @@ class TeleaiEncoder(BaseEncoder):
         return out
 
     def _encode_dpo(self, raw_batch: Dict[str, Any]) -> Dict[str, Any]:
+        dataset_config = set_config().get("dataset", {})
+        chosen_key = dataset_config.get("chosen_video_key", "chosen")
+        rejected_key = dataset_config.get("rejected_video_key", "rejected")
+        branches = (chosen_key, rejected_key)
+
         schema = self.get_output_schema()
         out = {}
 
         # ========== 1️⃣ prompt / context：只算一次 ==========
-        shared_input = raw_batch["chosen"]  # chosen / rejected 共用 prompt
+        shared_input = raw_batch[chosen_key]  # chosen / rejected 共用 prompt
 
         for key in schema:
             if key in ["context", "prompt_emb", "unprompt_emb"]:
@@ -195,13 +200,13 @@ class TeleaiEncoder(BaseEncoder):
 
         # ========== 2️⃣ image / latent：CUDA stream 并行 ==========
         streams = {
-            "chosen": torch.cuda.Stream(device=self.device),
-            "rejected": torch.cuda.Stream(device=self.device),
+            chosen_key: torch.cuda.Stream(device=self.device),
+            rejected_key: torch.cuda.Stream(device=self.device),
         }
 
         branch_outputs = {}
 
-        for branch in ["chosen", "rejected"]:
+        for branch in branches:
             branch_outputs[branch] = {}
             branch_input = raw_batch[branch]
 
