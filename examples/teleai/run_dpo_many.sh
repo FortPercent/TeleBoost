@@ -199,7 +199,7 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 500
     --eval-interval 500
-    --load $CHECKPOINT_PATH_LOAD
+    # --load $CHECKPOINT_PATH_LOAD
     # --pretrained_checkpoint $CHECKPOINT_PATH_LOAD
     # --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20
