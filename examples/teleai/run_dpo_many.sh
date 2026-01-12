@@ -63,17 +63,17 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/Megatron-LM
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/teleai_data_tool
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
-export MEMORY_SNAPSHOT=1
-export PROF_SAVE_PATH="./dpo_train_profile"
+# export MEMORY_SNAPSHOT=1
+# export PROF_SAVE_PATH="./dpo_train_profile"
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=1
+CP=4
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=6
-N_GPU_FOR_DATA=2
+N_GPU_FOR_TRAIN=12
+N_GPU_FOR_DATA=3
 
 # EXPR_NAME=sr_720p
 EXPR_NAME=f1fn2v_1.3B
