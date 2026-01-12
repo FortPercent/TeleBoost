@@ -99,25 +99,29 @@ def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
 
+    dataset_config = set_config().get("dataset", {})
+    chosen_key = dataset_config.get("chosen_video_key", "chosen")
+    rejected_key = dataset_config.get("rejected_video_key", "rejected")
+
     timers = get_timers()
     timers.start_timer('get-data-time')
     batch = next(data_iterator)
     timers.stop_timer('get-data-time')
     context = batch["context"]  # shared text context
 
-    chosen_latents = batch["chosen"]["latents"]
-    reject_latents = batch["rejected"]["latents"]
+    chosen_latents = batch[chosen_key]["latents"]
+    reject_latents = batch[rejected_key]["latents"]
 
     # clip feature / img_emb_y（正负样本各自的）
-    chosen_clip_feature = batch["chosen"].get(
-        "img_clip_feature", batch["chosen"].get("clip_feature")
+    chosen_clip_feature = batch[chosen_key].get(
+        "img_clip_feature", batch[chosen_key].get("clip_feature")
     )
-    reject_clip_feature = batch["rejected"].get(
-        "img_clip_feature", batch["rejected"].get("clip_feature")
+    reject_clip_feature = batch[rejected_key].get(
+        "img_clip_feature", batch[rejected_key].get("clip_feature")
     )
 
-    chosen_y = batch["chosen"].get("img_emb_y")
-    reject_y = batch["rejected"].get("img_emb_y")
+    chosen_y = batch[chosen_key].get("img_emb_y")
+    reject_y = batch[rejected_key].get("img_emb_y")
 
     # =========================
     # timestep sampling
