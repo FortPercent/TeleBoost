@@ -369,9 +369,12 @@ class UnifiedDataset(torch.utils.data.Dataset):
             data = self.cached_data_operator(data)
             return data
 
+        def _fmt_keys(d):
+            return sorted(list(d.keys()))
+
         # ===== 0️⃣ 取原始样本（完整 dict）=====
         raw = self.data[data_id % len(self.data)].copy()
-        print(f"raw = {raw.keys()}")
+        print(f"[UnifiedDataset __getitem__] raw keys: {_fmt_keys(raw)}")
         # ===== 1️⃣ path → VideoDecoder（只处理 video key）=====
         for key in self.data_file_keys:
             if key not in raw:
@@ -381,6 +384,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 raw[key] = self.special_operator_map[key](raw[key])
             else:
                 raw[key] = self.main_data_operator(raw[key])
+        print(f"[UnifiedDataset __getitem__] after decode video keys: {[k for k in self.data_file_keys if k in raw]}")
 
         # ===== 2️⃣ 明确“公共字段”=====
         # 除了 chosen / rejected，其它都视为公共字段
@@ -388,6 +392,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
             k: v for k, v in raw.items()
             if k not in self.data_file_keys
         }
+        print(f"[UnifiedDataset __getitem__] shared fields: {_fmt_keys(shared_fields)}")
 
         out = {}
 
@@ -411,8 +416,9 @@ class UnifiedDataset(torch.utils.data.Dataset):
             for k, v in shared_fields.items():
                 data_i.setdefault(k, v)
             out[key] = data_i
+            print(f"[UnifiedDataset __getitem__] branch '{key}' keys: {_fmt_keys(data_i)}")
 
-        print(out.keys())
+        print(f"[UnifiedDataset __getitem__] output branches: {_fmt_keys(out)}")
         return out
 
     def __len__(self):
