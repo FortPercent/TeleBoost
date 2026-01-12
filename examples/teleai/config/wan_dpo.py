@@ -11,9 +11,10 @@ config = dict(
 
         # === 原来 args 里的 ===
         dataset_base_path="",
-        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
         data_path_list=[
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
+            # "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
         ],
         dataset_repeat=2,
 
