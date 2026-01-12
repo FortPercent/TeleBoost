@@ -593,6 +593,7 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
         # for t in loss_obj:
         #     zero_optimizer.backward(t, retain_graph=False)
         #     zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
+        # print("enter dual_backward=============================================================================================")
         for idx, t in enumerate(loss_obj):
             torch.cuda.synchronize()
             start = torch.cuda.Event(enable_timing=True)
