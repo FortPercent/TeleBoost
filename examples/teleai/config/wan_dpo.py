@@ -11,19 +11,19 @@ config = dict(
 
         # === 原来 args 里的 ===
         dataset_base_path="",
-        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
-        # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
+        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
         data_path_list=[
-            # "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
-            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
+            # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
         ],
         dataset_repeat=2,
 
         # === DPO 语义 ===
-        # chosen_video_key="chosen",
-        chosen_video_key = "positive_video_path", 
-        # rejected_video_key="rejected",
-        rejected_video_key = "negative_video_path",
+        chosen_video_key="chosen",
+        # chosen_video_key = "positive_video_path", 
+        rejected_video_key="rejected",
+        # rejected_video_key = "negative_video_path",
         # === 视频尺寸 & 时序 ===
         height=720,
         # height=480,
@@ -93,7 +93,7 @@ config = dict(
 
             # 这里需要修改 TODO
             config=dict(
-                has_image_input=False, # t2v:False i2v:True i2v Wan2.2:False
+                has_image_input=True, # t2v:False i2v:True i2v Wan2.2:False
                 patch_size=[1, 2, 2],
                 in_dim=36, # t2v:16 i2v:36
                 dim=5120, # 1.3B:1536 10B:5120 14B:5120
