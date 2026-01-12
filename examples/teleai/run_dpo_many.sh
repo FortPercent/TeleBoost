@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.104.187"
+MASTER_ADDR="10.244.21.39"
 MASTER_PORT="11324"
 
 while [[ $# -gt 0 ]]; do
@@ -37,7 +37,7 @@ done
 # 环境变量兜底（兼容 SLURM / Ray）
 NODE_RANK=${NODE_RANK:-${RANK:-0}}
 NNODES=${NNODES:-${NNODES_ENV:-""}}
-MASTER_ADDR=${MASTER_ADDR:-${MASTER_ADDR_ENV:-"10.244.48.160"}}
+MASTER_ADDR=${MASTER_ADDR:-${MASTER_ADDR_ENV:-"10.244.21.39"}}
 
 if [[ -z "$NNODES" ]]; then
     echo "[ERROR] --nnodes is required"
@@ -87,7 +87,8 @@ fi
 echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
+# CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
+CHECKPOINT_PATH_LOAD=/workspace/high_noise
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
 
@@ -199,7 +200,7 @@ EVAL_AND_LOGGING_ARGS=(
     --save-interval 500
     --eval-interval 500
     --load $CHECKPOINT_PATH_LOAD
-    --pretrained_checkpoint $CHECKPOINT_PATH_LOAD
+    # --pretrained_checkpoint $CHECKPOINT_PATH_LOAD
     # --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20
     --producer-log-level 1
