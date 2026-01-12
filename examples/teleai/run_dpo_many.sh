@@ -87,7 +87,7 @@ fi
 echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
 
@@ -198,7 +198,8 @@ EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 500
     --eval-interval 500
-    # --load $CHECKPOINT_PATH_LOAD
+    --load $CHECKPOINT_PATH_LOAD
+    --pretrained_checkpoint $CHECKPOINT_PATH_LOAD
     # --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20
     --producer-log-level 1
