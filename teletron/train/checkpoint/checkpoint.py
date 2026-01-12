@@ -281,6 +281,7 @@ class CheckPointMixin:
             # }
 
             if len(model) == 1:
+                # print(f"state_dict model key = {state_dict['model']}")
                 model[0].load_state_dict(state_dict['model'], strict=strict)
             else:
                 for i in range(len(model)):
