@@ -165,10 +165,14 @@ class TeleaiEncoder(BaseEncoder):
             return work_fn
     
     def _is_dpo_batch(self, raw_batch: dict) -> bool:
+
+        dataset_config =set_config().get("dataset",{})
+        chosen_key = dataset_config.get("chosen_video_key","chosen")
+        rejected_key = dataset_config.get("rejected_video_key","rejected")
         return (
             isinstance(raw_batch, dict)
-            and "chosen" in raw_batch
-            and "rejected" in raw_batch
+            and chosen_key in raw_batch
+            and rejected_key in raw_batch
         )
 
     def _encode_single(self, raw_batch: Dict[str, Any]) -> Dict[str, Any]:
