@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.67.241"
+MASTER_ADDR="10.244.67.246"
 MASTER_PORT="11322"
 
 while [[ $# -gt 0 ]]; do
@@ -74,8 +74,8 @@ TP=1   # not support
 # Multi-node config
 N_MOE=1
 N_LAYERS=1
-N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=4
+N_GPU_FOR_TRAIN=12
+N_GPU_FOR_DATA=3
 
 TENSORBOARD_LOGS_PATH=./logs
 CHECKPOINT_PATH=/nvfile-heatstorage/yuc/refactor/Teletron/test

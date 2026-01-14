@@ -561,7 +561,7 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
     # NOTE: This code currently can handle at most one skip connection. It
     # needs to be modified slightly to support arbitrary numbers of skip
     # connections.
-
+    print(f"[Rank {torch.distributed.get_rank()}] enter deepspeed_backward")
     if config.timers is not None:
         config.timers('backward-compute', log_level=2).start()
 

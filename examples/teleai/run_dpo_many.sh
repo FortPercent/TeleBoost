@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.21.39"
+MASTER_ADDR="10.244.67.246"
 MASTER_PORT="11324"
 
 while [[ $# -gt 0 ]]; do
@@ -76,7 +76,7 @@ N_GPU_FOR_TRAIN=12
 N_GPU_FOR_DATA=3
 
 # EXPR_NAME=sr_720p
-EXPR_NAME=f1fn2v_1.3B
+EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
@@ -89,7 +89,8 @@ echo "Launching: $TRAIN_SCRIPT"
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
 CHECKPOINT_PATH_LOAD=/workspace/high_noise
-CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/myk/Teletron/checkpoint/${EXPR_NAME}
+# CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
+CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
 
 mkdir -p $CHECKPOINT_PATH_SAVE
@@ -161,9 +162,9 @@ TRAINING_ARGS=(
     --train-iters 200000
     --weight-decay 1e-4
     --init-method-std 0.006
-    --clip-grad 1.0
+    --clip-grad 20.0
     --bf16
-    --lr 1e-5
+    --lr 2e-6
     --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full
@@ -197,11 +198,11 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-log-interval 1
     --tensorboard-queue-size 10
     --log-interval 1
-    --save-interval 500
+    --save-interval 100
     --eval-interval 500
-    # --load $CHECKPOINT_PATH_LOAD
+    --load $CHECKPOINT_PATH_LOAD
     # --pretrained_checkpoint $CHECKPOINT_PATH_LOAD
-    # --save $CHECKPOINT_PATH_SAVE
+    --save $CHECKPOINT_PATH_SAVE
     --eval-iters 20
     --producer-log-level 1
 )
