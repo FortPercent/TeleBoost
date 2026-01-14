@@ -162,7 +162,7 @@ TRAINING_ARGS=(
     --train-iters 200000
     --weight-decay 1e-4
     --init-method-std 0.006
-    --clip-grad 20.0
+    --clip-grad 1.0
     --bf16
     --lr 2e-6
     --lr-decay-style constant
