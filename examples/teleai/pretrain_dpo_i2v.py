@@ -8,6 +8,7 @@ from teletron.utils import get_timers, set_config
 import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
+    print(f"[Rank {torch.distributed.get_rank()}] enter dpo_loss_func")
     # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled]
     if not isinstance(output_tensor, (list, tuple)):
         output_tensor = [output_tensor]
@@ -23,7 +24,7 @@ def dpo_loss_func(output_tensor):
     # 日志：给一个总的 dpo_loss（只是显示用，不参与反传）
     loss_total = sum(losses).detach()
     averaged = average_losses_across_data_parallel_group([loss_total])[0]
-
+    print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss = {loss_for_backward}")
     return loss_for_backward, {"loss": averaged}
 
 
@@ -181,6 +182,7 @@ def forward_step(data_iterator, model, time_step=None):
     # =========================
     # forward & loss
     # =========================
+    print(f"[Rank {torch.distributed.get_rank()}] enter chosen compute_single_loss========")
     loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
         _compute_single_loss(
             chosen_latents,
@@ -194,6 +196,7 @@ def forward_step(data_iterator, model, time_step=None):
         )
     )
 
+    print(f"[Rank {torch.distributed.get_rank()}] enter reject compute_single_loss========")
     loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
         _compute_single_loss(
             reject_latents,
