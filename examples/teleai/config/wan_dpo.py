@@ -12,27 +12,27 @@ config = dict(
         # === 原来 args 里的 ===
         dataset_base_path="",
         # no use
-        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
-        # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
+        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
         data_path_list=[
-            # "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
-            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part0.csv",
-            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
-            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part2.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
+            # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part0.csv",
+            # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
+            # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part2.csv",
         ],
         dataset_repeat=2,
 
         # === DPO 语义 ===
-        # chosen_video_key="chosen",
-        chosen_video_key = "positive_video_path", 
-        # rejected_video_key="rejected",
-        rejected_video_key = "negative_video_path",
+        chosen_video_key="chosen",
+        # chosen_video_key = "positive_video_path", 
+        rejected_video_key="rejected",
+        # rejected_video_key = "negative_video_path",
         # === 视频尺寸 & 时序 ===
-        height=720,
-        # height=480,
-        # width=832,
-        width=1280,
-        num_frames=81,
+        # height=720,
+        height=480,
+        width=832,
+        # width=1280,
+        num_frames=49,
 
         # === 这些原脚本是写死的，现在 config 化 ===
         time_division_factor=4,
