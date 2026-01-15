@@ -29,7 +29,7 @@ config = dict(
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part2.csv",
         ],
-        dataset_repeat=2,
+        dataset_repeat=1,
 
         # === DPO 语义 ===
         chosen_video_key="chosen",
