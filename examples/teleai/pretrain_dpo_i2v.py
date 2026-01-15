@@ -9,13 +9,14 @@ import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
     print(f"[Rank {torch.distributed.get_rank()}] enter dpo_loss_func")
-    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled]
+    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen]
     if not isinstance(output_tensor, (list, tuple)):
         output_tensor = [output_tensor]
 
+    loss_for_backward = output_tensor[:2]
     # 这两个 loss 已经是标量（你 forward 里 .sum() 了），这里不需要 .mean()
     # 但为了安全，还是统一成 scalar
-    losses = [t if t.dim() == 0 else t.mean() for t in output_tensor]
+    losses = [t if t.dim() == 0 else t.mean() for t in loss_for_backward]
 
     # 返回给 deepspeed_forward_step 的 "loss" 应该是一个 Tensor（或 list），用于 backward
     # 我们让它保持 list（长度2），后面 backward_step 里循环两次 backward。
@@ -23,9 +24,24 @@ def dpo_loss_func(output_tensor):
 
     # 日志：给一个总的 dpo_loss（只是显示用，不参与反传）
     loss_total = sum(losses).detach()
-    averaged = average_losses_across_data_parallel_group([loss_total])[0]
+    if len(output_tensor) >= 4:
+        loss_reject = output_tensor[2]
+        loss_chosen = output_tensor[3]
+        loss_reject_mean = loss_reject if loss_reject.dim() == 0 else loss_reject.mean()
+        loss_chosen_mean = loss_chosen if loss_chosen.dim() == 0 else loss_chosen.mean()
+        averaged = average_losses_across_data_parallel_group(
+            [loss_total, loss_reject_mean.detach(), loss_chosen_mean.detach()]
+        )
+        loss_dict = {
+            "loss": averaged[0],
+            "loss_reject_mean": averaged[1],
+            "loss_chosen_mean": averaged[2],
+        }
+    else:
+        averaged = average_losses_across_data_parallel_group([loss_total])
+        loss_dict = {"loss": averaged[0]}
     print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss = {loss_for_backward}")
-    return loss_for_backward, {"loss": averaged}
+    return loss_for_backward, loss_dict
 
 
 
@@ -234,7 +250,12 @@ def forward_step(data_iterator, model, time_step=None):
     # 这个只是用来日志/显示，不参与反传（可选）
     dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
 
-    return [loss_reject_scaled, loss_chosen_scaled], dpo_loss_func
+    return [
+        loss_reject_scaled,
+        loss_chosen_scaled,
+        loss_reject.detach(),
+        loss_chosen.detach(),
+    ], dpo_loss_func
 
 
 if __name__ == "__main__":

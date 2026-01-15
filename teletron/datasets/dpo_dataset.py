@@ -1,12 +1,10 @@
 import torch, torchvision, imageio, os, json, pandas
-import logging
 import torch.distributed as dist
 import imageio.v3 as iio
 from PIL import Image
 from teleai_data_tool.file.file_client import FileClient
 from teleai_data_tool.file.lmdb_client import LmdbClient
 from my_utils import get_global_logger
-from teletron.utils.debug_utils import dump_object_summary
 
 
 class DataProcessingPipeline:
@@ -376,40 +374,18 @@ class UnifiedDataset(torch.utils.data.Dataset):
         env_rank = os.environ.get("RANK")
         return int(env_rank) if env_rank is not None else -1
 
-    def _get_logger_log_dir(self, logger: logging.Logger):
-        for handler in getattr(logger, "handlers", []):
-            if isinstance(handler, logging.FileHandler):
-                base_filename = getattr(handler, "baseFilename", "")
-                if base_filename:
-                    return os.path.dirname(base_filename)
-        return None
-
     def _log_data(self, data_id, data, stage):
         logger = self._get_logger()
         producer_rank = self._get_producer_rank()
+        data_len = len(self.cached_data) if self.load_from_cache else len(self.data)
+        sample_idx = data_id % data_len if data_len > 0 else -1
+        source = "cache" if self.load_from_cache else "metadata"
         data_keys = sorted(list(data.keys())) if isinstance(data, dict) else []
         logger.info(
-            f"[UnifiedDataset __getitem__] producer_rank={producer_rank} data_id={data_id} "
-            f"stage={stage} output_keys={data_keys}"
+            f"[UnifiedDataset __getitem__] rank={producer_rank} source={source} "
+            f"data_len={data_len} data_id={data_id} sample_idx={sample_idx} "
+            f"stage={stage} keys={data_keys}"
         )
-        log_dir = self._get_logger_log_dir(logger)
-        if log_dir:
-            dump_path = os.path.join(
-                log_dir, f"dataset_{stage}_rank_{producer_rank}.jsonl"
-            )
-            dump_object_summary(
-                data,
-                dump_path,
-                meta={
-                    "rank": producer_rank,
-                    "data_id": data_id,
-                    "stage": stage,
-                },
-                logger=logger,
-            )
-            logger.info(
-                f"[UnifiedDataset __getitem__] {stage} data summary saved: {dump_path}"
-            )
 
     def __getitem__(self, data_id):
         if self.load_from_cache:
