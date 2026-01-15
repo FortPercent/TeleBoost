@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
     print(f"[Rank {torch.distributed.get_rank()}] enter dpo_loss_func")
-    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen]
+    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen, dpo_loss]
     if not isinstance(output_tensor, (list, tuple)):
         output_tensor = [output_tensor]
 
@@ -24,13 +24,19 @@ def dpo_loss_func(output_tensor):
 
     # 日志：给一个总的 dpo_loss（只是显示用，不参与反传）
     loss_total = sum(losses).detach()
+    if len(output_tensor) >= 5:
+        dpo_loss = output_tensor[4]
+        dpo_loss_mean = dpo_loss if dpo_loss.dim() == 0 else dpo_loss.mean()
+    else:
+        dpo_loss_mean = loss_total
+
     if len(output_tensor) >= 4:
         loss_reject = output_tensor[2]
         loss_chosen = output_tensor[3]
         loss_reject_mean = loss_reject if loss_reject.dim() == 0 else loss_reject.mean()
         loss_chosen_mean = loss_chosen if loss_chosen.dim() == 0 else loss_chosen.mean()
         averaged = average_losses_across_data_parallel_group(
-            [loss_total, loss_reject_mean.detach(), loss_chosen_mean.detach()]
+            [dpo_loss_mean.detach(), loss_reject_mean.detach(), loss_chosen_mean.detach()]
         )
         loss_dict = {
             "loss": averaged[0],
@@ -38,7 +44,7 @@ def dpo_loss_func(output_tensor):
             "loss_chosen_mean": averaged[2],
         }
     else:
-        averaged = average_losses_across_data_parallel_group([loss_total])
+        averaged = average_losses_across_data_parallel_group([dpo_loss_mean.detach()])
         loss_dict = {"loss": averaged[0]}
     print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss = {loss_for_backward}")
     return loss_for_backward, loss_dict
@@ -255,6 +261,7 @@ def forward_step(data_iterator, model, time_step=None):
         loss_chosen_scaled,
         loss_reject.detach(),
         loss_chosen.detach(),
+        dpo_loss_for_log.detach(),
     ], dpo_loss_func
 
 
