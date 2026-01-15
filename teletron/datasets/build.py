@@ -30,7 +30,7 @@ DATASETS.register_module(WanDPODataset)
 def build_dataset(params_or_type, *args, **kwargs):
     return build_module(DATASETS, params_or_type, *args, **kwargs)
 
-def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
+def build_train_valid_test_datasets(dp_rank=None, dp_size=None, shuffle=False):
     """Build pretraining datasets."""
     args = get_args()
 
@@ -49,8 +49,9 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         world_size = int(os.environ.get("WORLD_SIZE", 1))
         all_data_paths = global_config.dataset.data_path_list
         # shuffle
-        random.seed(global_config.sampler.seed)
-        random.shuffle(all_data_paths)
+        if shuffle:
+            random.seed(global_config.sampler.seed)
+            random.shuffle(all_data_paths)
         num_samples = len(all_data_paths)
         base_samples = (num_samples + args.distributed_vae_world_size -1) // args.distributed_vae_world_size
 
