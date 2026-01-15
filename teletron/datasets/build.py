@@ -13,6 +13,7 @@ from teletron.utils import (
     get_args,
     set_config,
 )
+from my_utils import get_global_logger
 from teletron.train.utils import (
     get_train_valid_test_num_samples,
 )
@@ -42,6 +43,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
         return  None, None, None
     else:
         import os
+        logger = get_global_logger()
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         global_rank = int(os.environ.get("RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -58,14 +60,29 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None):
             start_idx = (global_rank - args.dit_world_size) * base_samples
             end_idx = start_idx + base_samples
             local_data_paths = all_data_paths[start_idx: end_idx]
+            extra_sample = None
         else:
             start_idx = big_producer_count * base_samples + (global_rank - args.dit_world_size - big_producer_count) * (base_samples - 1)
             end_idx = start_idx + base_samples -1
             local_data_paths = all_data_paths[start_idx: end_idx]
-            local_data_paths.append(random.choice(all_data_paths[0:big_producer_count * base_samples]))
+            extra_sample = random.choice(all_data_paths[0:big_producer_count * base_samples])
+            local_data_paths.append(extra_sample)
             
         global_config.dataset.data_path_list = local_data_paths
-        print(f"rank:{global_rank}: {local_data_paths}")
+        logger.info(
+            "[DatasetSplit] rank=%s local_rank=%s world_size=%s data_len=%s "
+            "total_paths=%s base_samples=%s range=[%s,%s) assigned=%s extra=%s",
+            global_rank,
+            local_rank,
+            world_size,
+            len(local_data_paths),
+            num_samples,
+            base_samples,
+            start_idx,
+            end_idx,
+            local_data_paths,
+            extra_sample,
+        )
 
     train_ds_config = global_config
     eval_ds_config = global_config.get("eval", None)
