@@ -86,7 +86,8 @@ config = dict(
     ),
     eval=dict(
         data_path_list=[
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            # "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
         ],
         eval_time_steps=[200,400,600,800,1000]
     ),
