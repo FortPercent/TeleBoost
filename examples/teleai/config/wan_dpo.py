@@ -16,14 +16,14 @@ config = dict(
         dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
         data_path_list=[
             # "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part0.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part1.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part2.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part3.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part4.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part5.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part6.csv",
-            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.part7.csv"
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part0.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part1.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part2.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part3.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part4.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part5.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part6.csv",
+            "/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part7.csv"
             
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part0.csv",
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
