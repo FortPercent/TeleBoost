@@ -251,6 +251,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         base_path=None, metadata_path=None,
+        data_path_list=None,
         repeat=1,
         data_file_keys=tuple(),
         main_data_operator=lambda x: x,
@@ -258,6 +259,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         pipeline = None,
     ):
         self.base_path = base_path
+        metadata_path = data_path_list if data_path_list is not None else metadata_path
         self.metadata_path = metadata_path
         self.repeat = repeat
         self.data_file_keys = data_file_keys
