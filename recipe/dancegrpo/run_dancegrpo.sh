@@ -76,7 +76,11 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.h=480 \
     actor_rollout_ref.w=832 \
     actor_rollout_ref.num_frames=49 \
+<<<<<<< HEAD
     actor_rollout_ref.sampling_steps=3 \
+=======
+    actor_rollout_ref.sampling_steps=16 \
+>>>>>>> 0115
     actor_rollout_ref.actor.eta=0.25 \
     actor_rollout_ref.lr_warmup_steps=0 \
     actor_rollout_ref.use_hpsv2=True \
@@ -127,13 +131,9 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     reward_model.enable=True \
-    reward_model.type="joint" \
+    reward_model.rollout.load_format=safetensors \
     reward_model.micro_batch_size_per_gpu=1 \
-    reward_model.aesthetic.clip_model_path=/gfs/space/chatrl/users/wxe/ViT-L-14.pt \
-    reward_model.aesthetic.aes_model_path=/gfs/space/chatrl/users/wxe/sa_0_4_vit_l_14_linear.pth \
-    reward_model.raft.model_path=/gfs/space/chatrl/users/wxe/raft-things.pth \
-    reward_model.videoclip.model_path=/gfs/space/chatrl/users/wxe/VideoCLIP-XL.bin \
-    reward_model.videophy.model_path=/gfs/space/chatrl/users/wxe/videocon_physics \
+    reward_model.model.path='/gfs/space/chatrl/public/models/Qwen2.5-VL-7B-Instruct' \
     reward_model.model.input_tokenizer=null \
     reward_model.rollout.max_model_len=$((max_prompt_length + max_response_length)) \
     reward_model.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \

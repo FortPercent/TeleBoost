@@ -337,6 +337,8 @@ class RayPPOTrainer:
         # self.use_rm = Role.RewardModel in role_worker_mapping
         if (self.config.reward_model.enable and self.config.reward_model.type=="joint") or Role.RewardModel in role_worker_mapping:
             self.use_rm=True
+        else:
+            self.use_rm=False
         self.ray_worker_group_cls = ray_worker_group_cls
         self.device_name = device_name
         self.validation_generations_logger = ValidationGenerationsLogger()
