@@ -228,8 +228,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 clip_count = clipped_mask.sum().detach().item()
                 clip_fraction = clipped_mask.float().mean().detach().item()                     
                 
-                print("ratio",ratio)
-                print("="*100)
+                # print("ratio",ratio)
+                # print("="*100)
 
                 # ratio = torch.exp(new_log_probs - current_log_probs)
 

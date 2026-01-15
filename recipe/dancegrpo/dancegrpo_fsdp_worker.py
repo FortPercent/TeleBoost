@@ -566,12 +566,13 @@ class QwenRewardModelWorker(RewardModelWorker):
                 {
                     "rewards": all_rewards,
                 },
-                batch_size = len(batch_ids)
+                batch_size = datas.batch.batch_size[0]
             )
             
             non_tensor_batch = datas.non_tensor_batch
             batch_reward = DataProto(batch=batch, non_tensor_batch = non_tensor_batch)
             batch_reward = self.reward_rollout_sharding_manager.postprocess_data(batch_reward)
+            
             # with open('/gemini/space/ljm/Dancegrpo/videos/my_file.txt', 'a', encoding='utf-8') as f:
             #     f.write(f"rank {dist.get_rank()} \n batch['rewards'],内容是{batch_reward.batch['rewards']}\n\n")
                 

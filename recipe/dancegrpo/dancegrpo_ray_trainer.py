@@ -371,14 +371,14 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
                                     # 调用统一的 rm_wg（仅 single/qwen 有）
                                     reward_tensor = self.rm_wg.compute_rm_score(reward_input)
-
-                                    # 清理原 batch（移除大 tensor 如 video_frames）
-                                    gen_batch_output = gen_batch_output.pop(
-                                        batch_keys=['video_frames'],
+                                    reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
+                                    gen_batch_output.pop(
                                         non_tensor_batch_keys=["caption", "video_ids"]
                                     )
                                     gen_batch_output = gen_batch_output.union(reward_tensor)
-
+                                    # gen_batch_output = gen_batch_output.pop(
+                                    #     non_tensor_batch_keys=["caption", "video_ids"]
+                                    # )
                                     # 更新指标
                                     metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
                                     metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
