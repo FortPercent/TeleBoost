@@ -149,6 +149,27 @@ class DistDataProducer:
         base_dir = getattr(self.args, "profile_path", None) or "."
         return os.path.join(base_dir, f"producer/raw_batch_debug_rank_{self.rank}.jsonl")
 
+    def _get_raw_tensor_dump_path(self):
+        base_dir = getattr(self.args, "profile_path", None) or "."
+        return os.path.join(base_dir, f"producer/raw_batch_tensors_rank_{self.rank}.jsonl")
+
+    def _collect_tensor_kv(self, obj: Any, prefix: str = "") -> Dict[str, torch.Tensor]:
+        items: Dict[str, torch.Tensor] = {}
+        if torch.is_tensor(obj):
+            items[prefix or "root"] = obj
+            return items
+        if isinstance(obj, dict):
+            for k in sorted(obj.keys()):
+                new_prefix = f"{prefix}/{k}" if prefix else str(k)
+                items.update(self._collect_tensor_kv(obj[k], new_prefix))
+            return items
+        if isinstance(obj, (list, tuple)):
+            for i, v in enumerate(obj):
+                new_prefix = f"{prefix}/{i}" if prefix else str(i)
+                items.update(self._collect_tensor_kv(v, new_prefix))
+            return items
+        return items
+
     def _get_gpu_memory_usage(self) -> str:
         """获取并格式化当前GPU显存使用情况"""
         try:
@@ -366,6 +387,21 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
+        raw_tensor_kv = self._collect_tensor_kv(raw_batch)
+        if raw_tensor_kv:
+            dump_object_summary(
+                raw_tensor_kv,
+                self._get_raw_tensor_dump_path(),
+                meta={
+                    "rank": self.rank,
+                    "mode": mode_to_process,
+                    "iteration": self.iteration,
+                    "stage": "raw_tensors",
+                },
+                max_items=len(raw_tensor_kv),
+                max_depth=2,
+                logger=self.logger,
+            )
         # dump_object_summary(
         #     raw_batch,
         #     self._get_debug_dump_path(),

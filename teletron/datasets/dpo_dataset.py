@@ -1,8 +1,12 @@
 import torch, torchvision, imageio, os, json, pandas
+import logging
+import torch.distributed as dist
 import imageio.v3 as iio
 from PIL import Image
 from teleai_data_tool.file.file_client import FileClient
 from teleai_data_tool.file.lmdb_client import LmdbClient
+from my_utils import get_global_logger
+from teletron.utils.debug_utils import dump_object_summary
 
 
 class DataProcessingPipeline:
@@ -363,10 +367,55 @@ class UnifiedDataset(torch.utils.data.Dataset):
             metadata = pandas.read_csv(metadata_path)
             self.data = [metadata.iloc[i].to_dict() for i in range(len(metadata))]
 
+    def _get_logger(self):
+        return get_global_logger()
+
+    def _get_producer_rank(self):
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_rank()
+        env_rank = os.environ.get("RANK")
+        return int(env_rank) if env_rank is not None else -1
+
+    def _get_logger_log_dir(self, logger: logging.Logger):
+        for handler in getattr(logger, "handlers", []):
+            if isinstance(handler, logging.FileHandler):
+                base_filename = getattr(handler, "baseFilename", "")
+                if base_filename:
+                    return os.path.dirname(base_filename)
+        return None
+
+    def _log_data(self, data_id, data, stage):
+        logger = self._get_logger()
+        producer_rank = self._get_producer_rank()
+        data_keys = sorted(list(data.keys())) if isinstance(data, dict) else []
+        logger.info(
+            f"[UnifiedDataset __getitem__] producer_rank={producer_rank} data_id={data_id} "
+            f"stage={stage} output_keys={data_keys}"
+        )
+        log_dir = self._get_logger_log_dir(logger)
+        if log_dir:
+            dump_path = os.path.join(
+                log_dir, f"dataset_{stage}_rank_{producer_rank}.jsonl"
+            )
+            dump_object_summary(
+                data,
+                dump_path,
+                meta={
+                    "rank": producer_rank,
+                    "data_id": data_id,
+                    "stage": stage,
+                },
+                logger=logger,
+            )
+            logger.info(
+                f"[UnifiedDataset __getitem__] {stage} data summary saved: {dump_path}"
+            )
+
     def __getitem__(self, data_id):
         if self.load_from_cache:
             data = self.cached_data[data_id % len(self.cached_data)]
             data = self.cached_data_operator(data)
+            self._log_data(data_id, data, "processed")
             return data
 
         def _fmt_keys(d):
@@ -411,6 +460,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
             # 跑 dict-level pipeline
             if self.pipeline is not None:
                 # print(f"before pp = {data_i.keys()}")
+                self._log_data(data_id, data_i, "raw")
                 data_i = self.pipeline(data_i)
                 # print(f"after pp = {data_i.keys()}")
             for k, v in shared_fields.items():
@@ -419,6 +469,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
             print(f"[UnifiedDataset __getitem__] branch '{key}' keys: {_fmt_keys(data_i)}")
 
         print(f"[UnifiedDataset __getitem__] output branches: {_fmt_keys(out)}")
+        self._log_data(data_id, out, "processed")
         return out
 
     def __len__(self):
