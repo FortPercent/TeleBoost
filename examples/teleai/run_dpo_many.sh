@@ -7,8 +7,8 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.67.246"
-MASTER_PORT="11324"
+MASTER_ADDR="10.244.48.175"
+MASTER_PORT="11325"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -67,16 +67,16 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/V
 # export PROF_SAVE_PATH="./dpo_train_profile"
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=4
+CP=2
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=12
-N_GPU_FOR_DATA=3
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
-EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
+EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
@@ -88,7 +88,7 @@ echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
-CHECKPOINT_PATH_LOAD=/workspace/high_noise
+CHECKPOINT_PATH_LOAD=/workspace/high_noise_I2V
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
@@ -164,7 +164,7 @@ TRAINING_ARGS=(
     --init-method-std 0.006
     --clip-grad 1.0
     --bf16
-    --lr 2e-6
+    --lr 1.5e-6
     --lr-decay-style constant
     --lr-warmup-fraction 0
     --recompute-granularity full
