@@ -477,6 +477,7 @@ class WanDPODataset(UnifiedDataset):
         transforms,
         dataset_base_path="",
         dataset_metadata_path=None,
+        data_path_list=None,
         dataset_repeat=1,
 
         chosen_video_key="chosen",
@@ -532,6 +533,7 @@ class WanDPODataset(UnifiedDataset):
         super().__init__(
             base_path=dataset_base_path,
             metadata_path=dataset_metadata_path,
+            data_path_list=data_path_list,
             repeat=dataset_repeat,
             data_file_keys=data_file_keys,
             main_data_operator=main_data_operator,
