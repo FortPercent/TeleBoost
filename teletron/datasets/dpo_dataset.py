@@ -353,19 +353,39 @@ class UnifiedDataset(torch.utils.data.Dataset):
             print("No metadata_path. Searching for cached data files.")
             self.search_for_cached_data_files(self.base_path)
             print(f"{len(self.cached_data)} cached data files found.")
-        elif metadata_path.endswith(".json"):
-            with open(metadata_path, "r") as f:
-                metadata = json.load(f)
-            self.data = metadata
-        elif metadata_path.endswith(".jsonl"):
-            metadata = []
-            with open(metadata_path, 'r') as f:
-                for line in f:
-                    metadata.append(json.loads(line.strip()))
-            self.data = metadata
-        else:
-            metadata = pandas.read_csv(metadata_path)
-            self.data = [metadata.iloc[i].to_dict() for i in range(len(metadata))]
+            return
+
+        def _load_single_metadata(path):
+            if isinstance(path, list):
+                return list(path)
+            if isinstance(path, dict):
+                return [path]
+            if not isinstance(path, str):
+                raise TypeError(f"metadata_path must be str or list, got {type(path)}")
+            if path.endswith(".json"):
+                with open(path, "r") as f:
+                    metadata = json.load(f)
+                return metadata if isinstance(metadata, list) else [metadata]
+            if path.endswith(".jsonl"):
+                metadata = []
+                with open(path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        metadata.append(json.loads(line))
+                return metadata
+            metadata = pandas.read_csv(path)
+            return [metadata.iloc[i].to_dict() for i in range(len(metadata))]
+
+        if isinstance(metadata_path, (list, tuple)):
+            combined = []
+            for path in metadata_path:
+                combined.extend(_load_single_metadata(path))
+            self.data = combined
+            return
+
+        self.data = _load_single_metadata(metadata_path)
 
     def _get_logger(self):
         return get_global_logger()
