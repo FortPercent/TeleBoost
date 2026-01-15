@@ -147,7 +147,6 @@ class vLLMRollout(BaseRollout):
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
             
         VIDEO_DIRECTORY = "/gemini/space/wuxuaner/Dancegrpo/videos/output" 
-        
         print("max_model_len",max_model_len,"config.max_model_len",config.max_model_len, "config.prompt_length",config.prompt_length ,"config.response_length", config.response_length)
         self.inference_engine = LLM(
             model=model_path,
