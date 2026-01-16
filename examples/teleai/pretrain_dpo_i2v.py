@@ -346,6 +346,10 @@ def forward_step(data_iterator, model, time_step=None):
         tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
         if torch.distributed.get_rank() == tp_cp_src_rank:
             payload = torch.load(load_path, weights_only=False, map_location="cpu")
+            payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
+            print(
+                f"[DPO load] iter={curr_iter} dp_rank={dp_rank} path={load_path} keys={payload_keys}"
+            )
         else:
             payload = None
         payload = _broadcast_saved_payload(payload, device=torch.cuda.current_device())
@@ -610,6 +614,30 @@ def forward_step(data_iterator, model, time_step=None):
             curr_iter = int(getattr(args, "curr_iteration", 0))
             dp_rank = int(mpu.get_data_parallel_rank())
             print(f"[DPO compare] iter={curr_iter} dp_rank={dp_rank} results={compare}")
+            compare_dir = (
+                getattr(args, "save_dumps_dir", None)
+                or getattr(args, "save_inputs_dir", None)
+                or f"../test_data/saved_inputs_{args.test_resolution}"
+            )
+            os.makedirs(compare_dir, exist_ok=True)
+            compare_payload = {
+                "meta": {
+                    "iter": curr_iter,
+                    "rank": int(torch.distributed.get_rank()),
+                    "dp_rank": dp_rank,
+                },
+                "compare": compare,
+            }
+            for name, tensor in current_losses.items():
+                if torch.is_tensor(tensor):
+                    compare_payload[f"current_mean/{name}"] = float(tensor.float().mean().item())
+            for name, tensor in saved_losses.items():
+                if torch.is_tensor(tensor):
+                    compare_payload[f"saved_mean/{name}"] = float(tensor.float().mean().item())
+            compare_path = os.path.join(
+                compare_dir, f"dpo_loss_compare_iter{curr_iter}_rank{dp_rank}.pt"
+            )
+            torch.save(compare_payload, compare_path)
 
     return [
         loss_reject_scaled,
