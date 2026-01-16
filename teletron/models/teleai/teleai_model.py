@@ -120,11 +120,11 @@ class RMSNorm(nn.Module):
 
 
 def switch_rmsnorm(dim,eps=1e-6):
-    args = get_args()
-    if args.use_fused_rmsnorm:
-        return Fused_RMSNorm(dim,eps)
-    else:
-        return RMSNorm(dim,eps)
+    # args = get_args()
+    # if args.use_fused_rmsnorm:
+        # return Fused_RMSNorm(dim,eps)
+    # else:
+    return RMSNorm(dim,eps)
     
 class AttentionModule(nn.Module):
     def __init__(self, num_heads):

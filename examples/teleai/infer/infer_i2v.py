@@ -10,15 +10,15 @@ from prompts.HardPrompt import PROMPT_CONFIGS
 from prompts.i2v150Prompt import PROMPT_CONFIGS
 from prompts.flf2vPrompt import PROMPT_CONFIGS
 
-CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo/iter_0000100/mp_rank_00/model_optim_rng.pt"# ema_model.pt
+CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wwan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20/iter_0000100/mp_rank_00/model_optim_rng.pt" # ema_model.pt
 SAVEDIR = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo/iter_0000100/results"
 
 GPU_IDS = [0]
 
 DEFAULT_CONFIG = {
-    "height": 528,
-    "width": 900,
-    "num_frames": 121,
+    "height": 480,
+    "width": 832,
+    "num_frames": 49,
     "cfg_scale": 5,
     "num_inference_step": 40,
     "save_fps": 24,
@@ -32,7 +32,7 @@ PIPELINE_CONFIG = dict(
         dit=dict(
             path=CKPT_PATH, # ema_model.pt
             config=dict(
-                has_image_input=True, # t2v:False i2v:True i2v Wan2.2:False
+                has_image_input=False, # t2v:False i2v:True i2v Wan2.2:False
                 patch_size=[1, 2, 2],
                 in_dim=36, # t2v:16 i2v:36
                 dim=5120, # 1.3B:1536 10B:5120 14B:5120
@@ -41,7 +41,7 @@ PIPELINE_CONFIG = dict(
                 text_dim=4096,
                 out_dim=16,
                 num_heads=40, # 1.3B:12 10B:40 14B:40
-                num_layers=30, # 1.3B:30 10B:30 14B:40
+                num_layers=40, # 1.3B:30 10B:30 14B:40
                 eps=1e-6,
                 has_image_pos_emb=False, 
             ),

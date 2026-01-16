@@ -178,7 +178,7 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    --save-inputs
+    # --save-inputs
     --save-inputs-interval 1
     --save-inputs-dir ./test_data/saved_inputs_${EXPR_NAME}
 )
