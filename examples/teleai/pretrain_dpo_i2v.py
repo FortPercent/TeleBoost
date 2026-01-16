@@ -59,9 +59,9 @@ def extra_args(parser):
     group.add_argument("--moe-step-factor-list", type=float, action='append')
     group.add_argument("--test-with-pseudo-data", action="store_true")
     group.add_argument("--test-resolution", type=str, default="360")
-    group.add_argument("--save-inputs", action="store_true")
-    group.add_argument("--save-inputs-dir", type=str, default=None)
-    group.add_argument("--save-inputs-interval", type=int, default=1)
+    group.add_argument("--save-dumps", action="store_true")
+    group.add_argument("--save-dumps-dir", type=str, default=None)
+    group.add_argument("--save-dumps-interval", type=int, default=1)
     group.add_argument("--use-saved-inputs", action="store_true")
     
     return parser
@@ -158,6 +158,97 @@ def _to_cuda(obj, device=None):
     return obj
 
 
+def _dtype_from_string(dtype_str: str):
+    name = dtype_str.split(".", 1)[-1] if dtype_str.startswith("torch.") else dtype_str
+    if not hasattr(torch, name):
+        raise ValueError(f"Unsupported dtype string: {dtype_str}")
+    return getattr(torch, name)
+
+
+def _broadcast_tensor_from_src(tensor, src_rank, group, device):
+    if tensor is None and torch.distributed.get_rank() == src_rank:
+        meta = {"is_none": True}
+    elif torch.distributed.get_rank() == src_rank:
+        meta = {
+            "is_none": False,
+            "shape": list(tensor.shape),
+            "dtype": str(tensor.dtype),
+        }
+    else:
+        meta = {"is_none": True}
+
+    meta_list = [meta]
+    dist.broadcast_object_list(meta_list, src=src_rank, group=group)
+    meta = meta_list[0]
+    if meta.get("is_none"):
+        return None
+
+    dtype = _dtype_from_string(meta["dtype"])
+    if torch.distributed.get_rank() == src_rank:
+        out = tensor.to(device=device, non_blocking=True)
+    else:
+        out = torch.empty(meta["shape"], dtype=dtype, device=device)
+
+    dist.broadcast(out, src=src_rank, group=group)
+    return out
+
+
+def _set_nested(root, path, value):
+    node = root
+    for key in path[:-1]:
+        if key not in node:
+            node[key] = {}
+        node = node[key]
+    node[path[-1]] = value
+
+
+def _broadcast_saved_payload(payload, device):
+    cp_world = mpu.get_tensor_context_parallel_world_size()
+    if cp_world <= 1:
+        return _to_cuda(payload, device=device)
+
+    src_rank = mpu.get_tensor_context_parallel_src_rank()
+    group = mpu.get_tensor_context_parallel_group()
+    tensor_paths = [
+        ("timestep",),
+        ("context",),
+        ("chosen", "clip_feature"),
+        ("chosen", "y"),
+        ("chosen", "latents"),
+        ("chosen", "noise"),
+        ("chosen", "noisy_latents"),
+        ("chosen", "training_target"),
+        ("chosen", "loss_weight"),
+        ("rejected", "clip_feature"),
+        ("rejected", "y"),
+        ("rejected", "latents"),
+        ("rejected", "noise"),
+        ("rejected", "noisy_latents"),
+        ("rejected", "training_target"),
+        ("rejected", "loss_weight"),
+        ("losses", "loss_chosen"),
+        ("losses", "loss_reject"),
+        ("losses", "dpo_loss"),
+        ("losses", "loss_wo_w_chosen"),
+        ("losses", "loss_wo_w_reject"),
+        ("losses", "first_frame_loss_chosen"),
+        ("losses", "first_frame_loss_reject"),
+    ]
+
+    out = {}
+    for path in tensor_paths:
+        if payload is not None:
+            node = payload
+            for key in path:
+                node = node.get(key) if isinstance(node, dict) else None
+            tensor = node
+        else:
+            tensor = None
+        broadcasted = _broadcast_tensor_from_src(tensor, src_rank, group, device)
+        _set_nested(out, path, broadcasted)
+    return out
+
+
 def _compute_single_loss_from_saved(
     noisy_latents,
     training_target,
@@ -206,9 +297,14 @@ def forward_step(data_iterator, model, time_step=None):
     timers.stop_timer('get-data-time')
 
     use_saved_inputs = bool(getattr(args, "use_saved_inputs", False))
+    save_dumps = bool(getattr(args, "save_dumps", False))
 
     if use_saved_inputs:
-        save_dir = args.save_inputs_dir or f"../test_data/saved_inputs_{args.test_resolution}"
+        save_dir = (
+            getattr(args, "save_dumps_dir", None)
+            or getattr(args, "save_inputs_dir", None)
+            or f"../test_data/saved_inputs_{args.test_resolution}"
+        )
         dp_rank = int(mpu.get_data_parallel_rank())
         curr_iter = int(getattr(args, "curr_iteration", 0))
         load_path = os.path.join(
@@ -216,8 +312,12 @@ def forward_step(data_iterator, model, time_step=None):
         )
         if not os.path.exists(load_path):
             raise FileNotFoundError(f"Saved inputs not found: {load_path}")
-        payload = torch.load(load_path, weights_only=False, map_location="cpu")
-        payload = _to_cuda(payload, device=torch.cuda.current_device())
+        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+        if torch.distributed.get_rank() == tp_cp_src_rank:
+            payload = torch.load(load_path, weights_only=False, map_location="cpu")
+        else:
+            payload = None
+        payload = _broadcast_saved_payload(payload, device=torch.cuda.current_device())
         context = payload["context"]
         chosen_clip_feature = payload["chosen"]["clip_feature"]
         reject_clip_feature = payload["rejected"]["clip_feature"]
@@ -303,7 +403,7 @@ def forward_step(data_iterator, model, time_step=None):
     # =========================
     # forward & loss
     # =========================
-    return_debug = bool(getattr(args, "save_inputs", False))
+    return_debug = bool(save_dumps)
 
     print(f"[Rank {torch.distributed.get_rank()}] enter chosen compute_single_loss========")
     if use_saved_inputs:
@@ -414,10 +514,14 @@ def forward_step(data_iterator, model, time_step=None):
     dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
 
     if return_debug and not args.test_with_pseudo_data and not use_saved_inputs:
-        interval = max(1, int(getattr(args, "save_inputs_interval", 1)))
+        interval = max(1, int(getattr(args, "save_dumps_interval", 1)))
         curr_iter = int(getattr(args, "curr_iteration", 0))
         if curr_iter % interval == 0:
-            save_dir = args.save_inputs_dir or f"../test_data/saved_inputs_{args.test_resolution}"
+            save_dir = (
+                getattr(args, "save_dumps_dir", None)
+                or getattr(args, "save_inputs_dir", None)
+                or f"../test_data/saved_inputs_{args.test_resolution}"
+            )
             os.makedirs(save_dir, exist_ok=True)
             dp_rank = int(mpu.get_data_parallel_rank())
             payload = {
@@ -437,6 +541,15 @@ def forward_step(data_iterator, model, time_step=None):
                     "clip_feature": reject_clip_feature,
                     "y": reject_y,
                     **debug_reject,
+                },
+                "losses": {
+                    "loss_chosen": loss_chosen.detach(),
+                    "loss_reject": loss_reject.detach(),
+                    "dpo_loss": dpo_loss_for_log.detach(),
+                    "loss_wo_w_chosen": loss_wo_w_chosen.detach(),
+                    "loss_wo_w_reject": loss_wo_w_reject.detach(),
+                    "first_frame_loss_chosen": first_frame_loss_chosen.detach(),
+                    "first_frame_loss_reject": first_frame_loss_reject.detach(),
                 },
             }
             save_path = os.path.join(
