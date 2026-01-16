@@ -116,13 +116,7 @@ def _compute_single_loss(
     loss_wo_w = loss
     loss = loss * loss_weight
 
-    first_frame_pred = output_tensor_list[:, :, :1, :, :]
-    first_frame_target = training_target[:, :, :1, :, :]
-    assert first_frame_pred.shape[1] == 16
-    first_frame_loss = torch.nn.functional.mse_loss(
-        first_frame_pred.float(), first_frame_target.float()
-    )
-    loss += first_frame_loss
+    first_frame_loss = loss_wo_w.new_zeros(())
 
     if return_debug:
         debug = {
@@ -275,13 +269,7 @@ def _compute_single_loss_from_saved(
     loss_wo_w = loss
     loss = loss * loss_weight
 
-    first_frame_pred = output_tensor_list[:, :, :1, :, :]
-    first_frame_target = training_target[:, :, :1, :, :]
-    assert first_frame_pred.shape[1] == 16
-    first_frame_loss = torch.nn.functional.mse_loss(
-        first_frame_pred.float(), first_frame_target.float()
-    )
-    loss += first_frame_loss
+    first_frame_loss = loss_wo_w.new_zeros(())
 
     return loss, loss_wo_w, first_frame_loss
 
