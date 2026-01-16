@@ -263,6 +263,22 @@ def _compute_single_loss_from_saved(
     rtol=1e-5,
     atol=1e-8,
 ):
+    tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+    if dist.get_rank() == tp_cp_src_rank:
+        inputs_info = {
+            "x": (str(noisy_latents.dtype), list(noisy_latents.shape)),
+            "timestep": (str(timestep.dtype), list(timestep.shape)),
+            "context": (str(context.dtype), list(context.shape)),
+            "clip_feature": (
+                str(clip_feature.dtype) if torch.is_tensor(clip_feature) else str(type(clip_feature).__name__),
+                list(clip_feature.shape) if torch.is_tensor(clip_feature) else None,
+            ),
+            "y": (
+                str(y.dtype) if torch.is_tensor(y) else str(type(y).__name__),
+                list(y.shape) if torch.is_tensor(y) else None,
+            ),
+        }
+        print(f"[DPO input-dtype] rank={dist.get_rank()} {compare_name or 'noise_pred'} inputs={inputs_info}")
     output_tensor_list = model(
         x=noisy_latents,
         timestep=timestep,
@@ -278,7 +294,6 @@ def _compute_single_loss_from_saved(
             rtol=rtol,
             atol=atol,
         )
-        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
         if mismatch is not None:
             print(f"[DPO output-check] rank={dist.get_rank()} mismatch={mismatch}")
         elif dist.get_rank() == tp_cp_src_rank:
