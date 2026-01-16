@@ -313,6 +313,53 @@ def _compare_losses(saved_losses, current_losses, rtol, atol):
     return results
 
 
+def _compare_input_tensor(name, expected, actual, rtol=1e-5, atol=1e-8):
+    if expected is None and actual is None:
+        return None
+    if expected is None or actual is None:
+        return {"name": name, "reason": "one is None"}
+    if not torch.is_tensor(expected) or not torch.is_tensor(actual):
+        if expected == actual:
+            return None
+        return {"name": name, "reason": "non-tensor mismatch"}
+    if expected.shape != actual.shape:
+        return {
+            "name": name,
+            "reason": "shape mismatch",
+            "expected_shape": list(expected.shape),
+            "actual_shape": list(actual.shape),
+        }
+    if expected.dtype != actual.dtype:
+        return {
+            "name": name,
+            "reason": "dtype mismatch",
+            "expected_dtype": str(expected.dtype),
+            "actual_dtype": str(actual.dtype),
+        }
+    if torch.equal(expected, actual):
+        return None
+    allclose = torch.allclose(expected, actual, rtol=rtol, atol=atol)
+    if allclose:
+        return None
+    diff = (expected - actual).abs()
+    return {
+        "name": name,
+        "reason": "value mismatch",
+        "max_abs": diff.max().item(),
+        "mean_abs": diff.mean().item(),
+    }
+
+
+def _check_payload_inputs(payload, inputs, rtol=1e-5, atol=1e-8):
+    mismatches = []
+    for name, pair in inputs.items():
+        expected, actual = pair
+        diff = _compare_input_tensor(name, expected, actual, rtol=rtol, atol=atol)
+        if diff is not None:
+            mismatches.append(diff)
+    return mismatches
+
+
 def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
@@ -347,9 +394,13 @@ def forward_step(data_iterator, model, time_step=None):
         if torch.distributed.get_rank() == tp_cp_src_rank:
             payload = torch.load(load_path, weights_only=False, map_location="cpu")
             payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
+            chosen_keys = sorted(list(payload.get("chosen", {}).keys())) if isinstance(payload, dict) else []
+            rejected_keys = sorted(list(payload.get("rejected", {}).keys())) if isinstance(payload, dict) else []
             print(
                 f"[DPO load] iter={curr_iter} dp_rank={dp_rank} path={load_path} keys={payload_keys}"
             )
+            print(f"[DPO load] chosen keys={chosen_keys}")
+            print(f"[DPO load] rejected keys={rejected_keys}")
         else:
             payload = None
         payload = _broadcast_saved_payload(payload, device=torch.cuda.current_device())
@@ -440,13 +491,47 @@ def forward_step(data_iterator, model, time_step=None):
     # =========================
     return_debug = bool(save_dumps)
 
+    if use_saved_inputs:
+        chosen_noisy_latents = payload["chosen"]["noisy_latents"]
+        chosen_training_target = payload["chosen"]["training_target"]
+        chosen_loss_weight = payload["chosen"]["loss_weight"]
+        reject_noisy_latents = payload["rejected"]["noisy_latents"]
+        reject_training_target = payload["rejected"]["training_target"]
+        reject_loss_weight = payload["rejected"]["loss_weight"]
+        input_checks = {
+            "timestep": (payload["timestep"], timestep),
+            "context": (payload["context"], context),
+            "chosen.clip_feature": (payload["chosen"]["clip_feature"], chosen_clip_feature),
+            "chosen.y": (payload["chosen"]["y"], chosen_y),
+            "chosen.noisy_latents": (payload["chosen"]["noisy_latents"], chosen_noisy_latents),
+            "chosen.training_target": (payload["chosen"]["training_target"], chosen_training_target),
+            "chosen.loss_weight": (payload["chosen"]["loss_weight"], chosen_loss_weight),
+            "rejected.clip_feature": (payload["rejected"]["clip_feature"], reject_clip_feature),
+            "rejected.y": (payload["rejected"]["y"], reject_y),
+            "rejected.noisy_latents": (payload["rejected"]["noisy_latents"], reject_noisy_latents),
+            "rejected.training_target": (payload["rejected"]["training_target"], reject_training_target),
+            "rejected.loss_weight": (payload["rejected"]["loss_weight"], reject_loss_weight),
+        }
+        mismatches = _check_payload_inputs(
+            payload,
+            input_checks,
+            rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
+            atol=float(getattr(args, "compare_losses_atol", 1e-8)),
+        )
+        if mismatches:
+            print(
+                f"[DPO input-check] rank={dist.get_rank()} mismatches={mismatches}"
+            )
+        elif dist.get_rank() == mpu.get_tensor_context_parallel_src_rank():
+            print(f"[DPO input-check] rank={dist.get_rank()} ok")
+
     print(f"[Rank {torch.distributed.get_rank()}] enter chosen compute_single_loss========")
     if use_saved_inputs:
         loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
             _compute_single_loss_from_saved(
-                payload["chosen"]["noisy_latents"],
-                payload["chosen"]["training_target"],
-                payload["chosen"]["loss_weight"],
+                chosen_noisy_latents,
+                chosen_training_target,
+                chosen_loss_weight,
                 context,
                 chosen_clip_feature,
                 chosen_y,
@@ -486,9 +571,9 @@ def forward_step(data_iterator, model, time_step=None):
     if use_saved_inputs:
         loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
             _compute_single_loss_from_saved(
-                payload["rejected"]["noisy_latents"],
-                payload["rejected"]["training_target"],
-                payload["rejected"]["loss_weight"],
+                reject_noisy_latents,
+                reject_training_target,
+                reject_loss_weight,
                 context,
                 reject_clip_feature,
                 reject_y,
