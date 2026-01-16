@@ -63,6 +63,9 @@ def extra_args(parser):
     group.add_argument("--save-dumps-dir", type=str, default=None)
     group.add_argument("--save-dumps-interval", type=int, default=1)
     group.add_argument("--use-saved-inputs", action="store_true")
+    group.add_argument("--compare-saved-losses", action="store_true")
+    group.add_argument("--compare-losses-rtol", type=float, default=1e-5)
+    group.add_argument("--compare-losses-atol", type=float, default=1e-8)
     
     return parser
 
@@ -283,6 +286,33 @@ def _compute_single_loss_from_saved(
     return loss, loss_wo_w, first_frame_loss
 
 
+def _compare_losses(saved_losses, current_losses, rtol, atol):
+    results = {}
+    for key, current in current_losses.items():
+        saved = saved_losses.get(key)
+        if saved is None:
+            results[key] = {"missing": True}
+            continue
+        if not torch.is_tensor(saved):
+            results[key] = {"missing": True}
+            continue
+        if saved.shape != current.shape:
+            results[key] = {
+                "shape_mismatch": True,
+                "saved_shape": list(saved.shape),
+                "current_shape": list(current.shape),
+            }
+            continue
+        diff = (current - saved).abs()
+        results[key] = {
+            "missing": False,
+            "allclose": bool(torch.allclose(current, saved, rtol=rtol, atol=atol)),
+            "max_abs": diff.max().item(),
+            "mean_abs": diff.mean().item(),
+        }
+    return results
+
+
 def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
     flow_scheduler.set_timesteps(1000, training=True)
@@ -298,6 +328,7 @@ def forward_step(data_iterator, model, time_step=None):
 
     use_saved_inputs = bool(getattr(args, "use_saved_inputs", False))
     save_dumps = bool(getattr(args, "save_dumps", False))
+    compare_saved_losses = bool(getattr(args, "compare_saved_losses", False))
 
     if use_saved_inputs:
         save_dir = (
@@ -556,6 +587,29 @@ def forward_step(data_iterator, model, time_step=None):
                 save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
             )
             torch.save(_detach_to_cpu(payload), save_path)
+
+    if use_saved_inputs and compare_saved_losses:
+        saved_losses = payload.get("losses", {}) if isinstance(payload, dict) else {}
+        current_losses = {
+            "loss_chosen": loss_chosen.detach(),
+            "loss_reject": loss_reject.detach(),
+            "dpo_loss": dpo_loss_for_log.detach(),
+            "loss_wo_w_chosen": loss_wo_w_chosen.detach(),
+            "loss_wo_w_reject": loss_wo_w_reject.detach(),
+            "first_frame_loss_chosen": first_frame_loss_chosen.detach(),
+            "first_frame_loss_reject": first_frame_loss_reject.detach(),
+        }
+        compare = _compare_losses(
+            saved_losses,
+            current_losses,
+            float(getattr(args, "compare_losses_rtol", 1e-5)),
+            float(getattr(args, "compare_losses_atol", 1e-8)),
+        )
+        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+        if torch.distributed.get_rank() == tp_cp_src_rank:
+            curr_iter = int(getattr(args, "curr_iteration", 0))
+            dp_rank = int(mpu.get_data_parallel_rank())
+            print(f"[DPO compare] iter={curr_iter} dp_rank={dp_rank} results={compare}")
 
     return [
         loss_reject_scaled,
