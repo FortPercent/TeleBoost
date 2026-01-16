@@ -125,6 +125,7 @@ def _compute_single_loss(
             "noisy_latents": noisy_latents,
             "training_target": training_target,
             "loss_weight": loss_weight,
+            "noise_pred": output_tensor_list.detach(),
         }
         return loss, loss_wo_w, first_frame_loss, debug
 
@@ -214,6 +215,7 @@ def _broadcast_saved_payload(payload, device):
         ("chosen", "latents"),
         ("chosen", "noise"),
         ("chosen", "noisy_latents"),
+        ("chosen", "noise_pred"),
         ("chosen", "training_target"),
         ("chosen", "loss_weight"),
         ("rejected", "clip_feature"),
@@ -221,6 +223,7 @@ def _broadcast_saved_payload(payload, device):
         ("rejected", "latents"),
         ("rejected", "noise"),
         ("rejected", "noisy_latents"),
+        ("rejected", "noise_pred"),
         ("rejected", "training_target"),
         ("rejected", "loss_weight"),
         ("losses", "loss_chosen"),
@@ -255,6 +258,10 @@ def _compute_single_loss_from_saved(
     y,
     model,
     timestep,
+    expected_noise_pred=None,
+    compare_name=None,
+    rtol=1e-5,
+    atol=1e-8,
 ):
     output_tensor_list = model(
         x=noisy_latents,
@@ -263,6 +270,19 @@ def _compute_single_loss_from_saved(
         clip_feature=clip_feature,
         y=y,
     )
+    if expected_noise_pred is not None:
+        mismatch = _compare_input_tensor(
+            compare_name or "noise_pred",
+            expected_noise_pred,
+            output_tensor_list,
+            rtol=rtol,
+            atol=atol,
+        )
+        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+        if mismatch is not None:
+            print(f"[DPO output-check] rank={dist.get_rank()} mismatch={mismatch}")
+        elif dist.get_rank() == tp_cp_src_rank:
+            print(f"[DPO output-check] rank={dist.get_rank()} {compare_name or 'noise_pred'} ok")
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
     )
@@ -483,9 +503,11 @@ def forward_step(data_iterator, model, time_step=None):
         chosen_noisy_latents = payload["chosen"]["noisy_latents"]
         chosen_training_target = payload["chosen"]["training_target"]
         chosen_loss_weight = payload["chosen"]["loss_weight"]
+        chosen_noise_pred = payload["chosen"].get("noise_pred")
         reject_noisy_latents = payload["rejected"]["noisy_latents"]
         reject_training_target = payload["rejected"]["training_target"]
         reject_loss_weight = payload["rejected"]["loss_weight"]
+        reject_noise_pred = payload["rejected"].get("noise_pred")
         input_checks = {
             "timestep": (payload["timestep"], timestep),
             "context": (payload["context"], context),
@@ -525,6 +547,10 @@ def forward_step(data_iterator, model, time_step=None):
                 chosen_y,
                 model,
                 timestep,
+                expected_noise_pred=chosen_noise_pred,
+                compare_name="chosen.noise_pred",
+                rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
+                atol=float(getattr(args, "compare_losses_atol", 1e-8)),
             )
         )
     elif return_debug:
@@ -567,6 +593,10 @@ def forward_step(data_iterator, model, time_step=None):
                 reject_y,
                 model,
                 timestep,
+                expected_noise_pred=reject_noise_pred,
+                compare_name="rejected.noise_pred",
+                rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
+                atol=float(getattr(args, "compare_losses_atol", 1e-8)),
             )
         )
     elif return_debug:
