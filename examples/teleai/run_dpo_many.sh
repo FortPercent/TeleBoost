@@ -178,9 +178,9 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    # --save-inputs
-    --save-inputs-interval 1
-    --save-inputs-dir ./test_data/saved_inputs_${EXPR_NAME}
+    --save-dumps
+    --save-dumps-interval 1
+    --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
 )
 
 MODEL_PARALLEL_ARGS=(
@@ -210,6 +210,28 @@ EVAL_AND_LOGGING_ARGS=(
     --eval-iters 20
     --producer-log-level 1
 )
+
+#######################################
+# Mode banner
+#######################################
+
+MODE="train"
+if [[ " $* " == *" --use-saved-inputs "* ]]; then
+    MODE="use_saved_inputs"
+fi
+
+SAVE_DUMPS=0
+if [[ " ${TRAINING_ARGS[*]} " == *" --save-dumps "* ]] || [[ " $* " == *" --save-dumps "* ]]; then
+    SAVE_DUMPS=1
+fi
+
+if [[ "$SAVE_DUMPS" -eq 1 ]]; then
+    MODE="${MODE}+save_dumps"
+fi
+
+echo "#######################################"
+echo "[MODE] ${MODE}"
+echo "#######################################"
 
 #######################################
 # 启动
