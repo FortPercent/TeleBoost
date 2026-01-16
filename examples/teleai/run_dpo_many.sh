@@ -8,7 +8,7 @@ set -e
 NODE_RANK=""
 NNODES=""
 MASTER_ADDR="10.244.48.175"
-MASTER_PORT="11328"
+MASTER_PORT="11320"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -178,8 +178,9 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    --save-dumps
-    --save-dumps-interval 1
+    --use-saved-inputs
+    # --save-dumps
+    # --save-dumps-interval 1
     --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
 )
 
