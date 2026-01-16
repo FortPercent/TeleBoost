@@ -82,8 +82,8 @@ def _compute_single_loss(
     loss_weight = flow_scheduler.training_weight(timestep)
 
     if args.test_with_pseudo_data:
-        dp_rank = mpu.get_data_parallel_rank() % 2
-        curr_iter = args.curr_iteration % 1000
+        dp_rank = mpu.get_data_parallel_rank() 
+        curr_iter = args.curr_iteration
         input_dict = torch.load(
             f"../test_data/saved_inputs_{args.test_resolution}/input_dict_iter{curr_iter}_rank{dp_rank}.pt",
             weights_only=False,
