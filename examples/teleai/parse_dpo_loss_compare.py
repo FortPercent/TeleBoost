@@ -44,6 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description="Parse Teletron DPO loss compare dumps.")
     parser.add_argument("--dir", required=True, help="Directory with dpo_loss_compare_iter*_rank*.pt")
     parser.add_argument("--out", default=None, help="Output CSV path")
+    parser.add_argument("--only-core", action="store_true", help="Only keep dpo_loss/loss_chosen/loss_reject")
     args = parser.parse_args()
 
     files = _collect_files(args.dir)
@@ -65,6 +66,8 @@ def main():
         for loss_name, stats in compare.items():
             if not isinstance(stats, dict):
                 continue
+            if args.only_core and loss_name not in ("dpo_loss", "loss_chosen", "loss_reject"):
+                continue
             row[f"{loss_name}.allclose"] = _format_bool(stats.get("allclose"))
             row[f"{loss_name}.max_abs"] = stats.get("max_abs", "")
             row[f"{loss_name}.mean_abs"] = stats.get("mean_abs", "")
@@ -72,6 +75,9 @@ def main():
         # include saved/current means if present
         for key, val in payload.items():
             if key.startswith("current_mean/") or key.startswith("saved_mean/"):
+                if args.only_core:
+                    if not key.endswith("dpo_loss") and not key.endswith("loss_chosen") and not key.endswith("loss_reject"):
+                        continue
                 row[key] = val
 
         rows.append(row)
