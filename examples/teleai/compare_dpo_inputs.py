@@ -160,8 +160,14 @@ def main():
         if ref_rank not in by_iter[it]:
             raise RuntimeError(f"Reference rank {ref_rank} missing for iter {it}")
 
-        ref_payload = torch.load(by_iter[it][ref_rank], weights_only=False, map_location="cpu")
-        ref_tensors = _flatten_tensors(ref_payload)
+        rank_payloads = {}
+        rank_tensors = {}
+        for rank in ranks:
+            payload = torch.load(by_iter[it][rank], weights_only=False, map_location="cpu")
+            rank_payloads[rank] = payload
+            rank_tensors[rank] = _flatten_tensors(payload)
+
+        ref_tensors = rank_tensors[ref_rank]
 
         focus_prefixes = [p.strip() for p in args.focus.split(",") if p.strip()]
         tensor_keys = [k for k in sorted(ref_tensors.keys()) if any(k.startswith(p) for p in focus_prefixes)]
@@ -176,8 +182,7 @@ def main():
         for col_idx, rank in enumerate(ranks):
             if rank == ref_rank:
                 continue
-            payload = torch.load(by_iter[it][rank], weights_only=False, map_location="cpu")
-            tensors = _flatten_tensors(payload)
+            tensors = rank_tensors[rank]
             for row_idx, key in enumerate(tensor_keys):
                 if key not in tensors:
                     rows.append({
@@ -220,7 +225,7 @@ def main():
                 if val is not None and val > max_val:
                     max_val = val
                     max_rank = r.get("rank")
-            summary_rows.append({
+            summary_row = {
                 "iter": it,
                 "tensor": key,
                 "ref_rank": ref_rank,
@@ -229,7 +234,34 @@ def main():
                 "max_abs": max_abs,
                 "mean_abs": mean_abs,
                 "max_abs_rank": max_rank,
-            })
+            }
+            exact_equal = True
+            ref_tensor = ref_tensors.get(key)
+            if ref_tensor is None:
+                exact_equal = False
+            for rank in ranks:
+                t = rank_tensors.get(rank, {}).get(key)
+                if t is None or ref_tensor is None:
+                    exact_equal = False
+                    break
+                if t.shape != ref_tensor.shape or t.dtype != ref_tensor.dtype:
+                    exact_equal = False
+                    break
+                if not torch.equal(t, ref_tensor):
+                    exact_equal = False
+                    break
+            for rank in ranks:
+                t = rank_tensors.get(rank, {}).get(key)
+                if t is None:
+                    summary_row[f"mean_rank{rank}"] = ""
+                    continue
+                try:
+                    mean_val = t.float().mean().item()
+                except Exception:
+                    mean_val = ""
+                summary_row[f"mean_rank{rank}"] = mean_val
+            summary_row["exact_equal"] = exact_equal
+            summary_rows.append(summary_row)
 
         csv_path = os.path.join(output_dir, f"dpo_inputs_diff_iter{it}.csv")
         _write_csv(csv_path, rows)
