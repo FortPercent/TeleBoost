@@ -458,7 +458,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
             # 跑 dict-level pipeline
             if self.pipeline is not None:
                 # print(f"before pp = {data_i.keys()}")
-                self._log_data(data_id, data_i, "raw")
+                self._log_data(data_id, data_i, f"before_pipeline_{key}")
                 data_i = self.pipeline(data_i)
                 # print(f"after pp = {data_i.keys()}")
             for k, v in shared_fields.items():

@@ -76,7 +76,8 @@ N_GPU_FOR_TRAIN=16
 N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
-EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
+# EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
+EXPR_NAME=test_dpo_i2v
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
@@ -177,6 +178,9 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
+    --save-inputs
+    --save-inputs-interval 1
+    --save-inputs-dir ./test_data/saved_inputs_${EXPR_NAME}
 )
 
 MODEL_PARALLEL_ARGS=(
