@@ -1,3 +1,4 @@
+import os
 import torch
 from teletron.train import Trainer, parse_args
 import torch.distributed as dist
@@ -58,6 +59,10 @@ def extra_args(parser):
     group.add_argument("--moe-step-factor-list", type=float, action='append')
     group.add_argument("--test-with-pseudo-data", action="store_true")
     group.add_argument("--test-resolution", type=str, default="360")
+    group.add_argument("--save-inputs", action="store_true")
+    group.add_argument("--save-inputs-dir", type=str, default=None)
+    group.add_argument("--save-inputs-interval", type=int, default=1)
+    group.add_argument("--use-saved-inputs", action="store_true")
     
     return parser
 
@@ -70,6 +75,7 @@ def _compute_single_loss(
     model,
     timestep,
     noise,
+    return_debug=False,
 ):
     training_target = flow_scheduler.training_target(latents, noise, timestep)
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
@@ -115,6 +121,74 @@ def _compute_single_loss(
     )
     loss += first_frame_loss
 
+    if return_debug:
+        debug = {
+            "latents": latents,
+            "noise": noise,
+            "noisy_latents": noisy_latents,
+            "training_target": training_target,
+            "loss_weight": loss_weight,
+        }
+        return loss, loss_wo_w, first_frame_loss, debug
+
+    return loss, loss_wo_w, first_frame_loss
+
+
+def _detach_to_cpu(obj):
+    if torch.is_tensor(obj):
+        return obj.detach().cpu()
+    if isinstance(obj, dict):
+        return {k: _detach_to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_detach_to_cpu(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_detach_to_cpu(v) for v in obj)
+    return obj
+
+
+def _to_cuda(obj, device=None):
+    if torch.is_tensor(obj):
+        return obj.to(device=device, non_blocking=True)
+    if isinstance(obj, dict):
+        return {k: _to_cuda(v, device=device) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_cuda(v, device=device) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_to_cuda(v, device=device) for v in obj)
+    return obj
+
+
+def _compute_single_loss_from_saved(
+    noisy_latents,
+    training_target,
+    loss_weight,
+    context,
+    clip_feature,
+    y,
+    model,
+    timestep,
+):
+    output_tensor_list = model(
+        x=noisy_latents,
+        timestep=timestep,
+        context=context,
+        clip_feature=clip_feature,
+        y=y,
+    )
+    loss = torch.nn.functional.mse_loss(
+        output_tensor_list.float(), training_target.float()
+    )
+    loss_wo_w = loss
+    loss = loss * loss_weight
+
+    first_frame_pred = output_tensor_list[:, :, :1, :, :]
+    first_frame_target = training_target[:, :, :1, :, :]
+    assert first_frame_pred.shape[1] == 16
+    first_frame_loss = torch.nn.functional.mse_loss(
+        first_frame_pred.float(), first_frame_target.float()
+    )
+    loss += first_frame_loss
+
     return loss, loss_wo_w, first_frame_loss
 
 
@@ -130,21 +204,44 @@ def forward_step(data_iterator, model, time_step=None):
     timers.start_timer('get-data-time')
     batch = next(data_iterator)
     timers.stop_timer('get-data-time')
-    context = batch["context"]  # shared text context
 
-    chosen_latents = batch[chosen_key]["latents"]
-    reject_latents = batch[rejected_key]["latents"]
+    use_saved_inputs = bool(getattr(args, "use_saved_inputs", False))
 
-    # clip feature / img_emb_y（正负样本各自的）
-    chosen_clip_feature = batch[chosen_key].get(
-        "img_clip_feature", batch[chosen_key].get("clip_feature")
-    )
-    reject_clip_feature = batch[rejected_key].get(
-        "img_clip_feature", batch[rejected_key].get("clip_feature")
-    )
+    if use_saved_inputs:
+        save_dir = args.save_inputs_dir or f"../test_data/saved_inputs_{args.test_resolution}"
+        dp_rank = int(mpu.get_data_parallel_rank())
+        curr_iter = int(getattr(args, "curr_iteration", 0))
+        load_path = os.path.join(
+            save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
+        )
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"Saved inputs not found: {load_path}")
+        payload = torch.load(load_path, weights_only=False, map_location="cpu")
+        payload = _to_cuda(payload, device=torch.cuda.current_device())
+        context = payload["context"]
+        chosen_clip_feature = payload["chosen"]["clip_feature"]
+        reject_clip_feature = payload["rejected"]["clip_feature"]
+        chosen_y = payload["chosen"]["y"]
+        reject_y = payload["rejected"]["y"]
+        timestep = payload["timestep"].to(
+            dtype=torch.bfloat16,
+            device=torch.cuda.current_device(),
+        )
+    else:
+        context = batch["context"]  # shared text context
+        chosen_latents = batch[chosen_key]["latents"]
+        reject_latents = batch[rejected_key]["latents"]
 
-    chosen_y = batch[chosen_key].get("img_emb_y")
-    reject_y = batch[rejected_key].get("img_emb_y")
+        # clip feature / img_emb_y（正负样本各自的）
+        chosen_clip_feature = batch[chosen_key].get(
+            "img_clip_feature", batch[chosen_key].get("clip_feature")
+        )
+        reject_clip_feature = batch[rejected_key].get(
+            "img_clip_feature", batch[rejected_key].get("clip_feature")
+        )
+
+        chosen_y = batch[chosen_key].get("img_emb_y")
+        reject_y = batch[rejected_key].get("img_emb_y")
 
     # =========================
     # timestep sampling
@@ -166,13 +263,14 @@ def forward_step(data_iterator, model, time_step=None):
     )
 
     timestep_range = [min_timestep_boundary, max_timestep_boundary]
-    timestep_id = torch.randint(
-        timestep_range[0], timestep_range[1], (1,)
-    )
-    timestep = flow_scheduler.timesteps[timestep_id].to(
-        dtype=torch.bfloat16,
-        device=torch.cuda.current_device(),
-    )
+    if not use_saved_inputs:
+        timestep_id = torch.randint(
+            timestep_range[0], timestep_range[1], (1,)
+        )
+        timestep = flow_scheduler.timesteps[timestep_id].to(
+            dtype=torch.bfloat16,
+            device=torch.cuda.current_device(),
+        )
 
     def broadcast_tensor(input: torch.Tensor):
         tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
@@ -195,42 +293,101 @@ def forward_step(data_iterator, model, time_step=None):
     # =========================
     # noise (正负样本独立)
     # =========================
-    noise_chosen = torch.randn_like(chosen_latents)
-    noise_reject = torch.randn_like(reject_latents)
+    if not use_saved_inputs:
+        noise_chosen = torch.randn_like(chosen_latents)
+        noise_reject = torch.randn_like(reject_latents)
 
-    broadcast_tensor(noise_chosen)
-    broadcast_tensor(noise_reject)
+        broadcast_tensor(noise_chosen)
+        broadcast_tensor(noise_reject)
 
     # =========================
     # forward & loss
     # =========================
+    return_debug = bool(getattr(args, "save_inputs", False))
+
     print(f"[Rank {torch.distributed.get_rank()}] enter chosen compute_single_loss========")
-    loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
-        _compute_single_loss(
-            chosen_latents,
-            context,
-            chosen_clip_feature,
-            chosen_y,
-            flow_scheduler,
-            model,
-            timestep,
-            noise_chosen,
+    if use_saved_inputs:
+        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
+            _compute_single_loss_from_saved(
+                payload["chosen"]["noisy_latents"],
+                payload["chosen"]["training_target"],
+                payload["chosen"]["loss_weight"],
+                context,
+                chosen_clip_feature,
+                chosen_y,
+                model,
+                timestep,
+            )
         )
-    )
+    elif return_debug:
+        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen, debug_chosen = (
+            _compute_single_loss(
+                chosen_latents,
+                context,
+                chosen_clip_feature,
+                chosen_y,
+                flow_scheduler,
+                model,
+                timestep,
+                noise_chosen,
+                return_debug=True,
+            )
+        )
+    else:
+        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
+            _compute_single_loss(
+                chosen_latents,
+                context,
+                chosen_clip_feature,
+                chosen_y,
+                flow_scheduler,
+                model,
+                timestep,
+                noise_chosen,
+            )
+        )
 
     print(f"[Rank {torch.distributed.get_rank()}] enter reject compute_single_loss========")
-    loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
-        _compute_single_loss(
-            reject_latents,
-            context,
-            reject_clip_feature,
-            reject_y,
-            flow_scheduler,
-            model,
-            timestep,
-            noise_reject,
+    if use_saved_inputs:
+        loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
+            _compute_single_loss_from_saved(
+                payload["rejected"]["noisy_latents"],
+                payload["rejected"]["training_target"],
+                payload["rejected"]["loss_weight"],
+                context,
+                reject_clip_feature,
+                reject_y,
+                model,
+                timestep,
+            )
         )
-    )
+    elif return_debug:
+        loss_reject, loss_wo_w_reject, first_frame_loss_reject, debug_reject = (
+            _compute_single_loss(
+                reject_latents,
+                context,
+                reject_clip_feature,
+                reject_y,
+                flow_scheduler,
+                model,
+                timestep,
+                noise_reject,
+                return_debug=True,
+            )
+        )
+    else:
+        loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
+            _compute_single_loss(
+                reject_latents,
+                context,
+                reject_clip_feature,
+                reject_y,
+                flow_scheduler,
+                model,
+                timestep,
+                noise_reject,
+            )
+        )
 
     beta = float(
         set_config()
@@ -255,6 +412,37 @@ def forward_step(data_iterator, model, time_step=None):
 
     # 这个只是用来日志/显示，不参与反传（可选）
     dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
+
+    if return_debug and not args.test_with_pseudo_data and not use_saved_inputs:
+        interval = max(1, int(getattr(args, "save_inputs_interval", 1)))
+        curr_iter = int(getattr(args, "curr_iteration", 0))
+        if curr_iter % interval == 0:
+            save_dir = args.save_inputs_dir or f"../test_data/saved_inputs_{args.test_resolution}"
+            os.makedirs(save_dir, exist_ok=True)
+            dp_rank = int(mpu.get_data_parallel_rank())
+            payload = {
+                "meta": {
+                    "iter": curr_iter,
+                    "rank": int(torch.distributed.get_rank()),
+                    "dp_rank": dp_rank,
+                },
+                "timestep": timestep,
+                "context": context,
+                "chosen": {
+                    "clip_feature": chosen_clip_feature,
+                    "y": chosen_y,
+                    **debug_chosen,
+                },
+                "rejected": {
+                    "clip_feature": reject_clip_feature,
+                    "y": reject_y,
+                    **debug_reject,
+                },
+            }
+            save_path = os.path.join(
+                save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
+            )
+            torch.save(_detach_to_cpu(payload), save_path)
 
     return [
         loss_reject_scaled,
