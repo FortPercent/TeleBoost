@@ -44,25 +44,33 @@ def _flatten_tensors(obj, prefix="", out=None):
     return out
 
 
-def _compute_stats(a: torch.Tensor, b: torch.Tensor, sample_size: int):
+def _select_samples(a: torch.Tensor, b: torch.Tensor, sample_size: int):
+    if a.shape != b.shape:
+        return None, None, 0
+    a_flat = a.flatten()
+    b_flat = b.flatten()
+    numel = a_flat.numel()
+    if sample_size and numel > sample_size:
+        idx = torch.randperm(numel)[:sample_size]
+        return a_flat[idx], b_flat[idx], sample_size
+    return a_flat, b_flat, numel
+
+
+def _compute_stats(a: torch.Tensor, b: torch.Tensor, sample_size: int, rtol: float, atol: float):
     if a.shape != b.shape:
         return {
             "shape_mismatch": True,
             "shape_a": list(a.shape),
             "shape_b": list(b.shape),
         }
-    a_flat = a.flatten()
-    b_flat = b.flatten()
-    numel = a_flat.numel()
-    if sample_size and numel > sample_size:
-        idx = torch.randperm(numel)[:sample_size]
-        a_use = a_flat[idx]
-        b_use = b_flat[idx]
-        sampled = sample_size
-    else:
-        a_use = a_flat
-        b_use = b_flat
-        sampled = numel
+    a_use, b_use, sampled = _select_samples(a, b, sample_size)
+    numel = a.numel()
+    if a_use is None:
+        return {
+            "shape_mismatch": True,
+            "shape_a": list(a.shape),
+            "shape_b": list(b.shape),
+        }
 
     diff = (a_use - b_use).abs()
     mean_abs = diff.mean().item()
@@ -72,6 +80,7 @@ def _compute_stats(a: torch.Tensor, b: torch.Tensor, sample_size: int):
     mean_ref = a_use.abs().mean().item()
     eps = 1e-12
 
+    allclose = torch.allclose(a_use, b_use, rtol=rtol, atol=atol)
     return {
         "shape_mismatch": False,
         "numel": numel,
@@ -80,6 +89,7 @@ def _compute_stats(a: torch.Tensor, b: torch.Tensor, sample_size: int):
         "max_abs": max_abs,
         "mean_rel": mean_abs / (mean_ref + eps),
         "l2_rel": l2_diff / (l2_ref + eps),
+        "allclose": bool(allclose),
     }
 
 
@@ -121,6 +131,9 @@ def main():
     parser.add_argument("--output-dir", default=None, help="Output directory (default: <inputs-dir>/analysis)")
     parser.add_argument("--metric", default="max_abs", choices=["max_abs", "mean_abs", "mean_rel", "l2_rel"])
     parser.add_argument("--no-heatmap", action="store_true")
+    parser.add_argument("--focus", default="context,chosen.,rejected.", help="Comma-separated prefixes to compare")
+    parser.add_argument("--rtol", type=float, default=1e-5)
+    parser.add_argument("--atol", type=float, default=1e-8)
     args = parser.parse_args()
 
     by_iter = _collect_files(args.inputs_dir)
@@ -150,9 +163,15 @@ def main():
         ref_payload = torch.load(by_iter[it][ref_rank], weights_only=False, map_location="cpu")
         ref_tensors = _flatten_tensors(ref_payload)
 
-        tensor_keys = sorted(ref_tensors.keys())
+        focus_prefixes = [p.strip() for p in args.focus.split(",") if p.strip()]
+        tensor_keys = [k for k in sorted(ref_tensors.keys()) if any(k.startswith(p) for p in focus_prefixes)]
+        if not tensor_keys:
+            print(f"[WARN] iteration {it} has no tensors matching focus={args.focus}")
+            continue
+
         rows = []
         heatmap_values = np.full((len(tensor_keys), len(ranks)), np.nan, dtype=np.float64)
+        summary_rows = []
 
         for col_idx, rank in enumerate(ranks):
             if rank == ref_rank:
@@ -171,7 +190,7 @@ def main():
                         "missing": True,
                     })
                     continue
-                stats = _compute_stats(ref_tensors[key], tensors[key], args.sample_size)
+                stats = _compute_stats(ref_tensors[key], tensors[key], args.sample_size, args.rtol, args.atol)
                 row = {
                     "iter": it,
                     "rank": rank,
@@ -186,9 +205,43 @@ def main():
                 if not stats.get("shape_mismatch"):
                     heatmap_values[row_idx, col_idx] = stats.get(args.metric)
 
+        for row_idx, key in enumerate(tensor_keys):
+            per_rank = [r for r in rows if r.get("tensor") == key and not r.get("missing")]
+            if not per_rank:
+                continue
+            allclose_flags = [r.get("allclose") for r in per_rank if r.get("shape_mismatch") is False]
+            equal_all = all(allclose_flags) if allclose_flags else False
+            max_abs = max((r.get("max_abs", float("nan")) for r in per_rank), default=float("nan"))
+            mean_abs = max((r.get("mean_abs", float("nan")) for r in per_rank), default=float("nan"))
+            max_rank = None
+            max_val = -1.0
+            for r in per_rank:
+                val = r.get("max_abs", -1.0)
+                if val is not None and val > max_val:
+                    max_val = val
+                    max_rank = r.get("rank")
+            summary_rows.append({
+                "iter": it,
+                "tensor": key,
+                "ref_rank": ref_rank,
+                "ranks_compared": ",".join(str(r) for r in ranks if r != ref_rank),
+                "equal_all": equal_all,
+                "max_abs": max_abs,
+                "mean_abs": mean_abs,
+                "max_abs_rank": max_rank,
+            })
+
         csv_path = os.path.join(output_dir, f"dpo_inputs_diff_iter{it}.csv")
         _write_csv(csv_path, rows)
         print(f"[OK] wrote {csv_path}")
+
+        summary_path = os.path.join(output_dir, f"dpo_inputs_summary_iter{it}.csv")
+        _write_csv(summary_path, summary_rows)
+        print(f"[OK] wrote {summary_path}")
+
+        diff_keys = [r["tensor"] for r in summary_rows if not r.get("equal_all")]
+        if diff_keys:
+            print(f"[WARN] iter {it} tensors differ across ranks: {len(diff_keys)}")
 
         if HAS_MPL and not args.no_heatmap:
             col_labels = [f"rank{r}" for r in ranks]
