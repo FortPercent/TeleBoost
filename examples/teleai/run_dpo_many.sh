@@ -178,6 +178,7 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
+    --compare-saved-losses
     --save-dumps
     --save-dumps-interval 1
     --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
@@ -218,6 +219,9 @@ EVAL_AND_LOGGING_ARGS=(
 MODE="train"
 if [[ " $* " == *" --use-saved-inputs "* ]]; then
     MODE="use_saved_inputs"
+fi
+if [[ " $* " == *" --compare-saved-losses "* ]]; then
+    MODE="${MODE}+compare_losses"
 fi
 
 SAVE_DUMPS=0
