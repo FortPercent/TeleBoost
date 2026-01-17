@@ -89,7 +89,8 @@ echo "Launching: $TRAIN_SCRIPT"
 
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
-CHECKPOINT_PATH_LOAD=/workspace/high_noise_I2V
+# CHECKPOINT_PATH_LOAD=/workspace/high_noise_I2V
+CHECKPOINT_PATH_LOAD=/workspace/models/high_noise_teletron
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
@@ -178,11 +179,12 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    --use-saved-inputs
-    --compare-saved-losses
+    # --use-saved-inputs
+    # --compare-saved-losses
     # --save-dumps
     # --save-dumps-interval 1
-    --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
+    # --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
+    --save-dumps-dir /nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/test_data/saved_inputs_test_dpo_i2v
 )
 
 MODEL_PARALLEL_ARGS=(
