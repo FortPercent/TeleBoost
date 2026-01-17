@@ -370,13 +370,16 @@ class UnifiedDataset(torch.utils.data.Dataset):
             num_frames=num_frames,
             time_division_factor=time_division_factor,
             time_division_remainder=time_division_remainder,
-        ) >> PreprocessVideoToTensor(
-            torch_dtype=torch_dtype,
-            device=device,
-            pattern=pattern,
-            min_value=min_value,
-            max_value=max_value,
-        )
+        ) 
+    
+    
+        #  >> PreprocessVideoToTensor(
+        #     torch_dtype=torch_dtype,
+        #     device=device,
+        #     pattern=pattern,
+        #     min_value=min_value,
+        #     max_value=max_value,
+        # )
         
     def search_for_cached_data_files(self, path):
         for file_name in os.listdir(path):
@@ -531,11 +534,12 @@ class UnifiedDataset(torch.utils.data.Dataset):
             if key in self.special_operator_map:
                 raw[key] = self.special_operator_map[key](raw[key])
             else:
+                # 现在这里会得到chosen和rejected的PIL列表
                 raw[key] = self.main_data_operator(raw[key])
         print(f"[UnifiedDataset __getitem__] after decode video keys: {[k for k in self.data_file_keys if k in raw]}")
 
         # ===== 2️⃣ 明确“公共字段”=====
-        # 除了 chosen / rejected，其它都视为公共字段
+        # 除了 chosen / rejected，其它都视为公共字段，prompt
         shared_fields = {
             k: v for k, v in raw.items()
             if k not in self.data_file_keys

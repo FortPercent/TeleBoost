@@ -4,6 +4,7 @@ from torchvision.transforms.functional import to_pil_image
 import numpy as np
 from einops import rearrange
 from collections import defaultdict
+from PIL import Image
 from teletron.train.utils import get_args
 from teletron.utils import set_config
 
@@ -179,6 +180,24 @@ def preprocess_image(image):
 def preprocess_images(images):
     return [preprocess_image(image) for image in images]
 
+def _raw_image_to_pil(raw_image):
+    if isinstance(raw_image, Image.Image):
+        return raw_image
+    if isinstance(raw_image, (list, tuple)) and len(raw_image) > 0:
+        raw_image = raw_image[0]
+        if isinstance(raw_image, Image.Image):
+            return raw_image
+    if torch.is_tensor(raw_image):
+        tensor = raw_image
+        if tensor.dim() >= 5:
+            tensor = tensor[0][0]
+        elif tensor.dim() == 4:
+            tensor = tensor[0]
+        return to_pil_image(
+            tensor.detach().cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        )
+    return raw_image
+
 
 def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtype=torch.bfloat16, compression=(4,8,8)):
     with torch.no_grad():
@@ -193,21 +212,15 @@ def get_encoder_features(batch, prompter, vae, tiler_kwargs, image_encoder, dtyp
         # print("images: ",height, width )
         if 'raw_last_image' in batch:
             raw_first_image = batch["raw_first_image"]
-            pil_first_image = to_pil_image(
-                raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-            )
+            pil_first_image = _raw_image_to_pil(raw_first_image)
             raw_last_image = batch['raw_last_image']
-            pil_last_image = to_pil_image(
-                raw_last_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-            )
+            pil_last_image = _raw_image_to_pil(raw_last_image)
             image_emb = encode_first_last_image(
                 vae,image_encoder, pil_first_image, pil_last_image, num_frames, height, width, dtype=dtype
             )
         elif 'raw_first_image' in batch:
             raw_first_image = batch["raw_first_image"]
-            pil_image = to_pil_image(
-                raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-            )
+            pil_image = _raw_image_to_pil(raw_first_image)
             image_emb = encode_image(vae, image_encoder, pil_image, num_frames, height, width, dtype=dtype, compression=compression)
         elif 'ref_images' in batch:
             first_image = (batch['ref_images'] + 1) / 2 * 255
@@ -277,9 +290,7 @@ def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
         )
     elif 'raw_first_image' in batch:
         raw_first_image = batch["raw_first_image"]
-        pil_image = to_pil_image(
-            raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-        )
+        pil_image = _raw_image_to_pil(raw_first_image)
         image = preprocess_image(pil_image.resize((width, height))).to(torch.cuda.current_device())
         clip_context = image_encoder.encode_image([image])
         clip_context = clip_context.to(dtype=dtype, device=torch.cuda.current_device())
@@ -309,9 +320,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_k
     
     elif 'raw_first_image' in batch:
         raw_first_image = batch["raw_first_image"]
-        pil_image = to_pil_image(
-            raw_first_image[0][0].cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-        )
+        pil_image = _raw_image_to_pil(raw_first_image)
         image = preprocess_image(pil_image.resize((width, height))).to(torch.cuda.current_device())
         msk = torch.ones(1, num_frames, height // compression[1], width // compression[2], device=torch.cuda.current_device())
 
