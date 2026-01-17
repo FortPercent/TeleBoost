@@ -193,8 +193,9 @@ def _raw_image_to_pil(raw_image):
             tensor = tensor[0][0]
         elif tensor.dim() == 4:
             tensor = tensor[0]
+        tensor = tensor.detach().cpu().clamp(0, 255)
         return to_pil_image(
-            tensor.detach().cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+            tensor.permute(1, 2, 0).numpy().astype(np.uint8)
         )
     return raw_image
 
