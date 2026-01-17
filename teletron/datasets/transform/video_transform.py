@@ -207,7 +207,16 @@ class InjectRawFirstImageFromVideo:
             return data_dict
         video = data_dict.get(self.video_key, None)
         if isinstance(video, (list, tuple)) and len(video) > 0:
-            data_dict[self.output_key] = video[0]
+            first = video[0]
+            if isinstance(first, torch.Tensor):
+                raw_first = first
+                if raw_first.dim() == 3:
+                    raw_first = raw_first.unsqueeze(0)
+                data_dict[self.output_key] = raw_first.contiguous()
+            else:
+                # PIL ---> Tensor
+                raw_first = torch.from_numpy(np.array(first)).permute(2, 0, 1).contiguous()
+                data_dict[self.output_key] = raw_first.unsqueeze(0)
         return data_dict
 
 class GenerateRawFirstLastRefImage:
