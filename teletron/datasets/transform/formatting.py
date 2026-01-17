@@ -97,3 +97,37 @@ class PackInputs:
             new_height = dst_height
             new_width = int(round(float(dst_height) / height * width))
         return new_height, new_width, dst_height, dst_width
+
+
+class PackInputsNoResize:
+    def __init__(
+        self,
+        image_keys,
+        embedding_keys=[],
+        normalize=False,
+        mean=0.5,
+        std=0.5,
+        input_scale=255.0,
+    ) -> None:
+        self.image_keys = image_keys
+        self.embedding_keys = embedding_keys
+        self.normalize = normalize
+        self.mean = mean
+        self.std = std
+        self.input_scale = input_scale
+
+    def __call__(self, data_dict):
+        input_dict = dict()
+        input_dict["struct_prompt"] = data_dict["struct_prompt"]
+        input_dict["short_prompt"] = data_dict["short_prompt"]
+        input_dict["dense_prompt"] = data_dict["dense_prompt"]
+        input_dict["frame_interval"] = data_dict["frame_interval"]
+        for image_key in self.image_keys:
+            images = data_dict[image_key]
+            if self.normalize:
+                # 这里不需要正则化，在preprocess_video里已经做过了
+                images = ((images / self.input_scale) - self.mean) / self.std
+            input_dict[image_key] = images
+        for embed_key in self.embedding_keys:
+            input_dict[embed_key] = data_dict[embed_key]
+        return input_dict

@@ -1,7 +1,9 @@
 import torch, torchvision, imageio, os, json, pandas
 import torch.distributed as dist
+import numpy as np
 import imageio.v3 as iio
 from PIL import Image
+from einops import repeat
 from teleai_data_tool.file.file_client import FileClient
 from teleai_data_tool.file.lmdb_client import LmdbClient
 from my_utils import get_global_logger
@@ -73,6 +75,7 @@ class LoadImage(DataProcessingOperator):
 
 
 
+## 输入是image PIL对象，输出是crop并resize后的PIL对象
 class ImageCropAndResize(DataProcessingOperator):
     def __init__(self, height, width, max_pixels, height_division_factor, width_division_factor):
         self.height = height
@@ -247,6 +250,49 @@ class ToAbsolutePath(DataProcessingOperator):
 
 
 
+class PreprocessImageToTensor(DataProcessingOperator):
+    def __init__(self, torch_dtype=torch.float32, device="cpu", pattern="B C H W", min_value=-1, max_value=1):
+        self.torch_dtype = torch_dtype
+        self.device = device
+        self.pattern = pattern
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def __call__(self, image: Image.Image):
+        tensor = torch.Tensor(np.array(image, dtype=np.float32))
+        tensor = tensor.to(dtype=self.torch_dtype or tensor.dtype, device=self.device or tensor.device)
+        tensor = tensor * ((self.max_value - self.min_value) / 255) + self.min_value
+        tensor = repeat(tensor, f"H W C -> {self.pattern}", **({"B": 1} if "B" in self.pattern else {}))
+        return tensor
+
+
+class PreprocessVideoToTensor(DataProcessingOperator):
+    def __init__(self, torch_dtype=torch.float32, device="cpu", pattern="B C T H W", min_value=-1, max_value=1):
+        self.torch_dtype = torch_dtype
+        self.device = device
+        self.pattern = pattern
+        self.min_value = min_value
+        self.max_value = max_value
+        parts = pattern.split()
+        image_pattern = " ".join([p for p in parts if p != "T"])
+        self.image_preprocess = PreprocessImageToTensor(
+            torch_dtype=torch_dtype,
+            device=device,
+            pattern=image_pattern,
+            min_value=min_value,
+            max_value=max_value,
+        )
+
+    def __call__(self, video):
+        if isinstance(video, Image.Image):
+            video = [video]
+        frames = [self.image_preprocess(image) for image in video]
+        t_dim = self.pattern.index("T") // 2
+        return torch.stack(frames, dim=t_dim)
+    
+
+
+
 class UnifiedDataset(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -304,6 +350,33 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 )),
             ])),
         ])
+
+    @staticmethod
+    def default_video_tensor_operator(
+        base_path="",
+        max_pixels=1920*1080, height=None, width=None,
+        height_division_factor=16, width_division_factor=16,
+        num_frames=81, time_division_factor=4, time_division_remainder=1,
+        torch_dtype=torch.float32, device="cpu", pattern="B C T H W",
+        min_value=-1, max_value=1,
+    ):
+        return UnifiedDataset.default_video_operator(
+            base_path=base_path,
+            max_pixels=max_pixels,
+            height=height,
+            width=width,
+            height_division_factor=height_division_factor,
+            width_division_factor=width_division_factor,
+            num_frames=num_frames,
+            time_division_factor=time_division_factor,
+            time_division_remainder=time_division_remainder,
+        ) >> PreprocessVideoToTensor(
+            torch_dtype=torch_dtype,
+            device=device,
+            pattern=pattern,
+            min_value=min_value,
+            max_value=max_value,
+        )
         
     def search_for_cached_data_files(self, path):
         for file_name in os.listdir(path):
@@ -316,9 +389,24 @@ class UnifiedDataset(torch.utils.data.Dataset):
     def inject_video_meta(self, data_dict):
         video = data_dict["video"]
 
-        # --- 时间维度 ---
         if "video_length" not in data_dict:
-            data_dict["video_length"] = len(video)
+            if torch.is_tensor(video):
+                if video.dim() >= 5:
+                    video_length = int(video.shape[-3])
+                elif video.dim() == 4:
+                    if video.shape[0] in (1, 3, 4) and video.shape[1] not in (1, 3, 4):
+                        video_length = int(video.shape[1])
+                    elif video.shape[1] in (1, 3, 4) and video.shape[0] not in (1, 3, 4):
+                        video_length = int(video.shape[0])
+                    else:
+                        video_length = int(video.shape[-3])
+                else:
+                    video_length = int(video.shape[0])
+            elif isinstance(video, (list, tuple)):
+                video_length = len(video)
+            else:
+                video_length = len(video)
+            data_dict["video_length"] = video_length
 
         if "frame_interval" not in data_dict:
             data_dict["frame_interval"] = 1
@@ -326,18 +414,33 @@ class UnifiedDataset(torch.utils.data.Dataset):
         if "video_valid_range" not in data_dict:
             data_dict["video_valid_range"] = (0, data_dict["video_length"])
 
-        # --- 空间维度（关键） ---
         if "video_height" not in data_dict or "video_width" not in data_dict:
-            try:
-                data_dict["video_height"] = video.height
-                data_dict["video_width"] = video.width
-            except Exception:
-                # 极端兜底（几乎不会走）
-                frame0 = video.get_frames_at([0]).data
-                data_dict["video_height"] = frame0.shape[-2]
-                data_dict["video_width"] = frame0.shape[-1]
+            if torch.is_tensor(video):
+                height = int(video.shape[-2])
+                width = int(video.shape[-1])
+            elif isinstance(video, (list, tuple)) and len(video) > 0:
+                first = video[0]
+                if torch.is_tensor(first):
+                    height = int(first.shape[-2])
+                    width = int(first.shape[-1])
+                elif hasattr(first, "size"):
+                    width, height = first.size
+                else:
+                    height = getattr(first, "height", 0)
+                    width = getattr(first, "width", 0)
+            else:
+                try:
+                    height = video.height
+                    width = video.width
+                except Exception:
+                    frame0 = video.get_frames_at([0]).data
+                    height = frame0.shape[-2]
+                    width = frame0.shape[-1]
+            data_dict["video_height"] = int(height)
+            data_dict["video_width"] = int(width)
+
         from teletron.utils import set_config
-        ds_config = set_config().get("dataset",{})
+        ds_config = set_config().get("dataset", {})
 
         data_dict["video_info"] = (ds_config["width"], ds_config["height"])
 
@@ -345,8 +448,6 @@ class UnifiedDataset(torch.utils.data.Dataset):
         data_dict.setdefault("short_prompt", "")
         data_dict.setdefault("dense_prompt", "")
         return data_dict
-
-
 
     def load_metadata(self, metadata_path):
         if metadata_path is None:
@@ -518,10 +619,23 @@ class WanDPODataset(UnifiedDataset):
     ):
         data_file_keys = (chosen_video_key, rejected_video_key)
 
-        main_data_operator = (
-            ToAbsolutePath(dataset_base_path)
-            >> LoadVideoWithFileClient(data_format="file")
+        main_data_operator = UnifiedDataset.default_video_tensor_operator(
+            base_path=dataset_base_path,
+            max_pixels=max_pixels,
+            height=height,
+            width=width,
+            height_division_factor=height_division_factor,
+            width_division_factor=width_division_factor,
+            num_frames=num_frames,
+            time_division_factor=time_division_factor,
+            time_division_remainder=time_division_remainder,
+            torch_dtype=torch.float32,  # 按需改成 bfloat16/float16
+            device="cpu",
+            pattern="B C T H W",
+            min_value=-1,
+            max_value=1,
         )
+
         
         # UnifiedDataset.default_video_operator(
         #     base_path=dataset_base_path,
