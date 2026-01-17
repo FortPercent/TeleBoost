@@ -177,6 +177,20 @@ class GeneratePoseControlImages:
 
 class GenerateRawFirstRefImage:
     def __call__(self, data_dict):
+        if "images" not in data_dict:
+            video = data_dict.get("video", None)
+            if torch.is_tensor(video):
+                if video.dim() == 5:
+                    data_dict["images"] = video[0].permute(1, 0, 2, 3).contiguous()
+                elif video.dim() == 4:
+                    if video.shape[0] in (1, 3, 4):
+                        data_dict["images"] = video.permute(1, 0, 2, 3).contiguous()
+                    else:
+                        data_dict["images"] = video.contiguous()
+                elif video.dim() == 3:
+                    data_dict["images"] = video.unsqueeze(0).contiguous()
+        if "images" not in data_dict:
+            return data_dict
         raw_first_image = copy.deepcopy(data_dict["images"][:1, ...])
         data_dict["raw_first_image"] = raw_first_image
         return data_dict
@@ -187,6 +201,33 @@ class GenerateRawFirstLastRefImage:
         data_dict["raw_first_image"] = raw_first_image
         raw_last_image = copy.deepcopy(data_dict["images"][-1:, ...])
         data_dict["raw_last_image"] = raw_last_image
+        return data_dict
+
+
+class InjectImagesFromVideoTensor:
+    def __init__(self, video_key="video", output_key="images", take_batch_index=0):
+        self.video_key = video_key
+        self.output_key = output_key
+        self.take_batch_index = take_batch_index
+
+    def __call__(self, data_dict):
+        if self.output_key in data_dict:
+            return data_dict
+        video = data_dict.get(self.video_key, None)
+        if not torch.is_tensor(video):
+            return data_dict
+        if video.dim() == 5:
+            images = video[self.take_batch_index].permute(1, 0, 2, 3).contiguous()
+        elif video.dim() == 4:
+            if video.shape[0] in (1, 3, 4):
+                images = video.permute(1, 0, 2, 3).contiguous()
+            else:
+                images = video.contiguous()
+        elif video.dim() == 3:
+            images = video.unsqueeze(0).contiguous()
+        else:
+            return data_dict
+        data_dict[self.output_key] = images
         return data_dict
     
 
@@ -264,6 +305,7 @@ class SampleImages:
     def __call__(self, data_dict):
         video = data_dict["video"]
         if self.num_frames > 1:
+            ## [T, H, W, C]
             sample_indexes = self.get_sample_indexes(data_dict, self.num_frames)
             images = video.get_frames_at(sample_indexes.tolist()).data
         else:

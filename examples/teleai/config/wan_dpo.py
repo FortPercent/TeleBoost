@@ -54,9 +54,14 @@ config = dict(
         
 
         transforms=[
+            # dict(
+            #     type="SampleImages",
+            #     num_frames=dst_num_frames,
+            # ),
             dict(
-                type="SampleImages",
-                num_frames=dst_num_frames,
+                type="InjectImagesFromVideoTensor",
+                video_key="video",
+                output_key="images",
             ),
             dict(
                 type="InjectPromptToTopLevel",
@@ -67,8 +72,9 @@ config = dict(
                 
             ),
             dict(
-                type="PackInputs",
-                deterministic=True,
+                type="PackInputsNoResize",
+                normalize=False,
+                # deterministic=True,
                 image_keys=[
                     "images",
                 ],

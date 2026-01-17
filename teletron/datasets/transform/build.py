@@ -15,10 +15,11 @@ from .video_transform import (
     LoadInputImageAsFirstFrame,
     GenerateRawFirstLastRefImage,
     GenerateRefImagesWithTimeMask,
+    InjectImagesFromVideoTensor,
     SampleDynamicFPSVideo,
     SampleWholeVideo
 )
-from .formatting import PackInputs
+from .formatting import PackInputs, PackInputsNoResize
 
 TRANSFORMS = Registry()
 TRANSFORMS.register_module(SampleDynamicFPSVideo)
@@ -29,6 +30,7 @@ TRANSFORMS.register_module(PromptGenerator)
 TRANSFORMS.register_module(SampleImages)
 TRANSFORMS.register_module(SampleImageVideo)
 TRANSFORMS.register_module(PackInputs)
+TRANSFORMS.register_module(PackInputsNoResize)
 TRANSFORMS.register_module(GenerateRefImages)
 TRANSFORMS.register_module(GenerateFirstRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithMask)
@@ -37,5 +39,6 @@ TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
 TRANSFORMS.register_module(InjectPromptToTopLevel)
 TRANSFORMS.register_module(LoadInputImageAsFirstFrame)
+TRANSFORMS.register_module(InjectImagesFromVideoTensor)
 def build_transform(params_or_type, *args, **kwargs):
     return build_module(TRANSFORMS, params_or_type, *args, **kwargs)
