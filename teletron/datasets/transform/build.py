@@ -12,9 +12,11 @@ from .video_transform import (
     GenerateFirstRefImage,
     GenerateRefImagesWithMask, 
     GenerateRawFirstRefImage,
+    InjectRawFirstImageFromVideo,
     LoadInputImageAsFirstFrame,
     GenerateRawFirstLastRefImage,
     GenerateRefImagesWithTimeMask,
+    PreprocessVideoToTensor,
     InjectImagesFromVideoTensor,
     SampleDynamicFPSVideo,
     SampleWholeVideo
@@ -35,10 +37,12 @@ TRANSFORMS.register_module(GenerateRefImages)
 TRANSFORMS.register_module(GenerateFirstRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithMask)
 TRANSFORMS.register_module(GenerateRawFirstRefImage)
+TRANSFORMS.register_module(InjectRawFirstImageFromVideo)
 TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
 TRANSFORMS.register_module(InjectPromptToTopLevel)
 TRANSFORMS.register_module(LoadInputImageAsFirstFrame)
+TRANSFORMS.register_module(PreprocessVideoToTensor)
 TRANSFORMS.register_module(InjectImagesFromVideoTensor)
 def build_transform(params_or_type, *args, **kwargs):
     return build_module(TRANSFORMS, params_or_type, *args, **kwargs)

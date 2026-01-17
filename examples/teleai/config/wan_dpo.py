@@ -59,6 +59,21 @@ config = dict(
             #     num_frames=dst_num_frames,
             # ),
             dict(
+                type="InjectRawFirstImageFromVideo",
+                video_key="video",
+                output_key="raw_first_image",  # 这个是PIL list的首帧
+            ),
+            dict(
+                type="PreprocessVideoToTensor",
+                input_key="video",
+                output_key="video",
+                pattern="B C T H W",
+                min_value=-1,
+                max_value=1,
+                skip_if_tensor=True,
+            ),
+
+            dict(
                 type="InjectImagesFromVideoTensor",
                 video_key="video",
                 output_key="images",
@@ -67,10 +82,10 @@ config = dict(
                 type="InjectPromptToTopLevel",
                 prompt_key="prompt"
             ),
-            dict(
-                type="GenerateRawFirstRefImage",
+            # dict(
+            #     type="GenerateRawFirstRefImage", # 这个是tensor的首帧
                 
-            ),
+            # ),
             dict(
                 type="PackInputsNoResize",
                 normalize=False,
@@ -83,11 +98,11 @@ config = dict(
                     "input_image"  # 保留data_dict --> input_dict新建的这个
                 ],  
             ),
-            dict(
-                type="LoadInputImageAsFirstFrame",
-                key="input_image",
-                output_key="raw_first_image",
-            )
+            # dict(
+            #     type="LoadInputImageAsFirstFrame", # 加载raw data中的input_image字段作为第一帧
+            #     key="input_image",
+            #     output_key="raw_first_image",
+            # )
         ],
     ),
     eval=dict(
