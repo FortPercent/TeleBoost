@@ -64,8 +64,8 @@ def save_teletron_release(state_dict, checkpoint_dir):
 
 if __name__ == "__main__":
     update_key_from_wan_to_teleai = True
-    model_path = [f"/nvfile-heatstorage/model_zoo/modelscope/Wan2.2-TI2V-5B/diffusion_pytorch_model-0000{i}-of-00003.safetensors" for i in range(1, 4)]
-    target_path = "/nvfile-heatstorage/AIGC_H100/shanggonghu/project/text2video/Teletron_latest/checkpoint/sgh_5B/"
+    model_path = "/workspace/models/high_noise_model/diffusion_pytorch_model.safetensors"
+    target_path = "/workspace/models/high_noise_teletron"
     state_dict = get_normal_state_dict(model_path)
     print(f"successfully load model from {model_path}")
     if update_key_from_wan_to_teleai:
