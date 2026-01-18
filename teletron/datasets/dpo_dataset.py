@@ -453,6 +453,12 @@ class UnifiedDataset(torch.utils.data.Dataset):
         data_dict.setdefault("dense_prompt", "")
         return data_dict
     def _get_dp_rank(self):
+        env_local = os.environ.get("LOCAL_RANK")
+        if env_local is not None:
+            try:
+                return int(env_local)
+            except ValueError:
+                pass
         try:
             return mpu.get_data_parallel_rank(with_context_parallel=True)
         except TypeError:
