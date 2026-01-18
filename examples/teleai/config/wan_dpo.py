@@ -41,7 +41,7 @@ config = dict(
         height=480,
         width=832,
         # width=1280,
-        num_frames=49,
+        num_frames=81,
 
         # === 这些原脚本是写死的，现在 config 化 ===
         time_division_factor=4,
