@@ -20,6 +20,9 @@ class DumpTensorIO:
         safe_tag = self._safe_tag(tag)
         return os.path.join(self.tensor_dir, f"{int(dump_id):04d}_{safe_tag}_rank{int(rank)}.pt")
 
+    def tensor_path(self, dump_id, tag, rank):
+        return self._tensor_path(dump_id, tag, rank)
+
     def _compare_path(self, rank):
         path = os.environ.get("WAN_DPO_PREVAE_COMPARE_FILE")
         if path:
