@@ -316,7 +316,15 @@ class PreprocessVideoToTensor:
             except Exception:
                 dump_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         tag = f"prevae_input_video_{branch}"
+        tensor_path = self.dump_loader.tensor_path(pair_id, tag, dump_rank)
+        path_exists = os.path.exists(tensor_path)
         payload = self.dump_loader.load_tensors(pair_id, tag, dump_rank)
+        logger = get_global_logger()
+        payload_keys = sorted(payload.keys()) if isinstance(payload, dict) else None
+        logger.info(
+            f"[DPO compare load] pair_id={pair_id} branch={branch} dump_rank={dump_rank} "
+            f"path={tensor_path} exists={path_exists} loaded={payload is not None} keys={payload_keys}"
+        )
         expected = payload.get("input_video") if isinstance(payload, dict) else None
         actual = data_dict.get(self.output_key)
         if torch.is_tensor(actual):
@@ -349,7 +357,6 @@ class PreprocessVideoToTensor:
             },
             writer_rank,
         )
-        logger = get_global_logger()
         logger.info(
             f"[DPO compare] pair_id={pair_id} branch={branch} dump_rank={dump_rank} "
             f"result={compare}"
