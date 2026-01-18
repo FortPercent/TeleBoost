@@ -7,8 +7,8 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.67.246"
-MASTER_PORT="11322"
+MASTER_ADDR="10.244.67.247"
+MASTER_PORT="11325"
 
 while [[ $# -gt 0 ]]; do
     case $1 in

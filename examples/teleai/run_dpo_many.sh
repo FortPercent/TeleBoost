@@ -67,13 +67,13 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/V
 # export PROF_SAVE_PATH="./dpo_train_profile"
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=2
+CP=4
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=16
-N_GPU_FOR_DATA=8
+N_GPU_FOR_TRAIN=12
+N_GPU_FOR_DATA=3
 
 # EXPR_NAME=sr_720p
 # EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
