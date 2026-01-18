@@ -325,6 +325,30 @@ class PreprocessVideoToTensor:
             expected = expected.detach().cpu()
         compare = self.dump_loader.compare_tensors(expected, actual, rtol=self.compare_rtol, atol=self.compare_atol)
         self.compare_count += 1
+        writer_rank = os.environ.get("LOCAL_RANK")
+        if writer_rank is None:
+            writer_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        else:
+            writer_rank = int(writer_rank)
+        try:
+            pair_id_value = int(pair_id) if not torch.is_tensor(pair_id) else int(pair_id.item())
+        except (TypeError, ValueError, RuntimeError):
+            pair_id_value = pair_id
+        try:
+            dump_rank_value = int(dump_rank)
+        except (TypeError, ValueError):
+            dump_rank_value = dump_rank
+        self.dump_loader.write_compare_result(
+            {
+                "tag": "prevae_compare",
+                "pair_id": pair_id_value,
+                "branch": branch,
+                "dump_rank": dump_rank_value,
+                "writer_rank": writer_rank,
+                "result": compare,
+            },
+            writer_rank,
+        )
         logger = get_global_logger()
         logger.info(
             f"[DPO compare] pair_id={pair_id} branch={branch} dump_rank={dump_rank} "
