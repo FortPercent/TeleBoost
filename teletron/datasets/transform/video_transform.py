@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from math import floor, ceil
 from func_timeout import func_set_timeout
+from megatron.core import mpu
+from my_utils import DumpTensorIO, get_global_logger
 
 
 class MaskGenerator:
@@ -248,6 +250,12 @@ class PreprocessVideoToTensor:
         self.min_value = min_value
         self.max_value = max_value
         self.skip_if_tensor = skip_if_tensor
+        self.compare_enabled = os.environ.get("WAN_DPO_PREVAE_COMPARE", "0") == "1"
+        self.compare_rtol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5"))
+        self.compare_atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
+        self.compare_limit = int(os.environ.get("WAN_DPO_PREVAE_COMPARE_LIMIT", "0"))
+        self.compare_count = 0
+        self.dump_loader = DumpTensorIO()
 
         parts = pattern.split()
         self.t_dim = parts.index("T")
@@ -271,15 +279,57 @@ class PreprocessVideoToTensor:
         if torch.is_tensor(video):
             if self.skip_if_tensor:
                 data_dict[self.output_key] = video
+                self._compare_with_dump(data_dict)
                 return data_dict
             data_dict[self.output_key] = video.to(dtype=self.torch_dtype, device=self.device)
+            self._compare_with_dump(data_dict)
             return data_dict
         from PIL import Image
         if isinstance(video, Image.Image):
             video = [video]
         frames = [self._image_to_tensor(image) for image in video]
         data_dict[self.output_key] = torch.stack(frames, dim=self.t_dim)
+        self._compare_with_dump(data_dict)
         return data_dict
+
+    def _compare_with_dump(self, data_dict):
+        if not self.compare_enabled:
+            return
+        if self.compare_limit > 0 and self.compare_count >= self.compare_limit:
+            return
+        try:
+            cp_rank = mpu.get_tensor_context_parallel_rank()
+        except Exception:
+            cp_rank = 0
+        if cp_rank != 0:
+            return
+        pair_id = data_dict.get("dpo_pair_id")
+        branch = data_dict.get("dpo_branch")
+        if pair_id is None or not branch:
+            return
+        dump_rank = os.environ.get("WAN_DPO_DUMP_RANK")
+        if dump_rank is None:
+            try:
+                dump_rank = mpu.get_data_parallel_rank(with_context_parallel=True)
+            except TypeError:
+                dump_rank = mpu.get_data_parallel_rank()
+            except Exception:
+                dump_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        tag = f"prevae_input_video_{branch}"
+        payload = self.dump_loader.load_tensors(pair_id, tag, dump_rank)
+        expected = payload.get("input_video") if isinstance(payload, dict) else None
+        actual = data_dict.get(self.output_key)
+        if torch.is_tensor(actual):
+            actual = actual.detach().cpu()
+        if torch.is_tensor(expected):
+            expected = expected.detach().cpu()
+        compare = self.dump_loader.compare_tensors(expected, actual, rtol=self.compare_rtol, atol=self.compare_atol)
+        self.compare_count += 1
+        logger = get_global_logger()
+        logger.info(
+            f"[DPO compare] pair_id={pair_id} branch={branch} dump_rank={dump_rank} "
+            f"result={compare}"
+        )
 
 
 class InjectImagesFromVideoTensor:

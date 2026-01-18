@@ -65,6 +65,18 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/yuc/env/t
 export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/Video-Depth-Anything/
 # export MEMORY_SNAPSHOT=1
 # export PROF_SAVE_PATH="./dpo_train_profile"
+# Compare with DiffSynth pre-VAE dumps (dataset raw + pre-VAE tensors).
+export WAN_DPO_PREVAE_COMPARE=1
+# Raw dataset JSONL (supports {rank} placeholder or *_rank{rank}.jsonl auto suffix).
+export WAN_DPO_DATASET_DUMP_FILE="./dpo_dumps/dataset_raw.jsonl"
+# Pre-VAE tensor dump directory from DiffSynth.
+export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
+# Optional compare controls.
+# export WAN_DPO_PREVAE_COMPARE_LIMIT=100
+# export WAN_DPO_PREVAE_COMPARE_RTOL=1e-5
+# export WAN_DPO_PREVAE_COMPARE_ATOL=1e-8
+# If your dump rank differs from Teletron dp rank, set it explicitly.
+# export WAN_DPO_DUMP_RANK=0
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
 CP=4

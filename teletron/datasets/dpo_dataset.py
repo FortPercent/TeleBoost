@@ -7,6 +7,7 @@ from einops import repeat
 from teleai_data_tool.file.file_client import FileClient
 from teleai_data_tool.file.lmdb_client import LmdbClient
 from my_utils import get_global_logger
+from megatron.core import mpu
 
 
 class DataProcessingPipeline:
@@ -451,8 +452,69 @@ class UnifiedDataset(torch.utils.data.Dataset):
         data_dict.setdefault("short_prompt", "")
         data_dict.setdefault("dense_prompt", "")
         return data_dict
+    def _get_dp_rank(self):
+        try:
+            return mpu.get_data_parallel_rank(with_context_parallel=True)
+        except TypeError:
+            return mpu.get_data_parallel_rank()
+        except Exception:
+            if dist.is_available() and dist.is_initialized():
+                return dist.get_rank()
+            env_rank = os.environ.get("RANK")
+            return int(env_rank) if env_rank is not None else 0
+
+    def _resolve_raw_dataset_path(self):
+        raw_path = os.environ.get("WAN_DPO_DATASET_RAW_FILE") or os.environ.get("WAN_DPO_DATASET_DUMP_FILE")
+        if not raw_path:
+            return None
+        rank = self._get_dp_rank()
+        if "{rank}" in raw_path:
+            return raw_path.format(rank=rank)
+        if os.path.exists(raw_path):
+            return raw_path
+        root, ext = os.path.splitext(raw_path)
+        candidate = f"{root}_rank{rank}{ext}"
+        if os.path.exists(candidate):
+            return candidate
+        return raw_path
+
+    def _load_raw_dataset(self, path):
+        records = []
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if record.get("tag") != "dataset.raw":
+                    continue
+                stage = record.get("stage")
+                if stage is not None and stage != "raw":
+                    continue
+                payload = record.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                payload = payload.copy()
+                dump_id = record.get("dump_id")
+                if dump_id is not None and "dpo_pair_id" not in payload:
+                    payload["dpo_pair_id"] = dump_id
+                records.append((dump_id, payload))
+        records.sort(key=lambda x: x[0] if x[0] is not None else -1)
+        return [payload for _, payload in records]
+
+
 
     def load_metadata(self, metadata_path):
+        if os.environ.get("WAN_DPO_PREVAE_COMPARE", "0") == "1":
+            raw_path = self._resolve_raw_dataset_path()
+            if raw_path:
+                self.data = self._load_raw_dataset(raw_path)
+                logger = self._get_logger()
+                logger.info(f"[UnifiedDataset] loaded raw dump: {raw_path} count={len(self.data)}")
+                return
         if metadata_path is None:
             print("No metadata_path. Searching for cached data files.")
             self.search_for_cached_data_files(self.base_path)
@@ -556,6 +618,9 @@ class UnifiedDataset(torch.utils.data.Dataset):
             # ---- 核心：公共字段 + 私有 video ----
             data_i = shared_fields.copy()
             data_i["video"] = raw[key]
+            pair_id = raw.get("dpo_pair_id", data_id)
+            data_i["dpo_pair_id"] = int(pair_id)
+            data_i["dpo_branch"] = key
 
             # 注入 video meta（video_length / height / width / fps 等）
             data_i = self.inject_video_meta(data_i)
