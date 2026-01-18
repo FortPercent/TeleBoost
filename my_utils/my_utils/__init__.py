@@ -15,5 +15,6 @@ from .DITProfiler import create_profiler_context
 from .clockSyncUtils import ClockSynchronizer
 from .etcd_utils import etcd_barrier
 from .oom_restore import set_oom_flag, check_oom_flag
+from .dump_utils import DumpTensorIO
 __all__ = ["register_hooks", "print_model_params", "tensor_md5", "DebugLayer", "filename", "get_logger", "GPU_Memory_Tracker", "ProfilerWrapper"
-           "pad_for_sequence_parallel", "remove_pad_by_value"]
+           "pad_for_sequence_parallel", "remove_pad_by_value", "DumpTensorIO"]
