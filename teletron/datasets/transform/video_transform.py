@@ -309,6 +309,13 @@ class PreprocessVideoToTensor:
             return
         dump_rank = os.environ.get("WAN_DPO_DUMP_RANK")
         if dump_rank is None:
+            env_local = os.environ.get("LOCAL_RANK")
+            if env_local is not None:
+                try:
+                    dump_rank = int(env_local)
+                except ValueError:
+                    dump_rank = None
+        if dump_rank is None:
             try:
                 dump_rank = mpu.get_data_parallel_rank(with_context_parallel=True)
             except TypeError:
