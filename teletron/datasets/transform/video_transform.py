@@ -235,7 +235,7 @@ class PreprocessVideoToTensor:
         self,
         input_key="video",
         output_key="video",
-        torch_dtype=torch.float32,
+        torch_dtype=torch.float16,
         device="cpu",
         pattern="B C T H W",
         min_value=-1,
