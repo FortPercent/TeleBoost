@@ -1,5 +1,6 @@
 import os
 import math
+import torch
 
 dst_size = (832, 480)
 dst_fps = 16
@@ -67,6 +68,7 @@ config = dict(
                 type="PreprocessVideoToTensor",
                 input_key="video",
                 output_key="video",
+                torch_dtype=torch.bfloat16,
                 pattern="B C T H W",
                 min_value=-1,
                 max_value=1,
