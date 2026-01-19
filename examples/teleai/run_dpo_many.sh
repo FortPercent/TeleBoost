@@ -8,7 +8,7 @@ set -e
 NODE_RANK=""
 NNODES=""
 MASTER_ADDR="10.244.48.175"
-MASTER_PORT="11320"
+MASTER_PORT="11329"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -68,7 +68,8 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/V
 # Compare with DiffSynth pre-VAE dumps (dataset raw + pre-VAE tensors).
 export WAN_DPO_PREVAE_COMPARE=1
 # Raw dataset JSONL (supports {rank} placeholder or *_rank{rank}.jsonl auto suffix).
-export WAN_DPO_DATASET_DUMP_FILE="./dpo_dumps/dataset_raw.jsonl"
+export WAN_DPO_DATASET_DUMP_FILE="./dpo_dumps/dataset_raw_rank{rank}.jsonl"
+
 # Pre-VAE tensor dump directory from DiffSynth.
 export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
 # Optional compare controls.
@@ -79,13 +80,13 @@ export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
 # export WAN_DPO_DUMP_RANK=0
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=4
+CP=2
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=12
-N_GPU_FOR_DATA=3
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
 # EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
