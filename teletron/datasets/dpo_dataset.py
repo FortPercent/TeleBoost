@@ -1,3 +1,16 @@
+# Example usage:
+# from teletron.datasets.dpo_dataset import WanDPODataset
+# dataset = WanDPODataset(
+#     transforms=[],
+#     dataset_base_path="/data",
+#     dataset_metadata_path="/data/pairs.csv",
+#     chosen_video_key="chosen",
+#     rejected_video_key="rejected",
+#     height=480,
+#     width=832,
+#     num_frames=49,
+# )
+# sample = dataset[0]
 import torch, torchvision, imageio, os, json, pandas
 import torch.distributed as dist
 import numpy as np
