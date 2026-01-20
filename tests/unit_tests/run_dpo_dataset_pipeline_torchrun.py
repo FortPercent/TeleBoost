@@ -279,6 +279,14 @@ def _run_pipeline(rank):
             if not isinstance(raw_entry, dict):
                 raise AssertionError("external dump mode requires raw dataset entries")
             compare_id = record_data_id if record_data_id is not None else data_id
+            prompt_value = raw_entry.get("prompt") if isinstance(raw_entry, dict) else None
+            if prompt_value is not None:
+                logging.info(
+                    "compare prompt rank=%s data_id=%s prompt=%s",
+                    rank,
+                    compare_id,
+                    prompt_value,
+                )
             preprocess = PreprocessVideoToTensor(
                 input_key="video",
                 output_key="video",
