@@ -10,7 +10,8 @@ import torch
 from PIL import Image
 
 import teletron.utils as teletron_utils
-from teletron.datasets.dpo_dataset import WanDPODataset
+from teletron.datasets.dpo_dataset import UnifiedDataset, WanDPODataset
+from teletron.datasets.transform.build import build_transform
 from teletron.datasets.transform.video_transform import PreprocessVideoToTensor
 
 
@@ -108,6 +109,13 @@ def _load_video_for_key(dataset, raw_entry, key):
     return dataset.main_data_operator(value)
 
 
+def _pick_record_for_rank(records, rank):
+    for dump_id, data_id, payload in records:
+        if data_id == rank:
+            return dump_id, data_id, payload
+    return records[rank % len(records)]
+
+
 def _run_pipeline(rank):
     height = 480
     width = 832
@@ -123,12 +131,9 @@ def _run_pipeline(rank):
     with tempfile.TemporaryDirectory() as temp_dir:
         tmp_path = Path(temp_dir)
         if use_external_dump:
-            os.environ["WAN_DPO_PREVAE_COMPARE"] = "1"
+            os.environ["WAN_DPO_PREVAE_COMPARE"] = "0"
             os.environ.setdefault("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5")
             os.environ.setdefault("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8")
-            os.environ["WAN_DPO_PREVAE_COMPARE_FILE"] = str(
-                tmp_path / f"prevae_compare_rank{rank}.jsonl"
-            )
             dataset_base_path = os.environ.get("WAN_DPO_DATASET_BASE_PATH", "")
             metadata_path = external_raw_dump
             part_files = []
@@ -231,6 +236,7 @@ def _run_pipeline(rank):
             },
         ]
 
+<<<<<<< HEAD
         dataset = WanDPODataset(
             transforms=transforms,
             dataset_base_path=dataset_base_path,
@@ -270,16 +276,19 @@ def _run_pipeline(rank):
         #     assert torch.max(item["images"]).item() <= 1.001
         #     assert torch.min(item["images"]).item() >= -1.001
 
+=======
+>>>>>>> 7503489c42d0de2ef8919c970cf2bba8c91c1aac
         if use_external_dump:
             raw_records = _load_raw_records(metadata_path)
             if not raw_records:
                 raise AssertionError("external dump mode requires raw dataset records")
-            record_idx = data_id % len(raw_records)
-            _, record_data_id, raw_entry = raw_records[record_idx]
+            _, record_data_id, raw_entry = _pick_record_for_rank(raw_records, rank)
             if not isinstance(raw_entry, dict):
                 raise AssertionError("external dump mode requires raw dataset entries")
-            compare_id = record_data_id if record_data_id is not None else data_id
-            prompt_value = raw_entry.get("prompt") if isinstance(raw_entry, dict) else None
+            if record_data_id is None:
+                raise AssertionError("external dump mode requires data_id for compare")
+            compare_id = record_data_id
+            prompt_value = raw_entry.get("prompt")
             if prompt_value is not None:
                 logging.info(
                     "compare prompt rank=%s data_id=%s prompt=%s",
@@ -287,27 +296,51 @@ def _run_pipeline(rank):
                     compare_id,
                     prompt_value,
                 )
-            preprocess = PreprocessVideoToTensor(
-                input_key="video",
-                output_key="video",
-                torch_dtype=torch.bfloat16,
-                pattern="B C T H W",
-                min_value=-1,
-                max_value=1,
-                skip_if_tensor=True,
+
+            main_data_operator = UnifiedDataset.default_video_operator(
+                base_path=dataset_base_path,
+                max_pixels=max_pixels,
+                height=height,
+                width=width,
+                height_division_factor=16,
+                width_division_factor=16,
+                num_frames=num_frames,
+                time_division_factor=4,
+                time_division_remainder=1,
             )
-            preprocess.compare_enabled = False
             rtol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5"))
             atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
+            shared_fields = {k: v for k, v in raw_entry.items() if k not in ("chosen", "rejected")}
             for branch in ("chosen", "rejected"):
-                video = _load_video_for_key(dataset, raw_entry, branch)
-                if video is None:
-                    raise AssertionError(f"missing video for branch={branch}")
-                data_dict = {"video": video}
-                actual = preprocess(data_dict)["video"].detach().cpu()
+                video_path = raw_entry.get(branch)
+                if not video_path:
+                    raise AssertionError(f"missing video path for branch={branch}")
+                video = main_data_operator(video_path)
+                data_dict = shared_fields.copy()
+                data_dict["video"] = video
+                data_dict.setdefault("frame_interval", 1)
+                data_dict.setdefault("dpo_pair_id", compare_id)
+                data_dict.setdefault("dpo_branch", branch)
+                transform_ops = [build_transform(cfg) for cfg in transforms]
+                preprocess_index = None
+                for idx, op in enumerate(transform_ops):
+                    if isinstance(op, PreprocessVideoToTensor):
+                        op.compare_enabled = False
+                        preprocess_index = idx
+                        break
+                if preprocess_index is None:
+                    raise AssertionError("missing PreprocessVideoToTensor in pipeline")
+                actual = None
+                for idx, op in enumerate(transform_ops):
+                    data_dict = op(data_dict)
+                    if data_dict is None:
+                        raise AssertionError(f"pipeline returned None for branch={branch}")
+                    if idx == preprocess_index:
+                        actual = data_dict.get("video")
+                if actual is None:
+                    raise AssertionError(f"missing preprocessed video for branch={branch}")
+                actual = actual.detach().cpu()
                 expected = _find_prevae_tensor(external_prevae_dir, compare_id, branch, rank)
-                if expected is None:
-                    expected = _find_prevae_tensor(external_prevae_dir, data_id, branch, rank)
                 if expected is None:
                     raise AssertionError(f"missing prevae dump for id={compare_id} branch={branch}")
                 expected = expected.detach().cpu()
@@ -323,6 +356,44 @@ def _run_pipeline(rank):
                         f"prevae mismatch branch={branch} max={float(diff.max())} "
                         f"mean={float(diff.mean())}"
                     )
+        else:
+            dataset = WanDPODataset(
+                transforms=transforms,
+                dataset_base_path=dataset_base_path,
+                dataset_metadata_path=str(metadata_path),
+                data_path_list=[str(path) for path in part_files] if part_files else None,
+                chosen_video_key="chosen",
+                rejected_video_key="rejected",
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                max_pixels=max_pixels,
+                time_division_factor=4,
+                time_division_remainder=1,
+                height_division_factor=16,
+                width_division_factor=16,
+                dataset_repeat=1,
+            )
+
+            data_id = 0
+            sample = dataset[data_id]
+            assert set(sample.keys()) == {"chosen", "rejected"}
+
+            for branch in ("chosen", "rejected"):
+                item = sample[branch]
+                assert item["images"].shape == (1, 3, height, width)
+                assert item["images"].dtype == torch.bfloat16
+                assert item["raw_first_image"].shape == (1, 3, height, width)
+                assert item["raw_first_image"].dtype == torch.uint8
+                if ref_path is not None:
+                    assert item["input_image"] == ref_path.name
+                assert item["frame_interval"] == 1
+                if part_prompt is not None:
+                    assert item["short_prompt"] == [part_prompt]
+                    assert item["dense_prompt"] == [part_prompt]
+                    assert item["struct_prompt"] == [part_prompt]
+                assert torch.max(item["images"]).item() <= 1.001
+                assert torch.min(item["images"]).item() >= -1.001
 
 
 def main():
