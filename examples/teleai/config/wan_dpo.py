@@ -182,7 +182,8 @@ config = dict(
             type="teleai_encoder", # teleai_encoder
             encoder_schema=['context', 'img_emb_y', 'latents'],
             vae=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                # path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/models/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
                 tiler_kwargs=dict(
                     tiled=False,
                     tile_size=(34, 34),
@@ -191,7 +192,8 @@ config = dict(
                 torch_compile=False
             ),
             text_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+                # path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+                path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/models/Wan-AI/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth",
                 tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
             ),
             image_encoder=dict(
