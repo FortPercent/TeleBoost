@@ -71,6 +71,10 @@ class WanVideoEncoder(BaseEncoder):
     def setup(self) -> None:
         """加载所有必需的WAN模型组件到指定设备。"""
         print(f"在设备 {self.device} 上设置 WanVideoEncoder...")
+        print(
+            "Init VAE params: "
+            f"path={self.vae_path} tiler_kwargs={self.tiler_kwargs}"
+        )
         
         print(f"加载 VAE 模型... {self.vae_path}")
         self.vae = WanVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)

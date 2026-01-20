@@ -102,6 +102,11 @@ class TeleaiEncoder(BaseEncoder):
     def setup(self) -> None:
         """加载所有必需的teleai模型组件到指定设备。"""
         print(f"在设备 {self.device} 上设置 TeleaiEncoder...")
+        print(
+            "Init VAE params: "
+            f"type={self.vae_type} path={self.vae_path} "
+            f"tiler_kwargs={self.tiler_kwargs} torch_compile={self.vae_compile}"
+        )
         print(f"加载 VAE 模型... {self.vae_path}")
         if self.vae_type == "TeleaiVideoVAE_2_1":
             self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
