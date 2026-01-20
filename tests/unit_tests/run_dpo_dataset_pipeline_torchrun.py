@@ -10,9 +10,7 @@ import torch
 from PIL import Image
 
 import teletron.utils as teletron_utils
-from teletron.datasets.dpo_dataset import UnifiedDataset, WanDPODataset
-from teletron.datasets.transform.build import build_transform
-from teletron.datasets.transform.video_transform import PreprocessVideoToTensor
+from teletron.datasets.dpo_dataset import WanDPODataset
 
 
 def _write_image(path, color, size):
@@ -85,30 +83,6 @@ def _load_raw_records(path):
     return records
 
 
-def _find_prevae_tensor(prevae_dir, dump_id, branch, rank):
-    try:
-        dump_id = int(dump_id)
-    except (TypeError, ValueError):
-        return None
-    filename = f"{dump_id:04d}_prevae_input_video_{branch}_rank{int(rank)}.pt"
-    path = Path(prevae_dir) / filename
-    if not path.exists():
-        return None
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    if isinstance(payload, dict):
-        return payload.get("input_video")
-    return None
-
-
-def _load_video_for_key(dataset, raw_entry, key):
-    value = raw_entry.get(key)
-    if value is None:
-        return None
-    if key in dataset.special_operator_map:
-        return dataset.special_operator_map[key](value)
-    return dataset.main_data_operator(value)
-
-
 def _run_pipeline(rank):
     height = 480
     width = 832
@@ -124,9 +98,12 @@ def _run_pipeline(rank):
     with tempfile.TemporaryDirectory() as temp_dir:
         tmp_path = Path(temp_dir)
         if use_external_dump:
-            os.environ["WAN_DPO_PREVAE_COMPARE"] = "0"
+            os.environ["WAN_DPO_PREVAE_COMPARE"] = "1"
             os.environ.setdefault("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5")
             os.environ.setdefault("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8")
+            os.environ["WAN_DPO_PREVAE_COMPARE_FILE"] = str(
+                tmp_path / f"prevae_compare_rank{rank}.jsonl"
+            )
             dataset_base_path = os.environ.get("WAN_DPO_DATASET_BASE_PATH", "")
             metadata_path = external_raw_dump
             part_files = []
@@ -233,106 +210,80 @@ def _run_pipeline(rank):
             raw_records = _load_raw_records(metadata_path)
             if not raw_records:
                 raise AssertionError("external dump mode requires raw dataset records")
-            main_data_operator = UnifiedDataset.default_video_operator(
-                base_path=dataset_base_path,
-                max_pixels=max_pixels,
+            dataset = WanDPODataset(
+                transforms=transforms,
+                dataset_base_path=dataset_base_path,
+                dataset_metadata_path=str(metadata_path),
+                data_path_list=None,
+                chosen_video_key="chosen",
+                rejected_video_key="rejected",
                 height=height,
                 width=width,
-                height_division_factor=16,
-                width_division_factor=16,
                 num_frames=num_frames,
+                max_pixels=max_pixels,
                 time_division_factor=4,
                 time_division_remainder=1,
+                height_division_factor=16,
+                width_division_factor=16,
+                dataset_repeat=1,
             )
-            rtol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5"))
-            atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
+            if len(dataset) != len(raw_records):
+                raise AssertionError(
+                    f"raw record count mismatch rank={rank} dataset_len={len(dataset)} "
+                    f"raw_len={len(raw_records)}"
+                )
+            compare_file = Path(os.environ["WAN_DPO_PREVAE_COMPARE_FILE"])
             for record_idx, (_, record_data_id, raw_entry) in enumerate(raw_records):
-                if not isinstance(raw_entry, dict):
-                    raise AssertionError("external dump mode requires raw dataset entries")
                 if record_data_id is None:
                     raise AssertionError("external dump mode requires data_id for compare")
-                compare_id = record_data_id
-                prompt_value = raw_entry.get("prompt")
+                prompt_value = raw_entry.get("prompt") if isinstance(raw_entry, dict) else None
                 if prompt_value is not None:
                     logging.info(
                         "compare prompt rank=%s data_id=%s idx=%s prompt=%s",
                         rank,
-                        compare_id,
+                        record_data_id,
                         record_idx,
                         prompt_value,
                     )
+                _ = dataset[record_idx]
 
-                shared_fields = {
-                    k: v for k, v in raw_entry.items() if k not in ("chosen", "rejected")
-                }
-                for branch in ("chosen", "rejected"):
-                    video_path = raw_entry.get(branch)
-                    if not video_path:
-                        raise AssertionError(f"missing video path for branch={branch}")
-                    video = main_data_operator(video_path)
-                    data_dict = shared_fields.copy()
-                    data_dict["video"] = video
-                    data_dict.setdefault("frame_interval", 1)
-                    data_dict.setdefault("dpo_pair_id", compare_id)
-                    data_dict.setdefault("dpo_branch", branch)
-                    transform_ops = [build_transform(cfg) for cfg in transforms]
-                    preprocess_index = None
-                    for idx, op in enumerate(transform_ops):
-                        if isinstance(op, PreprocessVideoToTensor):
-                            op.compare_enabled = False
-                            preprocess_index = idx
-                            break
-                    if preprocess_index is None:
-                        raise AssertionError("missing PreprocessVideoToTensor in pipeline")
-                    actual = None
-                    for idx, op in enumerate(transform_ops):
-                        data_dict = op(data_dict)
-                        if data_dict is None:
-                            raise AssertionError(f"pipeline returned None for branch={branch}")
-                        if idx == preprocess_index:
-                            actual = data_dict.get("video")
-                    if actual is None:
-                        raise AssertionError(f"missing preprocessed video for branch={branch}")
-                    actual = actual.detach().cpu()
-                    expected = _find_prevae_tensor(external_prevae_dir, compare_id, branch, rank)
-                    if expected is None:
-                        raise AssertionError(f"missing prevae dump for id={compare_id} branch={branch}")
-                    expected = expected.detach().cpu()
-                    if actual.shape != expected.shape or actual.dtype != expected.dtype:
-                        raise AssertionError(
-                            f"prevae mismatch branch={branch} "
-                            f"shape/dtype actual={tuple(actual.shape)} {actual.dtype} "
-                            f"expected={tuple(expected.shape)} {expected.dtype}"
-                        )
-                    diff = (actual.float() - expected.float()).abs()
-                    max_diff = float(diff.max())
-                    mean_diff = float(diff.mean())
-                    if not torch.allclose(actual, expected, rtol=rtol, atol=atol):
-                        logging.error(
-                            "compare failed rank=%s data_id=%s idx=%s branch=%s max=%s mean=%s rtol=%s atol=%s",
-                            rank,
-                            compare_id,
-                            record_idx,
-                            branch,
-                            max_diff,
-                            mean_diff,
-                            rtol,
-                            atol,
-                        )
-                        raise AssertionError(
-                            f"prevae mismatch branch={branch} max={max_diff} mean={mean_diff}"
-                        )
-                    logging.info(
-                        "compare ok rank=%s data_id=%s idx=%s branch=%s max=%s mean=%s rtol=%s atol=%s",
-                        rank,
-                        compare_id,
-                        record_idx,
-                        branch,
-                        max_diff,
-                        mean_diff,
-                        rtol,
-                        atol,
-                    )
+            cp_rank = 0
+            try:
+                from megatron.core import mpu
+                cp_rank = mpu.get_tensor_context_parallel_rank()
+            except Exception:
+                cp_rank = 0
+            if cp_rank == 0:
+                if not compare_file.exists():
+                    raise AssertionError(f"compare output missing: {compare_file}")
+                results = []
+                with open(compare_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            results.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+                if not results:
+                    raise AssertionError("compare output is empty")
+                failures = [
+                    r for r in results
+                    if not (isinstance(r, dict) and isinstance(r.get("result"), dict) and r["result"].get("allclose"))
+                ]
+                logging.info(
+                    "compare summary rank=%s total=%s ok=%s fail=%s",
+                    rank,
+                    len(results),
+                    len(results) - len(failures),
+                    len(failures),
+                )
+                if failures:
+                    sample = failures[0]
+                    raise AssertionError(f"compare failed: {sample}")
+            else:
+                logging.info("skip compare summary on cp_rank=%s", cp_rank)
         else:
             dataset = WanDPODataset(
                 transforms=transforms,
