@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import os
@@ -12,8 +13,8 @@ import teletron.utils as teletron_utils
 from teletron.datasets.dpo_dataset import WanDPODataset
 
 
-def _write_image(path, color):
-    image = Image.fromarray(np.full((32, 32, 3), color, dtype=np.uint8))
+def _write_image(path, color, size):
+    image = Image.fromarray(np.full((size[1], size[0], 3), color, dtype=np.uint8))
     image.save(path)
 
 
@@ -37,8 +38,10 @@ def _init_dist_from_torchrun():
 
 
 def _run_pipeline(rank):
-    height = 32
-    width = 32
+    height = 480
+    width = 832
+    num_frames = 49
+    max_pixels = 400000
 
     teletron_utils.set_config = lambda: {"dataset": {"width": width, "height": height}}
 
@@ -47,25 +50,56 @@ def _run_pipeline(rank):
         chosen_path = tmp_path / f"chosen_rank{rank}.png"
         rejected_path = tmp_path / f"rejected_rank{rank}.png"
         ref_path = tmp_path / f"ref_rank{rank}.png"
-        _write_image(chosen_path, 64)
-        _write_image(rejected_path, 192)
-        _write_image(ref_path, 128)
+        _write_image(chosen_path, 64, (64, 64))
+        _write_image(rejected_path, 192, (64, 64))
+        _write_image(ref_path, 128, (64, 64))
 
-        prompt = f"unit test prompt rank {rank}"
-        metadata_path = tmp_path / f"meta_rank{rank}.jsonl"
-        metadata_path.write_text(
+        raw_prompt = f"raw prompt rank {rank}"
+        metadata_prompt = f"metadata prompt rank {rank}"
+
+        dataset_raw_base = tmp_path / "dataset_raw.jsonl"
+        os.environ["WAN_DPO_PREVAE_COMPARE"] = "1"
+        os.environ["WAN_DPO_PREVAE_COMPARE_LIMIT"] = "1"
+        os.environ["WAN_DPO_PREVAE_TENSOR_DIR"] = str(tmp_path / "dpo_dumps")
+        os.environ["WAN_DPO_DATASET_DUMP_FILE"] = str(dataset_raw_base)
+
+        dataset_raw_rank = tmp_path / f"dataset_raw_rank{rank}.jsonl"
+        dataset_raw_rank.write_text(
             json.dumps(
                 {
-                    "chosen": chosen_path.name,
-                    "rejected": rejected_path.name,
-                    "prompt": prompt,
-                    "input_image": ref_path.name,
-                    "dpo_pair_id": rank,
+                    "tag": "dataset.raw",
+                    "stage": "raw",
+                    "dump_id": rank,
+                    "payload": {
+                        "chosen": chosen_path.name,
+                        "rejected": rejected_path.name,
+                        "prompt": raw_prompt,
+                        "input_image": ref_path.name,
+                        "dpo_pair_id": rank,
+                    },
                 }
             )
             + "\n",
             encoding="utf-8",
         )
+
+        metadata_path = tmp_path / "prompt_video_pairs_matched_image.csv"
+        part_files = [
+            tmp_path / f"prompt_video_pairs_matched_image.part{i}.csv" for i in range(8)
+        ]
+        for path in [metadata_path, *part_files]:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["chosen", "rejected", "prompt", "input_image", "dpo_pair_id"])
+                writer.writerow(
+                    [
+                        chosen_path.name,
+                        rejected_path.name,
+                        metadata_prompt,
+                        "metadata_ref.png",
+                        rank,
+                    ]
+                )
 
         transforms = [
             {
@@ -104,12 +138,17 @@ def _run_pipeline(rank):
             transforms=transforms,
             dataset_base_path=str(tmp_path),
             dataset_metadata_path=str(metadata_path),
+            data_path_list=[str(path) for path in part_files],
             chosen_video_key="chosen",
             rejected_video_key="rejected",
             height=height,
             width=width,
-            num_frames=1,
-            max_pixels=height * width,
+            num_frames=num_frames,
+            max_pixels=max_pixels,
+            time_division_factor=4,
+            time_division_remainder=1,
+            height_division_factor=16,
+            width_division_factor=16,
             dataset_repeat=1,
         )
 
@@ -124,9 +163,9 @@ def _run_pipeline(rank):
             assert item["raw_first_image"].dtype == torch.uint8
             assert item["input_image"] == ref_path.name
             assert item["frame_interval"] == 1
-            assert item["short_prompt"] == [prompt]
-            assert item["dense_prompt"] == [prompt]
-            assert item["struct_prompt"] == [prompt]
+            assert item["short_prompt"] == [raw_prompt]
+            assert item["dense_prompt"] == [raw_prompt]
+            assert item["struct_prompt"] == [raw_prompt]
             assert torch.max(item["images"]).item() <= 1.001
             assert torch.min(item["images"]).item() >= -1.001
 
