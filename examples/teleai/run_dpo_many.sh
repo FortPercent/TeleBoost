@@ -80,12 +80,12 @@ export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
 # export WAN_DPO_DUMP_RANK=0
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=2
+CP=1
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=16
+N_GPU_FOR_TRAIN=8
 N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
