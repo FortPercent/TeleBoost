@@ -245,7 +245,8 @@ class CompareImageEmbedFromVideo:
         self.compare_atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
         self.compare_limit = int(os.environ.get("WAN_DPO_PREVAE_COMPARE_LIMIT", "0"))
         self.compare_count = 0
-        self.dump_loader = DumpTensorIO()
+        tensor_dir_env = "WAN_DPO_EMBED_TENSOR_DIR" if os.environ.get("WAN_DPO_EMBED_TENSOR_DIR") else "WAN_DPO_PREVAE_TENSOR_DIR"
+        self.dump_loader = DumpTensorIO(tensor_dir_env=tensor_dir_env)
 
     def _image_to_tensor(self, image):
         tensor = torch.tensor(np.array(image, dtype=np.float32))

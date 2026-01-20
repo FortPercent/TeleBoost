@@ -3,7 +3,9 @@ import json
 import logging
 import os
 import tempfile
+import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -11,6 +13,7 @@ from PIL import Image
 
 import teletron.utils as teletron_utils
 from teletron.datasets.dpo_dataset import WanDPODataset
+from my_utils import DumpTensorIO
 
 
 def _write_image(path, color, size):
@@ -57,6 +60,171 @@ def _resolve_external_dump(rank):
     return None
 
 
+def _load_encoder_config():
+    config_path = os.environ.get("WAN_DPO_ENCODER_CONFIG_PATH")
+    if not config_path:
+        default_path = Path(__file__).resolve().parents[2] / "examples" / "teleai" / "config" / "wan_dpo.py"
+        if default_path.exists():
+            config_path = str(default_path)
+    if not config_path or not os.path.exists(config_path):
+        return None
+    spec = importlib.util.spec_from_file_location("wan_dpo_config", config_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    config = getattr(module, "config", None)
+    if not isinstance(config, dict):
+        return None
+    model_cfg = config.get("model_config", {})
+    return model_cfg.get("encoder")
+
+
+def _ensure_global_args_for_encoder():
+    from teletron.utils.global_vars import get_args, set_global_args
+
+    try:
+        _ = get_args()
+        return
+    except AssertionError:
+        pass
+    args = SimpleNamespace(
+        encoder_dtype="bfloat16",
+        consumer_models_num=1,
+        micro_batch_size=1,
+        negative_prompt="",
+    )
+    set_global_args(args)
+
+
+def _resolve_dump_rank():
+    dump_rank = os.environ.get("WAN_DPO_DUMP_RANK")
+    if dump_rank is None:
+        env_local = os.environ.get("LOCAL_RANK")
+        if env_local is not None:
+            try:
+                dump_rank = int(env_local)
+            except ValueError:
+                dump_rank = None
+    if dump_rank is None:
+        try:
+            from megatron.core import mpu
+
+            dump_rank = mpu.get_data_parallel_rank(with_context_parallel=True)
+        except TypeError:
+            dump_rank = mpu.get_data_parallel_rank()
+        except Exception:
+            dump_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    return dump_rank
+
+
+def _build_encoder_batch(sample):
+    if not isinstance(sample, dict):
+        return None
+    batch = dict(sample)
+    images = batch.get("images")
+    if not torch.is_tensor(images):
+        return None
+    if torch.is_tensor(images) and images.dim() == 4:
+        batch["images"] = images.unsqueeze(0)
+    return batch
+
+
+def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
+    if encoder is None or not isinstance(sample, dict):
+        return
+    try:
+        from megatron.core import mpu
+
+        cp_rank = mpu.get_tensor_context_parallel_rank()
+    except Exception:
+        cp_rank = 0
+    if cp_rank != 0:
+        return
+    chosen = sample.get("chosen")
+    rejected = sample.get("rejected")
+    if not isinstance(chosen, dict) or not isinstance(rejected, dict):
+        return
+    chosen_batch = _build_encoder_batch(chosen)
+    rejected_batch = _build_encoder_batch(rejected)
+    if chosen_batch is None or rejected_batch is None:
+        return
+    raw_batch = {
+        "chosen": chosen_batch,
+        "rejected": rejected_batch,
+    }
+    outputs = encoder.encode(raw_batch)
+    if not isinstance(outputs, dict):
+        return
+    context = outputs.get("context")
+    tensor_dir_env = "WAN_DPO_EMBED_TENSOR_DIR" if os.environ.get("WAN_DPO_EMBED_TENSOR_DIR") else "WAN_DPO_PREVAE_TENSOR_DIR"
+    dump_loader = DumpTensorIO(tensor_dir_env=tensor_dir_env)
+    dump_rank = _resolve_dump_rank()
+    logger = logging.getLogger(__name__)
+    compare_map = {
+        "context": ("prompt_emb", "context"),
+        "img_emb_y": ("first_frame_emb", "y"),
+        "latents": ("vae_latents", "input_latents"),
+        "img_clip_feature": ("clip_feature", "clip_feature"),
+    }
+    for branch_name, branch_item in (("chosen", chosen), ("rejected", rejected)):
+        pair_id = branch_item.get("dpo_pair_id")
+        if pair_id is None:
+            continue
+        try:
+            pair_id_value = int(pair_id) if not torch.is_tensor(pair_id) else int(pair_id.item())
+        except (TypeError, ValueError, RuntimeError):
+            continue
+        branch_outputs = outputs.get(branch_name, {})
+        for key, (tag_prefix, payload_key) in compare_map.items():
+            if key == "context":
+                actual = context
+            else:
+                actual = branch_outputs.get(key)
+            if not torch.is_tensor(actual):
+                continue
+            tag = f"{tag_prefix}_{branch_name}"
+            payload = dump_loader.load_tensors(pair_id_value, tag, dump_rank)
+            if not isinstance(payload, dict) or payload_key not in payload:
+                logger.info(
+                    "skip encoder compare missing dump pair_id=%s tag=%s dump_rank=%s",
+                    pair_id_value,
+                    tag,
+                    dump_rank,
+                )
+                continue
+            expected = payload[payload_key]
+            if not torch.is_tensor(expected):
+                logger.info(
+                    "skip encoder compare non-tensor dump pair_id=%s tag=%s dump_rank=%s",
+                    pair_id_value,
+                    tag,
+                    dump_rank,
+                )
+                continue
+            expected = expected.detach().cpu() if torch.is_tensor(expected) else expected
+            actual_cpu = actual.detach().cpu()
+            result = dump_loader.compare_tensors(expected, actual_cpu, rtol=compare_rtol, atol=compare_atol)
+            dump_loader.write_compare_result(
+                {
+                    "tag": "encoder_compare",
+                    "tensor": key,
+                    "pair_id": pair_id_value,
+                    "branch": branch_name,
+                    "dump_rank": int(dump_rank) if dump_rank is not None else dump_rank,
+                    "result": result,
+                },
+                torch.distributed.get_rank() if torch.distributed.is_initialized() else 0,
+            )
+            logger.info(
+                "encoder compare pair_id=%s branch=%s tensor=%s result=%s",
+                pair_id_value,
+                branch_name,
+                key,
+                result,
+            )
+
+
 def _load_raw_records(path):
     records = []
     with open(path, "r", encoding="utf-8") as f:
@@ -89,7 +257,15 @@ def _run_pipeline(rank):
     num_frames = 49
     max_pixels = 400000
 
-    teletron_utils.set_config = lambda: {"dataset": {"width": width, "height": height}}
+    encoder_config = _load_encoder_config()
+    dataset_config = {
+        "width": width,
+        "height": height,
+        "chosen_video_key": "chosen",
+        "rejected_video_key": "rejected",
+    }
+    model_config = {"encoder": encoder_config} if encoder_config is not None else {}
+    teletron_utils.set_config = lambda: {"dataset": dataset_config, "model_config": model_config}
 
     external_raw_dump = _resolve_external_dump(rank)
     external_prevae_dir = os.environ.get("WAN_DPO_PREVAE_TENSOR_DIR")
@@ -97,6 +273,8 @@ def _run_pipeline(rank):
 
     with tempfile.TemporaryDirectory() as temp_dir:
         tmp_path = Path(temp_dir)
+        encoder = None
+        encoder_compare_enabled = False
         if use_external_dump:
             os.environ["WAN_DPO_PREVAE_COMPARE"] = "1"
             os.environ.setdefault("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5")
@@ -128,6 +306,20 @@ def _run_pipeline(rank):
                     raise RuntimeError(
                         f"raw dataset dump not found: {metadata_path}"
                     )
+            encoder_compare_enabled = os.environ.get("WAN_DPO_ENCODER_COMPARE", "1") == "1"
+            if encoder_compare_enabled:
+                if not torch.cuda.is_available():
+                    raise RuntimeError("encoder compare requires CUDA")
+                if encoder_config is None or not isinstance(encoder_config, dict):
+                    raise RuntimeError("encoder config is missing; set WAN_DPO_ENCODER_CONFIG_PATH")
+                encoder_name = encoder_config.get("type")
+                if not encoder_name:
+                    raise RuntimeError("encoder config missing type field")
+                _ensure_global_args_for_encoder()
+                from teletron.models.encoder_registry import get_encoder
+
+                encoder = get_encoder(name=encoder_name, device=torch.cuda.current_device())
+                encoder.setup()
         else:
             chosen_path = tmp_path / f"chosen_rank{rank}.png"
             rejected_path = tmp_path / f"rejected_rank{rank}.png"
@@ -254,7 +446,11 @@ def _run_pipeline(rank):
                         record_idx,
                         prompt_value,
                     )
-                _ = dataset[record_idx]
+                sample = dataset[record_idx]
+                if encoder_compare_enabled and encoder is not None:
+                    compare_rtol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5"))
+                    compare_atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
+                    _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol)
 
             cp_rank = 0
             try:
