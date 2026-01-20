@@ -54,40 +54,29 @@ def _run_pipeline(rank):
         _write_image(rejected_path, 192, (64, 64))
         _write_image(ref_path, 128, (64, 64))
 
-        raw_prompt = f"raw prompt rank {rank}"
-        metadata_prompt = f"metadata prompt rank {rank}"
+        full_prompt = f"full prompt rank {rank}"
+        part_prompt = f"part0 prompt rank {rank}"
 
-        dataset_raw_base = tmp_path / "dataset_raw.jsonl"
-        os.environ["WAN_DPO_PREVAE_COMPARE"] = "1"
-        os.environ["WAN_DPO_PREVAE_COMPARE_LIMIT"] = "1"
-        os.environ["WAN_DPO_PREVAE_TENSOR_DIR"] = str(tmp_path / "dpo_dumps")
-        os.environ["WAN_DPO_DATASET_DUMP_FILE"] = str(dataset_raw_base)
-
-        dataset_raw_rank = tmp_path / f"dataset_raw_rank{rank}.jsonl"
-        dataset_raw_rank.write_text(
-            json.dumps(
-                {
-                    "tag": "dataset.raw",
-                    "stage": "raw",
-                    "dump_id": rank,
-                    "payload": {
-                        "chosen": chosen_path.name,
-                        "rejected": rejected_path.name,
-                        "prompt": raw_prompt,
-                        "input_image": ref_path.name,
-                        "dpo_pair_id": rank,
-                    },
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        os.environ["WAN_DPO_PREVAE_COMPARE"] = "0"
+        os.environ.pop("WAN_DPO_DATASET_DUMP_FILE", None)
 
         metadata_path = tmp_path / "prompt_video_pairs_matched_image.csv"
         part_files = [
             tmp_path / f"prompt_video_pairs_matched_image.part{i}.csv" for i in range(8)
         ]
-        for path in [metadata_path, *part_files]:
+        with open(metadata_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["chosen", "rejected", "prompt", "input_image", "dpo_pair_id"])
+            writer.writerow(
+                [
+                    chosen_path.name,
+                    rejected_path.name,
+                    full_prompt,
+                    ref_path.name,
+                    rank,
+                ]
+            )
+        for path in part_files:
             with open(path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["chosen", "rejected", "prompt", "input_image", "dpo_pair_id"])
@@ -95,8 +84,8 @@ def _run_pipeline(rank):
                     [
                         chosen_path.name,
                         rejected_path.name,
-                        metadata_prompt,
-                        "metadata_ref.png",
+                        part_prompt,
+                        ref_path.name,
                         rank,
                     ]
                 )
@@ -163,9 +152,9 @@ def _run_pipeline(rank):
             assert item["raw_first_image"].dtype == torch.uint8
             assert item["input_image"] == ref_path.name
             assert item["frame_interval"] == 1
-            assert item["short_prompt"] == [raw_prompt]
-            assert item["dense_prompt"] == [raw_prompt]
-            assert item["struct_prompt"] == [raw_prompt]
+            assert item["short_prompt"] == [part_prompt]
+            assert item["dense_prompt"] == [part_prompt]
+            assert item["struct_prompt"] == [part_prompt]
             assert torch.max(item["images"]).item() <= 1.001
             assert torch.min(item["images"]).item() >= -1.001
 
