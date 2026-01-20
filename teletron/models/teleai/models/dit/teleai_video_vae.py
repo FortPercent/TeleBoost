@@ -616,6 +616,18 @@ class TeleaiVideoVAE(nn.Module):
         # init model
         self.model = VideoVAE_(z_dim=z_dim).eval().requires_grad_(False)
         self.upsampling_factor = 8
+        print(
+            "[TeleaiVideoVAE init] "
+            f"z_dim={z_dim} "
+            f"model_dim={self.model.dim} "
+            f"model_z_dim={self.model.z_dim} "
+            f"dim_mult={self.model.dim_mult} "
+            f"num_res_blocks={self.model.num_res_blocks} "
+            f"attn_scales={self.model.attn_scales} "
+            f"temperal_downsample={self.model.temperal_downsample} "
+            f"dropout={getattr(self.model, 'dropout', 0.0)} "
+            f"upsampling_factor={self.upsampling_factor}"
+        )
 
 
     def build_1d_mask(self, length, left_bound, right_bound, border_width):
