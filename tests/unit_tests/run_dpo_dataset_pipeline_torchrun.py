@@ -308,12 +308,33 @@ def _run_pipeline(rank):
                         f"shape/dtype actual={tuple(actual.shape)} {actual.dtype} "
                         f"expected={tuple(expected.shape)} {expected.dtype}"
                     )
+                diff = (actual.float() - expected.float()).abs()
+                max_diff = float(diff.max())
+                mean_diff = float(diff.mean())
                 if not torch.allclose(actual, expected, rtol=rtol, atol=atol):
-                    diff = (actual.float() - expected.float()).abs()
-                    raise AssertionError(
-                        f"prevae mismatch branch={branch} max={float(diff.max())} "
-                        f"mean={float(diff.mean())}"
+                    logging.error(
+                        "compare failed rank=%s data_id=%s branch=%s max=%s mean=%s rtol=%s atol=%s",
+                        rank,
+                        compare_id,
+                        branch,
+                        max_diff,
+                        mean_diff,
+                        rtol,
+                        atol,
                     )
+                    raise AssertionError(
+                        f"prevae mismatch branch={branch} max={max_diff} mean={mean_diff}"
+                    )
+                logging.info(
+                    "compare ok rank=%s data_id=%s branch=%s max=%s mean=%s rtol=%s atol=%s",
+                    rank,
+                    compare_id,
+                    branch,
+                    max_diff,
+                    mean_diff,
+                    rtol,
+                    atol,
+                )
         else:
             dataset = WanDPODataset(
                 transforms=transforms,
