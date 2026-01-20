@@ -236,48 +236,6 @@ def _run_pipeline(rank):
             },
         ]
 
-<<<<<<< HEAD
-        dataset = WanDPODataset(
-            transforms=transforms,
-            dataset_base_path=dataset_base_path,
-            dataset_metadata_path=str(metadata_path),
-            data_path_list=[str(path) for path in part_files] if part_files else None,
-            chosen_video_key="chosen",
-            rejected_video_key="rejected",
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            max_pixels=max_pixels,
-            time_division_factor=4,
-            time_division_remainder=1,
-            height_division_factor=16,
-            width_division_factor=16,
-            dataset_repeat=1,
-        )
-
-        data_id = (rank % len(dataset)) if use_external_dump else 0
-        sample = dataset[data_id]
-        assert set(sample.keys()) == {"chosen", "rejected"}
-
-        # for branch in ("chosen", "rejected"):
-        #     item = sample[branch]
-        #     print(item["images"].shape)
-        #     assert item["images"].shape == (1, 3, height, width)
-        #     assert item["images"].dtype == torch.bfloat16
-        #     assert item["raw_first_image"].shape == (1, 3, height, width)
-        #     assert item["raw_first_image"].dtype == torch.uint8
-        #     if ref_path is not None:
-        #         assert item["input_image"] == ref_path.name
-        #     assert item["frame_interval"] == 1
-        #     if part_prompt is not None:
-        #         assert item["short_prompt"] == [part_prompt]
-        #         assert item["dense_prompt"] == [part_prompt]
-        #         assert item["struct_prompt"] == [part_prompt]
-        #     assert torch.max(item["images"]).item() <= 1.001
-        #     assert torch.min(item["images"]).item() >= -1.001
-
-=======
->>>>>>> 7503489c42d0de2ef8919c970cf2bba8c91c1aac
         if use_external_dump:
             raw_records = _load_raw_records(metadata_path)
             if not raw_records:
