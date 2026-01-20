@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import copy
-
+import torch
 class Registry(dict):
     r"""A helper class for managing registering modules, it extends a
     dictionary and provides a register function."""
@@ -53,8 +53,22 @@ def merge_params(params_or_type, **kwargs):
     return kwargs
 
 
+def normalize_params(params):
+    if "torch_dtype" in params and isinstance(params["torch_dtype"], str):
+        s = params["torch_dtype"].lower().replace("torch.", "")
+        params["torch_dtype"] = {
+            "bf16": torch.bfloat16,
+            "bfloat16": torch.bfloat16,
+            "fp16": torch.float16,
+            "float16": torch.float16,
+            "fp32": torch.float32,
+            "float32": torch.float32,
+        }.get(s, params["torch_dtype"])
+    return params
+
 def build_module(registry, params_or_type, *args, **kwargs):
     params = merge_params(params_or_type, **kwargs)
+    params = normalize_params(params)
     if "type" in params:
         obj_type = params.pop("type")
         assert obj_type in registry, "%s not in registry" % obj_type

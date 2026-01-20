@@ -264,3 +264,177 @@
 {"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
 {"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
 {"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 3, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": true}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.9296875, "mean_abs": 0.578125}}
+{"tag": "prevae_compare", "pair_id": 1, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.55078125}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "chosen", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 1.8125, "mean_abs": 0.5234375}}
+{"tag": "prevae_compare", "pair_id": 2, "branch": "rejected", "dump_rank": 1, "writer_rank": 1, "result": {"missing": false, "allclose": false, "max_abs": 2.0, "mean_abs": 0.50390625}}
