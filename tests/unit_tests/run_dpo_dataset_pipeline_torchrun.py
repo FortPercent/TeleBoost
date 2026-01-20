@@ -180,6 +180,15 @@ def _run_pipeline(rank):
                 "output_key": "raw_first_image",
             },
             {
+                "type": "CompareImageEmbedFromVideo",
+                "video_key": "video",
+                "compare_input": True,
+                "compare_end": False,
+                "torch_dtype": "bfloat16",
+                "min_value": -1,
+                "max_value": 1,
+            },
+            {
                 "type": "PreprocessVideoToTensor",
                 "input_key": "video",
                 "output_key": "video",

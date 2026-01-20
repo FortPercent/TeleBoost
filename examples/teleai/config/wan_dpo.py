@@ -51,7 +51,7 @@ config = dict(
         width_division_factor=16,
 
         # 可选
-        max_pixels=400000,
+        max_pixels=2073600,
         
 
         transforms=[
@@ -63,6 +63,16 @@ config = dict(
                 type="InjectRawFirstImageFromVideo",
                 video_key="video",
                 output_key="raw_first_image",  # 这个是PIL list的首帧
+            ),
+            # Compare DiffSynth image-embed preprocess dumps against Teletron output.
+            dict(
+                type="CompareImageEmbedFromVideo",
+                video_key="video",
+                compare_input=True,
+                compare_end=False,
+                torch_dtype="bfloat16",
+                min_value=-1,
+                max_value=1,
             ),
             dict(
                 type="PreprocessVideoToTensor",
