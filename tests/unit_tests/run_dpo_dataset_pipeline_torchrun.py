@@ -158,6 +158,8 @@ def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
     if not isinstance(outputs, dict):
         return
     context = outputs.get("context")
+    if torch.is_tensor(context):
+        logging.info("encoder output dtype context=%s", context.dtype)
     tensor_dir_env = "WAN_DPO_EMBED_TENSOR_DIR" if os.environ.get("WAN_DPO_EMBED_TENSOR_DIR") else "WAN_DPO_PREVAE_TENSOR_DIR"
     dump_loader = DumpTensorIO(tensor_dir_env=tensor_dir_env)
     dump_rank = _resolve_dump_rank()
@@ -177,6 +179,22 @@ def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
         except (TypeError, ValueError, RuntimeError):
             continue
         branch_outputs = outputs.get(branch_name, {})
+        img_emb_y = branch_outputs.get("img_emb_y")
+        latents = branch_outputs.get("latents")
+        if torch.is_tensor(img_emb_y):
+            logging.info(
+                "encoder output dtype pair_id=%s branch=%s img_emb_y=%s",
+                pair_id_value,
+                branch_name,
+                img_emb_y.dtype,
+            )
+        if torch.is_tensor(latents):
+            logging.info(
+                "encoder output dtype pair_id=%s branch=%s latents=%s",
+                pair_id_value,
+                branch_name,
+                latents.dtype,
+            )
         for key, (tag_prefix, payload_key) in compare_map.items():
             if key == "context":
                 actual = context
@@ -224,6 +242,27 @@ def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
                 key,
                 result,
             )
+
+
+def _log_encoder_dtypes(encoder):
+    if encoder is None:
+        return
+
+    def _param_dtype(module):
+        if module is None:
+            return None
+        try:
+            return next(iter(module.parameters())).dtype
+        except (StopIteration, AttributeError):
+            return getattr(module, "dtype", None)
+
+    logging.info(
+        "encoder model dtype encoder=%s text=%s image=%s vae=%s",
+        getattr(encoder, "dtype", None),
+        _param_dtype(getattr(encoder, "text_encoder", None)),
+        _param_dtype(getattr(encoder, "image_encoder", None)),
+        _param_dtype(getattr(encoder, "vae", None)),
+    )
 
 
 def _load_raw_records(path):
@@ -322,6 +361,7 @@ def _run_pipeline(rank):
                 # Build and initialize the Teletron encoder used for compare.
                 encoder = get_encoder(name=encoder_name, device=torch.cuda.current_device())
                 encoder.setup()
+                _log_encoder_dtypes(encoder)
         else:
             chosen_path = tmp_path / f"chosen_rank{rank}.png"
             rejected_path = tmp_path / f"rejected_rank{rank}.png"
