@@ -150,6 +150,10 @@ class WanTrainingModule(DiffusionTrainingModule):
             "max_timestep_boundary": self.max_timestep_boundary,
             "min_timestep_boundary": self.min_timestep_boundary,
         }
+        pair_id = data.get("dpo_pair_id")
+        if pair_id is not None:
+            inputs_shared["dpo_pair_id"] = pair_id
+        inputs_shared["dpo_branch"] = data.get("dpo_branch", video_key)
         
         # Extra inputs
         for extra_input in self.extra_inputs:

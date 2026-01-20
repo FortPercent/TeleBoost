@@ -25,6 +25,7 @@ from teletron.models.wan.encoder.wan_video_motion_controller import WanMotionCon
 # from ..schedulers.flow_match import FlowMatchScheduler
 from teletron.models.flow_match import FlowMatchScheduler
 from teletron.models.wan.encoder.wan_prompter import WanPrompter
+from my_utils import DumpTensorIO, get_global_logger
 # from ..vram_management import enable_vram_management, AutoWrappedModule, AutoWrappedLinear, WanAutoCastLayerNorm
 
 
@@ -81,6 +82,7 @@ class WanVideoPipeline(BasePipeline):
         )
         self.scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)
         self.prompter = WanPrompter(tokenizer_path=tokenizer_path)
+        self.preimg_compare_count = 0
         self.text_encoder: WanTextEncoder = None
         self.image_encoder: WanImageEncoder = None
         self.dit: WanModel = None
@@ -220,6 +222,100 @@ class WanVideoPipeline(BasePipeline):
     # __call__ 已经remove了
 
 
+def _should_compare_preimg(pipe):
+    if os.environ.get("WAN_DPO_PREVAE_COMPARE", "0") != "1":
+        return False
+    limit_env = os.environ.get("WAN_DPO_PREIMG_COMPARE_LIMIT", os.environ.get("WAN_DPO_PREVAE_COMPARE_LIMIT", "0"))
+    try:
+        limit = int(limit_env)
+    except ValueError:
+        limit = 0
+    if limit > 0 and pipe.preimg_compare_count >= limit:
+        return False
+    return True
+
+
+def _resolve_dump_rank():
+    dump_rank = os.environ.get("WAN_DPO_DUMP_RANK")
+    if dump_rank is None:
+        env_local = os.environ.get("LOCAL_RANK")
+        if env_local is not None:
+            try:
+                dump_rank = int(env_local)
+            except ValueError:
+                dump_rank = None
+    if dump_rank is None:
+        try:
+            from megatron.core import mpu
+            try:
+                dump_rank = mpu.get_data_parallel_rank(with_context_parallel=True)
+            except TypeError:
+                dump_rank = mpu.get_data_parallel_rank()
+        except Exception:
+            dump_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    return dump_rank
+
+
+def _compare_preprocessed_image(pipe, image_tensor, branch, pair_id, tag_suffix):
+    if image_tensor is None or not _should_compare_preimg(pipe):
+        return
+    if pair_id is None or not branch:
+        return
+    try:
+        from megatron.core import mpu
+        cp_rank = mpu.get_tensor_context_parallel_rank()
+    except Exception:
+        cp_rank = 0
+    if cp_rank != 0:
+        return
+    dump_rank = _resolve_dump_rank()
+    tag = f"image_embed_{tag_suffix}_{branch}"
+    dump_loader = DumpTensorIO()
+    payload = dump_loader.load_tensors(pair_id, tag, dump_rank)
+    expected = payload.get("image") if isinstance(payload, dict) else None
+    actual = image_tensor.detach().cpu() if torch.is_tensor(image_tensor) else image_tensor
+    if torch.is_tensor(expected):
+        expected = expected.detach().cpu()
+    rtol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_RTOL", "1e-5"))
+    atol = float(os.environ.get("WAN_DPO_PREVAE_COMPARE_ATOL", "1e-8"))
+    compare = dump_loader.compare_tensors(expected, actual, rtol=rtol, atol=atol)
+    pipe.preimg_compare_count += 1
+    writer_rank = os.environ.get("LOCAL_RANK")
+    if writer_rank is None:
+        writer_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    else:
+        writer_rank = int(writer_rank)
+    try:
+        pair_id_value = int(pair_id) if not torch.is_tensor(pair_id) else int(pair_id.item())
+    except (TypeError, ValueError, RuntimeError):
+        pair_id_value = pair_id
+    try:
+        dump_rank_value = int(dump_rank)
+    except (TypeError, ValueError):
+        dump_rank_value = dump_rank
+    dump_loader.write_compare_result(
+        {
+            "tag": "preimage_compare",
+            "pair_id": pair_id_value,
+            "branch": branch,
+            "image_tag": tag,
+            "dump_rank": dump_rank_value,
+            "writer_rank": writer_rank,
+            "result": compare,
+        },
+        writer_rank,
+    )
+    logger = get_global_logger()
+    logger.info(
+        "[DPO preimage compare] pair_id=%s branch=%s tag=%s dump_rank=%s result=%s",
+        pair_id_value,
+        branch,
+        tag,
+        dump_rank_value,
+        compare,
+    )
+
+
 class WanVideoUnit_ShapeChecker(PipelineUnit):
     def __init__(self):
         super().__init__(input_params=("height", "width", "num_frames"))
@@ -296,20 +392,22 @@ class WanVideoUnit_ImageEmbedder(PipelineUnit):
     """
     def __init__(self):
         super().__init__(
-            input_params=("input_image", "end_image", "num_frames", "height", "width", "tiled", "tile_size", "tile_stride"),
+            input_params=("input_image", "end_image", "num_frames", "height", "width", "tiled", "tile_size", "tile_stride", "dpo_pair_id", "dpo_branch"),
             onload_model_names=("image_encoder", "vae")
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride, dpo_pair_id=None, dpo_branch=None):
         if input_image is None or pipe.image_encoder is None:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
         image = pipe.preprocess_image(input_image.resize((width, height))).to(pipe.device)
+        _compare_preprocessed_image(pipe, image, dpo_branch, dpo_pair_id, "input")
         clip_context = pipe.image_encoder.encode_image([image])
         msk = torch.ones(1, num_frames, height//8, width//8, device=pipe.device)
         msk[:, 1:] = 0
         if end_image is not None:
             end_image = pipe.preprocess_image(end_image.resize((width, height))).to(pipe.device)
+            _compare_preprocessed_image(pipe, end_image, dpo_branch, dpo_pair_id, "end")
             vae_input = torch.concat([image.transpose(0,1), torch.zeros(3, num_frames-2, height, width).to(image.device), end_image.transpose(0,1)],dim=1)
             if pipe.dit.has_image_pos_emb:
                 clip_context = torch.concat([clip_context, pipe.image_encoder.encode_image([end_image])], dim=1)
@@ -334,18 +432,20 @@ class WanVideoUnit_ImageEmbedder(PipelineUnit):
 class WanVideoUnit_ImageEmbedderCLIP(PipelineUnit):
     def __init__(self):
         super().__init__(
-            input_params=("input_image", "end_image", "height", "width"),
+            input_params=("input_image", "end_image", "height", "width", "dpo_pair_id", "dpo_branch"),
             onload_model_names=("image_encoder",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, end_image, height, width):
+    def process(self, pipe: WanVideoPipeline, input_image, end_image, height, width, dpo_pair_id=None, dpo_branch=None):
         if input_image is None or pipe.image_encoder is None or not pipe.dit.require_clip_embedding:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
         image = pipe.preprocess_image(input_image.resize((width, height))).to(pipe.device)
+        _compare_preprocessed_image(pipe, image, dpo_branch, dpo_pair_id, "input")
         clip_context = pipe.image_encoder.encode_image([image])
         if end_image is not None:
             end_image = pipe.preprocess_image(end_image.resize((width, height))).to(pipe.device)
+            _compare_preprocessed_image(pipe, end_image, dpo_branch, dpo_pair_id, "end")
             if pipe.dit.has_image_pos_emb:
                 clip_context = torch.concat([clip_context, pipe.image_encoder.encode_image([end_image])], dim=1)
         clip_context = clip_context.to(dtype=pipe.torch_dtype, device=pipe.device)
@@ -356,19 +456,21 @@ class WanVideoUnit_ImageEmbedderCLIP(PipelineUnit):
 class WanVideoUnit_ImageEmbedderVAE(PipelineUnit):
     def __init__(self):
         super().__init__(
-            input_params=("input_image", "end_image", "num_frames", "height", "width", "tiled", "tile_size", "tile_stride"),
+            input_params=("input_image", "end_image", "num_frames", "height", "width", "tiled", "tile_size", "tile_stride", "dpo_pair_id", "dpo_branch"),
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoPipeline, input_image, end_image, num_frames, height, width, tiled, tile_size, tile_stride, dpo_pair_id=None, dpo_branch=None):
         if input_image is None or not pipe.dit.require_vae_embedding:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
         image = pipe.preprocess_image(input_image.resize((width, height))).to(pipe.device)
+        _compare_preprocessed_image(pipe, image, dpo_branch, dpo_pair_id, "input")
         msk = torch.ones(1, num_frames, height//8, width//8, device=pipe.device)
         msk[:, 1:] = 0
         if end_image is not None:
             end_image = pipe.preprocess_image(end_image.resize((width, height))).to(pipe.device)
+            _compare_preprocessed_image(pipe, end_image, dpo_branch, dpo_pair_id, "end")
             vae_input = torch.concat([image.transpose(0,1), torch.zeros(3, num_frames-2, height, width).to(image.device), end_image.transpose(0,1)],dim=1)
             msk[:, -1:] = 1
         else:
@@ -393,15 +495,17 @@ class WanVideoUnit_ImageEmbedderFused(PipelineUnit):
     """
     def __init__(self):
         super().__init__(
-            input_params=("input_image", "latents", "height", "width", "tiled", "tile_size", "tile_stride"),
+            input_params=("input_image", "latents", "height", "width", "tiled", "tile_size", "tile_stride", "dpo_pair_id", "dpo_branch"),
             onload_model_names=("vae",)
         )
 
-    def process(self, pipe: WanVideoPipeline, input_image, latents, height, width, tiled, tile_size, tile_stride):
+    def process(self, pipe: WanVideoPipeline, input_image, latents, height, width, tiled, tile_size, tile_stride, dpo_pair_id=None, dpo_branch=None):
         if input_image is None or not pipe.dit.fuse_vae_embedding_in_latents:
             return {}
         pipe.load_models_to_device(self.onload_model_names)
-        image = pipe.preprocess_image(input_image.resize((width, height))).transpose(0, 1)
+        image = pipe.preprocess_image(input_image.resize((width, height)))
+        _compare_preprocessed_image(pipe, image, dpo_branch, dpo_pair_id, "input")
+        image = image.transpose(0, 1)
         z = pipe.vae.encode([image], device=pipe.device, tiled=tiled, tile_size=tile_size, tile_stride=tile_stride)
         latents[:, :, 0: 1] = z
         return {"latents": latents, "fuse_vae_embedding_in_latents": True, "first_frame_latents": z}
