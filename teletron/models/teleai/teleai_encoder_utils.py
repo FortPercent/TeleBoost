@@ -5,7 +5,7 @@ import numpy as np
 from einops import rearrange
 from collections import defaultdict
 from PIL import Image
-from teletron.train.utils import get_args
+from teletron.utils import get_args
 from teletron.utils import set_config
 
 def encode_prompt(prompter,prompt, positive=True):
