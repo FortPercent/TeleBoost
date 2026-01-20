@@ -153,6 +153,7 @@ def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
         "chosen": chosen_batch,
         "rejected": rejected_batch,
     }
+    # Run encoder forward to get embeddings/latents for compare.
     outputs = encoder.encode(raw_batch)
     if not isinstance(outputs, dict):
         return
@@ -318,6 +319,7 @@ def _run_pipeline(rank):
                 _ensure_global_args_for_encoder()
                 from teletron.models.encoder_registry import get_encoder
 
+                # Build and initialize the Teletron encoder used for compare.
                 encoder = get_encoder(name=encoder_name, device=torch.cuda.current_device())
                 encoder.setup()
         else:
