@@ -518,8 +518,12 @@ class UnifiedDataset(torch.utils.data.Dataset):
                     continue
                 payload = payload.copy()
                 dump_id = record.get("dump_id")
-                if dump_id is not None and "dpo_pair_id" not in payload:
-                    payload["dpo_pair_id"] = dump_id
+                data_id = record.get("data_id")
+                if "dpo_pair_id" not in payload:
+                    if data_id is not None:
+                        payload["dpo_pair_id"] = data_id
+                    elif dump_id is not None:
+                        payload["dpo_pair_id"] = dump_id
                 records.append((dump_id, payload))
         records.sort(key=lambda x: x[0] if x[0] is not None else -1)
         return [payload for _, payload in records]
