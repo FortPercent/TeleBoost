@@ -106,8 +106,8 @@ def _sha256_file(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str:
 
 def _sha256_state_dict(model) -> str | None:
     """
-    Hash tensor contents of state_dict in a stable key order.
-    Returns None if model does not expose a usable state_dict().
+    Best-effort: hash the *raw bytes* of tensors in state_dict (dtype-agnostic).
+    Works for bfloat16 (numpy doesn't support bf16 directly).
     """
     try:
         sd = model.state_dict()
@@ -115,19 +115,25 @@ def _sha256_state_dict(model) -> str | None:
         return None
 
     h = hashlib.sha256()
+
     for k in sorted(sd.keys()):
         v = sd[k]
+        h.update(k.encode("utf-8"))
+
         if torch.is_tensor(v):
             t = v.detach().cpu().contiguous()
-            h.update(k.encode("utf-8"))
+            # include metadata for safety
             h.update(str(tuple(t.shape)).encode("utf-8"))
             h.update(str(t.dtype).encode("utf-8"))
-            # use numpy bytes for stable serialization
-            h.update(t.numpy().tobytes())
+
+            # hash raw bytes (dtype-agnostic, supports bf16)
+            raw = t.view(torch.uint8).numpy().tobytes()
+            h.update(raw)
         else:
-            h.update(k.encode("utf-8"))
             h.update(repr(v).encode("utf-8"))
+
     return h.hexdigest()
+
 
 
 def _resolve_weight_path(p: str, teletron_root: Path, config_path: Path | None = None) -> Path:
