@@ -151,8 +151,14 @@ def main():
     config = _load_config_from_py(config_path)
     _patch_set_config(config)
     teletron_encoder, _ = _build_teletron_encoder(config, device, args.encoder_dtype)
-    teletron_batch = {"images": images}
-    tele_latents = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
+    dump_tiler = payload.get("tiler_kwargs", {})
+    if not isinstance(dump_tiler, dict):
+        dump_tiler = {}
+    dump_tiler.setdefault("tiled", False)
+    dump_tiler.setdefault("tile_size", (34, 34))
+    dump_tiler.setdefault("tile_stride", (18, 16))
+    video = images.permute(0, 2, 1, 3, 4)[0]
+    tele_latents = teletron_encoder.vae.encode([video], device=device, **dump_tiler).detach().cpu()
     mode_label = "teletron"
 
     result = _compare_tensors(latents_ref, tele_latents, args.rtol, args.atol)
