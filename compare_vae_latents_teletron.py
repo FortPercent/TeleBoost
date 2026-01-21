@@ -307,6 +307,7 @@ def main():
 
     # ---- dump-side tiler kwargs (must align) ----
     dump_tiler = payload.get("tiler_kwargs", {})
+    dump_tiler["tiled"] = False
     print(f"[teletron] diffsynth_tiler_kwargs={dump_tiler}")
 
     # ---- input sanity ----
