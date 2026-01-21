@@ -315,6 +315,7 @@ class CompareImageEmbedFromVideo:
         expected = payload.get("image") if isinstance(payload, dict) else None
         if width and height:
             image = image.resize((int(width), int(height)))
+        # preprocess_image
         actual = self._image_to_tensor(image)
         if torch.is_tensor(actual):
             actual = actual.detach().cpu()
