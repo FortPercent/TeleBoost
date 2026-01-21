@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 import importlib.util
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,6 +117,50 @@ def _resolve_dump_rank():
         except Exception:
             dump_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     return dump_rank
+
+
+def _hash_file(path, chunk_size=1024 * 1024):
+    if not path or not os.path.exists(path):
+        return None
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _hash_module_parameters(module):
+    if module is None:
+        return None
+    hasher = hashlib.sha256()
+    for name, param in sorted(module.named_parameters(), key=lambda x: x[0]):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(str(param.dtype).encode("utf-8"))
+        hasher.update(str(tuple(param.shape)).encode("utf-8"))
+        data = param.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
+        hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _log_vae_hashes(encoder, encoder_config):
+    if encoder is None:
+        return
+    vae = getattr(encoder, "vae", None)
+    if vae is None:
+        return
+    vae_path = None
+    if isinstance(encoder_config, dict):
+        vae_cfg = encoder_config.get("vae", {})
+        if isinstance(vae_cfg, dict):
+            vae_path = vae_cfg.get("path")
+    file_hash = _hash_file(vae_path)
+    param_hash = _hash_module_parameters(vae)
+    logging.info(
+        "vae_hash path=%s file_sha256=%s param_sha256=%s",
+        vae_path,
+        file_hash,
+        param_hash,
+    )
 
 
 def _build_encoder_batch(sample):
@@ -362,6 +407,7 @@ def _run_pipeline(rank):
                 encoder = get_encoder(name=encoder_name, device=torch.cuda.current_device())
                 encoder.setup()
                 _log_encoder_dtypes(encoder)
+                _log_vae_hashes(encoder, encoder_config)
         else:
             chosen_path = tmp_path / f"chosen_rank{rank}.png"
             rejected_path = tmp_path / f"rejected_rank{rank}.png"
