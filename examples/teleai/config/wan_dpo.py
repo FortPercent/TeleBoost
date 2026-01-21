@@ -183,6 +183,7 @@ config = dict(
             encoder_schema=['context', 'img_emb_y', 'latents'],
             vae=dict(
                 # path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                type="DiffSynthWanVideoVAE",
                 path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/models/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
                 tiler_kwargs=dict(
                     tiled=False,

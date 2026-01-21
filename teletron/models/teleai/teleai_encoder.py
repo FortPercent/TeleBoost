@@ -8,6 +8,10 @@ from teletron.models.teleai.models.dit import TeleaiTextEncoder
 from teletron.models.teleai.models.dit import TeleaiVideoVAE
 from teletron.models.teleai.models.dit import TeleaiVideoVAE_2_2
 from teletron.models.teleai.models.dit import TeleaiImageEncoder
+from teletron.models.teleai.models.dit.diffsynth_wan_video_vae import (
+    WanVideoVAE as DiffSynthWanVideoVAE,
+    WanVideoVAE38 as DiffSynthWanVideoVAE38,
+)
 from teletron.models.teleai.teleai_encoder_utils import (
     get_context,
     get_img_clip_feature,
@@ -65,6 +69,7 @@ class TeleaiEncoder(BaseEncoder):
         self.vae_type = encoder_model_config.get("vae", None).get("type", "TeleaiVideoVAE_2_1")
         self.tiler_kwargs = encoder_model_config.get("vae", None).get("tiler_kwargs", {})
         self.vae_compile = encoder_model_config.get("vae", None).get("torch_compile", False)
+        self.compression_cfg = encoder_model_config.get("vae", None).get("compression", None)
         if self.tiler_kwargs is None:
             self.tiler_kwargs = dict(
                 tiled=False,
@@ -108,15 +113,39 @@ class TeleaiEncoder(BaseEncoder):
             f"tiler_kwargs={self.tiler_kwargs} torch_compile={self.vae_compile}"
         )
         print(f"加载 VAE 模型... {self.vae_path}")
-        if self.vae_type == "TeleaiVideoVAE_2_1":
+        if self.vae_type in ("DiffSynthWanVideoVAE", "diffsynth_wan_video_vae"):
+            self.vae = DiffSynthWanVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            if self.vae_compile and hasattr(self.vae, "model") and hasattr(self.vae.model, "encode"):
+                self.vae.model.encode = torch.compile(self.vae.model.encode, dynamic=True)
+                print("torch.compile DiffSynth VAE model... ")
+            if self.compression_cfg is not None:
+                self.compression = tuple(self.compression_cfg)
+            else:
+                self.compression = (4, 8, 8)
+        elif self.vae_type in ("DiffSynthWanVideoVAE38", "diffsynth_wan_video_vae38"):
+            self.vae = DiffSynthWanVideoVAE38().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
+            if self.vae_compile and hasattr(self.vae, "model") and hasattr(self.vae.model, "encode"):
+                self.vae.model.encode = torch.compile(self.vae.model.encode, dynamic=True)
+                print("torch.compile DiffSynth VAE38 model... ")
+            if self.compression_cfg is not None:
+                self.compression = tuple(self.compression_cfg)
+            else:
+                self.compression = (4, 8, 8)
+        elif self.vae_type == "TeleaiVideoVAE_2_1":
             self.vae = TeleaiVideoVAE().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
             if self.vae_compile:
                 self.vae.model.encode = torch.compile(self.vae.model.encode, dynamic=True)
                 print(f"torch.compile VAE 模型... ")
-            self.compression = (4,8,8)
+            if self.compression_cfg is not None:
+                self.compression = tuple(self.compression_cfg)
+            else:
+                self.compression = (4, 8, 8)
         else:
             self.vae = TeleaiVideoVAE_2_2().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
-            self.compression = (4,16,16)
+            if self.compression_cfg is not None:
+                self.compression = tuple(self.compression_cfg)
+            else:
+                self.compression = (4, 16, 16)
         self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True)
 
         print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
