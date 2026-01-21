@@ -299,21 +299,82 @@ def main():
     print(f"[teletron] is_autocast_enabled={torch.is_autocast_enabled()}")
     if torch.cuda.is_available():
         print(f"[teletron] autocast_gpu_dtype={torch.get_autocast_dtype('cuda')}")
-    # -----------------------------
-    # 3) Run Teletron encode and compare latents
+       # -----------------------------
+    # 3) Run Teletron encode and compare latents (3 paths)
     # -----------------------------
     torch_dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}[input_dtype]
     images = _build_input(height, width, num_frames, device, torch_dtype)
-    # video_list = [images.permute(0,2,1,3,4)[0]]   # list[(C,T,H,W)]
-    # latents2 = diffsynth_vae.encode(video_list, device=device, **tiler_kwargs)
-    # Teletron work_fn expects {"images": (B,T,C,H,W)} (per your pipeline)
-    teletron_batch = {"images": images}
-    teletron_latents = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
 
-    result = _compare_tensors(latents_ref, teletron_latents, args.rtol, args.atol)
-    print(f"[teletron] latents shape={tuple(teletron_latents.shape)} dtype={teletron_latents.dtype}")
-    print(f"[diffsynth] latents shape={tuple(latents_ref.shape)} dtype={latents_ref.dtype}")
-    print(f"[compare] allclose={result['allclose']} max_abs={result['max_abs']} mean_abs={result['mean_abs']}")
+    # ---- dump-side tiler kwargs (must align) ----
+    dump_tiler = payload.get("tiler_kwargs", {})
+    print(f"[teletron] diffsynth_tiler_kwargs={dump_tiler}")
+
+    # ---- input sanity ----
+    video_cthw = images.permute(0, 2, 1, 3, 4)[0].detach().cpu().contiguous()  # (C,T,H,W)
+    input_bcthw = images.permute(0, 2, 1, 3, 4).detach().cpu().contiguous()    # (B,C,T,H,W)
+
+    def _sha256_tensor_bytes(t: torch.Tensor) -> str:
+        t = t.detach().cpu().contiguous()
+        return hashlib.sha256(t.view(torch.uint8).numpy().tobytes()).hexdigest()
+
+    print(f"[teletron] images dtype={images.dtype} shape={tuple(images.shape)} "
+          f"min={images.min().item():.6g} max={images.max().item():.6g} mean={images.float().mean().item():.6g}")
+    print(f"[teletron] video_cthw sha256={_sha256_tensor_bytes(video_cthw)}")
+    print(f"[teletron] input_bcthw sha256={_sha256_tensor_bytes(input_bcthw)}")
+
+    # ---- helper to summarize latents ----
+    def _summ(name: str, t: torch.Tensor):
+        t = t.detach().cpu()
+        print(f"[{name}] dtype={t.dtype} shape={tuple(t.shape)} "
+              f"min={t.min().item():.6g} max={t.max().item():.6g} mean={t.float().mean().item():.6g}")
+
+    # ---- get teletron vae handle ----
+    tele_vae = teletron_encoder.vae
+    if tele_vae is None:
+        raise RuntimeError("teletron_encoder.vae is None (encoder setup failed?)")
+
+    # ----------------------------------
+    # Path P0: original Teletron pipeline (work_fn)
+    # ----------------------------------
+    teletron_batch = {"images": images}
+    tele_lat_p0 = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
+    _summ("teletron.P0.work_fn", tele_lat_p0)
+
+    # ----------------------------------
+    # Path P1: direct encode with tensor input (B,C,T,H,W)  (matches Teletron encode_video)
+    # ----------------------------------
+    with torch.no_grad():
+        inp = images.permute(0, 2, 1, 3, 4).to(device=torch.cuda.current_device(), dtype=images.dtype)  # (B,C,T,H,W)
+        tele_lat_p1 = tele_vae.encode(
+            inp,
+            device=torch.cuda.current_device(),
+            **dump_tiler
+        ).detach().cpu()
+    _summ("teletron.P1.encode_tensor", tele_lat_p1)
+
+    # ----------------------------------
+    # Path P2: direct encode with list input [(C,T,H,W)] (matches DiffSynth dump)
+    # ----------------------------------
+    with torch.no_grad():
+        vid = images.permute(0, 2, 1, 3, 4)[0].to(device=torch.cuda.current_device(), dtype=images.dtype)  # (C,T,H,W)
+        tele_lat_p2 = tele_vae.encode(
+            [vid],
+            device=torch.cuda.current_device(),
+            **dump_tiler
+        ).detach().cpu()
+    _summ("teletron.P2.encode_list", tele_lat_p2)
+
+    # ---- compare against diffsynth dump ----
+    _summ("diffsynth.ref", latents_ref)
+
+    res0 = _compare_tensors(latents_ref, tele_lat_p0, args.rtol, args.atol)
+    res1 = _compare_tensors(latents_ref, tele_lat_p1, args.rtol, args.atol)
+    res2 = _compare_tensors(latents_ref, tele_lat_p2, args.rtol, args.atol)
+
+    print(f"[compare] P0(work_fn)      allclose={res0['allclose']} max_abs={res0['max_abs']} mean_abs={res0['mean_abs']}")
+    print(f"[compare] P1(encode_tensor) allclose={res1['allclose']} max_abs={res1['max_abs']} mean_abs={res1['mean_abs']}")
+    print(f"[compare] P2(encode_list)   allclose={res2['allclose']} max_abs={res2['max_abs']} mean_abs={res2['mean_abs']}")
+
 
 
 if __name__ == "__main__":
