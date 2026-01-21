@@ -15,6 +15,11 @@ def _tensor_bytes_sha256(t: torch.Tensor) -> str:
     return hashlib.sha256(t.view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
+def _tensor_bytes_md5(t: torch.Tensor) -> str:
+    t = t.detach().cpu().contiguous()
+    return hashlib.md5(t.view(torch.uint8).numpy().tobytes()).hexdigest()
+
+
 def _to_cpu_detached(x: Any) -> Any:
     """Detach tensors and move to CPU; keep structure for (list/tuple/dict)."""
     if torch.is_tensor(x):
@@ -29,7 +34,7 @@ def _to_cpu_detached(x: Any) -> Any:
 def _flatten_tensors(x: Any, prefix: str = "") -> List[Tuple[str, torch.Tensor]]:
     """
     Flatten nested structure to list of (key, tensor).
-    key is a stable path like "tensor", "0", "0.key", "out.0", etc.
+    key is a stable path like "tensor", "0", "0.key", etc.
     """
     out: List[Tuple[str, torch.Tensor]] = []
     if torch.is_tensor(x):
@@ -81,7 +86,6 @@ def _dtype_counts_str(dtypes: List[str]) -> Dict[str, int]:
 def _module_param_dtype_runtime(module: nn.Module) -> Dict[str, Any]:
     """
     Capture *current* (runtime) param dtypes for this module (recurse=False).
-    This is what you asked for: save at every hook call.
     """
     dtypes = [str(p.dtype) for p in module.parameters(recurse=False)]
     return {
@@ -100,6 +104,63 @@ def _module_buffer_dtype_runtime(module: nn.Module) -> Dict[str, Any]:
     }
 
 
+def _hash_named_tensors_md5(named_tensors: List[Tuple[str, torch.Tensor]]) -> Dict[str, Any]:
+    """
+    Stable MD5 for a list of (name, tensor):
+      - per-tensor md5 is over raw bytes (cpu/contiguous)
+      - module-level md5 combines: name + shape + dtype + bytes for each tensor, in sorted(name) order
+    """
+    # stable order
+    items = sorted(named_tensors, key=lambda kv: kv[0])
+
+    per = {}
+    h = hashlib.md5()
+    total_num = 0
+
+    for name, t in items:
+        if not torch.is_tensor(t):
+            continue
+        tt = t.detach().cpu().contiguous()
+        total_num += 1
+
+        # per-tensor md5
+        md5_i = hashlib.md5(tt.view(torch.uint8).numpy().tobytes()).hexdigest()
+        per[name] = {
+            "md5": md5_i,
+            "shape": list(tt.shape),
+            "dtype": str(tt.dtype),
+            "numel": int(tt.numel()),
+        }
+
+        # feed module md5 with metadata + raw bytes
+        h.update(name.encode("utf-8"))
+        h.update(str(tuple(tt.shape)).encode("utf-8"))
+        h.update(str(tt.dtype).encode("utf-8"))
+        h.update(tt.view(torch.uint8).numpy().tobytes())
+
+    return {
+        "num_tensors": total_num,
+        "module_md5": h.hexdigest() if total_num > 0 else None,
+        "per_tensor": per,
+    }
+
+
+def _module_param_md5_runtime(module: nn.Module) -> Dict[str, Any]:
+    """
+    MD5 snapshot of this module's *own* params (recurse=False) at runtime.
+    """
+    named = [(n, p) for n, p in module.named_parameters(recurse=False)]
+    return _hash_named_tensors_md5(named)
+
+
+def _module_buffer_md5_runtime(module: nn.Module) -> Dict[str, Any]:
+    """
+    MD5 snapshot of this module's *own* buffers (recurse=False) at runtime.
+    """
+    named = [(n, b) for n, b in module.named_buffers(recurse=False)]
+    return _hash_named_tensors_md5(named)
+
+
 @dataclass
 class TraceTensorMeta:
     name: str              # module qualified name
@@ -109,7 +170,6 @@ class TraceTensorMeta:
     dtype: str
     device: str
     sha256: str
-    # stats in fp32 to compare quickly
     min: float
     max: float
     mean: float
@@ -120,7 +180,7 @@ class ForwardTraceRecorder:
     Ordered forward trace recorder:
     - stores per-call events in a list (execution order)
     - supports modules called multiple times
-    - (NEW) stores module param/buffer dtype snapshot at every hook call
+    - stores module param/buffer dtype + md5 snapshot at every hook call (recurse=False)
     """
 
     def __init__(
@@ -141,9 +201,14 @@ class ForwardTraceRecorder:
         save_stats_only: bool = False,
         max_modules: Optional[int] = None,
         verbose: bool = False,
-        # NEW knobs:
+        # dtype knobs
         record_param_dtypes_each_call: bool = True,
         record_buffer_dtypes_each_call: bool = True,
+        # md5 knobs
+        record_param_md5_each_call: bool = True,
+        record_buffer_md5_each_call: bool = False,  # 默认关掉，开了更重
+        record_param_md5_per_param: bool = True,
+        record_buffer_md5_per_buffer: bool = False,
     ):
         self.model = model
         self.name = name
@@ -163,12 +228,15 @@ class ForwardTraceRecorder:
 
         self.record_param_dtypes_each_call = record_param_dtypes_each_call
         self.record_buffer_dtypes_each_call = record_buffer_dtypes_each_call
+        self.record_param_md5_each_call = record_param_md5_each_call
+        self.record_buffer_md5_each_call = record_buffer_md5_each_call
+        self.record_param_md5_per_param = record_param_md5_per_param
+        self.record_buffer_md5_per_buffer = record_buffer_md5_per_buffer
 
         self.handles: List[torch.utils.hooks.RemovableHandle] = []
         self._module_count = 0
         self._start_time = None
 
-        # ✅ ordered, per-call trace
         self.events: List[Dict[str, Any]] = []
         self._call_idx = 0
 
@@ -231,27 +299,45 @@ class ForwardTraceRecorder:
             self._call_idx += 1
 
             ev: Dict[str, Any] = {
-                "idx": call_idx,  # ✅ execution order
+                "idx": call_idx,
                 "module_name": module_name,
                 "module_type": module.__class__.__name__,
                 "time": time.time(),
 
-                # NEW: runtime dtype snapshots (per call)
+                # dtype snapshots
                 "param_dtypes": None,
                 "buffer_dtypes": None,
 
+                # md5 snapshots
+                "param_md5": None,               # overall module md5 (params)
+                "param_md5_per_param": None,     # per-param md5 map
+                "buffer_md5": None,              # overall module md5 (buffers)
+                "buffer_md5_per_buffer": None,   # per-buffer md5 map
+
                 "inputs": None,
                 "outputs": None,
-                "meta": [],  # list of TraceTensorMeta dicts
+                "meta": [],
             }
 
+            # dtype snapshots
             if self.record_param_dtypes_each_call:
-                # recurse=False only (this module's own params)
                 ev["param_dtypes"] = _module_param_dtype_runtime(module)
-
             if self.record_buffer_dtypes_each_call:
                 ev["buffer_dtypes"] = _module_buffer_dtype_runtime(module)
 
+            # md5 snapshots (params / buffers)
+            if self.record_param_md5_each_call:
+                pm = _module_param_md5_runtime(module)
+                ev["param_md5"] = pm["module_md5"]
+                if self.record_param_md5_per_param:
+                    ev["param_md5_per_param"] = pm["per_tensor"]
+            if self.record_buffer_md5_each_call:
+                bm = _module_buffer_md5_runtime(module)
+                ev["buffer_md5"] = bm["module_md5"]
+                if self.record_buffer_md5_per_buffer:
+                    ev["buffer_md5_per_buffer"] = bm["per_tensor"]
+
+            # tensor IO
             if self.record_inputs:
                 store_in, metas_in = self._process(module_name, "in", inputs)
                 ev["inputs"] = store_in
@@ -262,7 +348,6 @@ class ForwardTraceRecorder:
                 ev["outputs"] = store_out
                 ev["meta"].extend(metas_out)
 
-            # ✅ append in real forward order
             self.events.append(ev)
 
         return fn
@@ -297,6 +382,7 @@ class ForwardTraceRecorder:
             "num_modules_hooked": self._module_count,
             "num_events": len(self.events),
             "elapsed_sec": (time.time() - self._start_time) if self._start_time else None,
+
             "record_inputs": self.record_inputs,
             "record_outputs": self.record_outputs,
             "cast_float32": self.cast_float32,
@@ -305,11 +391,17 @@ class ForwardTraceRecorder:
             "sample_seed": self.sample_seed,
             "save_stats_only": self.save_stats_only,
 
-            # NEW:
+            # dtype knobs
             "record_param_dtypes_each_call": self.record_param_dtypes_each_call,
             "record_buffer_dtypes_each_call": self.record_buffer_dtypes_each_call,
 
-            "events": self.events,  # ✅ ordered list
+            # md5 knobs
+            "record_param_md5_each_call": self.record_param_md5_each_call,
+            "record_buffer_md5_each_call": self.record_buffer_md5_each_call,
+            "record_param_md5_per_param": self.record_param_md5_per_param,
+            "record_buffer_md5_per_buffer": self.record_buffer_md5_per_buffer,
+
+            "events": self.events,
             "extra": extra or {},
         }
         torch.save(payload, str(path))
