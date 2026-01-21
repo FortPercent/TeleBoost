@@ -175,6 +175,39 @@ def _build_encoder_batch(sample):
     return batch
 
 
+def _build_image_vae_input(branch_item):
+    if not isinstance(branch_item, dict):
+        return None
+    images = branch_item.get("images")
+    if not torch.is_tensor(images):
+        return None
+    if images.dim() == 5:
+        images = images[0]
+    if images.dim() != 4:
+        return None
+    num_frames, channels, height, width = images.shape
+    if num_frames < 1 or channels < 3:
+        return None
+    image = images[0].unsqueeze(0)
+    end_image = branch_item.get("end_image")
+    if torch.is_tensor(end_image):
+        if end_image.dim() == 3:
+            end_image = end_image.unsqueeze(0)
+        elif end_image.dim() == 4 and end_image.shape[0] != 1:
+            end_image = end_image[:1]
+        if end_image.shape[-2:] != (height, width):
+            end_image = None
+    else:
+        end_image = None
+    if end_image is not None and num_frames >= 2:
+        zeros = torch.zeros(3, num_frames - 2, height, width, device=image.device, dtype=image.dtype)
+        vae_input = torch.concat([image.transpose(0, 1), zeros, end_image.transpose(0, 1)], dim=1)
+    else:
+        zeros = torch.zeros(3, num_frames - 1, height, width, device=image.device, dtype=image.dtype)
+        vae_input = torch.concat([image.transpose(0, 1), zeros], dim=1)
+    return vae_input
+
+
 def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
     if encoder is None or not isinstance(sample, dict):
         return
@@ -287,6 +320,39 @@ def _compare_encoder_outputs(sample, encoder, compare_rtol, compare_atol):
                 key,
                 result,
             )
+        image_vae_input = _build_image_vae_input(branch_item)
+        if torch.is_tensor(image_vae_input):
+            tag = f"image_vae_input_{branch_name}"
+            payload = dump_loader.load_tensors(pair_id_value, tag, dump_rank)
+            if isinstance(payload, dict) and torch.is_tensor(payload.get("vae_input")):
+                expected = payload["vae_input"].detach().cpu()
+                actual = image_vae_input.detach().cpu()
+                if expected.dtype != actual.dtype:
+                    actual = actual.to(dtype=expected.dtype)
+                result = dump_loader.compare_tensors(expected, actual, rtol=compare_rtol, atol=compare_atol)
+                dump_loader.write_compare_result(
+                    {
+                        "tag": "image_vae_input_compare",
+                        "pair_id": pair_id_value,
+                        "branch": branch_name,
+                        "dump_rank": int(dump_rank) if dump_rank is not None else dump_rank,
+                        "result": result,
+                    },
+                    torch.distributed.get_rank() if torch.distributed.is_initialized() else 0,
+                )
+                logger.info(
+                    "image_vae_input compare pair_id=%s branch=%s result=%s",
+                    pair_id_value,
+                    branch_name,
+                    result,
+                )
+            else:
+                logger.info(
+                    "skip image_vae_input compare missing dump pair_id=%s tag=%s dump_rank=%s",
+                    pair_id_value,
+                    tag,
+                    dump_rank,
+                )
 
 
 def _log_encoder_dtypes(encoder):
