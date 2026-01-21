@@ -96,16 +96,20 @@ def _compare_tensors(name, a, b, rtol, atol):
 
 
 def main():
-    root = Path(__file__).resolve().parent
-    teletron_root = root / "Teletron-clean" / "Teletron"
-    diffsynth_root = root / "DiffSynth" / "Megatron_VAST"
-    _add_sys_path(teletron_root)
-    _add_sys_path(diffsynth_root)
-
     parser = argparse.ArgumentParser(description="Minimal Teletron vs DiffSynth VAE compare demo.")
     parser.add_argument(
+        "--teletron-root",
+        default=os.environ.get("TELETRON_ROOT", ""),
+        help="Teletron repo root (defaults to the script directory).",
+    )
+    parser.add_argument(
+        "--diffsynth-root",
+        default=os.environ.get("DIFFSYNTH_ROOT", ""),
+        help="DiffSynth repo root (set if not co-located).",
+    )
+    parser.add_argument(
         "--teletron-config",
-        default=str(teletron_root / "examples" / "teleai" / "config" / "wan_dpo.py"),
+        default="",
         help="Path to Teletron config .py (must define `config`).",
     )
     parser.add_argument(
@@ -126,6 +130,21 @@ def main():
     parser.add_argument("--rtol", type=float, default=1e-5)
     parser.add_argument("--atol", type=float, default=1e-8)
     args = parser.parse_args()
+
+    teletron_root = Path(args.teletron_root) if args.teletron_root else Path(__file__).resolve().parent
+    diffsynth_root = Path(args.diffsynth_root) if args.diffsynth_root else None
+    if diffsynth_root is None:
+        candidate = teletron_root.parent / "DiffSynth" / "Megatron_VAST"
+        diffsynth_root = candidate if candidate.exists() else None
+    if diffsynth_root is None or not diffsynth_root.exists():
+        raise RuntimeError("diffsynth root not found; set --diffsynth-root or DIFFSYNTH_ROOT")
+    _add_sys_path(teletron_root)
+    _add_sys_path(diffsynth_root)
+
+    if not args.teletron_config:
+        args.teletron_config = str(
+            teletron_root / "examples" / "teleai" / "config" / "wan_dpo.py"
+        )
 
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this demo")
