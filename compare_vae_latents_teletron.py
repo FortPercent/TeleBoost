@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# Usage:
+#   python compare_vae_latents_teletron.py --diffsynth-dump /tmp/diffsynth_vae_latents.pt \
+#     --diffsynth-root /path/to/DiffSynth/Megatron_VAST --device cuda
 import argparse
 import importlib.util
 import os
@@ -169,11 +172,31 @@ def main():
         help="Teletron repo root (defaults to the script directory).",
     )
     parser.add_argument(
+        "--diffsynth-root",
+        default=os.environ.get("DIFFSYNTH_ROOT", ""),
+        help="DiffSynth repo root (set if using DiffSynth VAE init).",
+    )
+    parser.add_argument(
         "--teletron-config",
         default="",
         help="Path to Teletron config .py (must define `config`).",
     )
     parser.add_argument("--diffsynth-dump", required=True, help="DiffSynth .pt dump file.")
+    parser.add_argument(
+        "--diffsynth-vae-path",
+        default="",
+        help="DiffSynth VAE weight file path (defaults to dump payload).",
+    )
+    parser.add_argument(
+        "--diffsynth-vae-model-name",
+        default="",
+        help="ModelManager model name (defaults to dump payload).",
+    )
+    parser.add_argument(
+        "--use-teletron-encoder",
+        action="store_true",
+        help="Use Teletron encoder instead of DiffSynth VAE init.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--encoder-dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     parser.add_argument("--rtol", type=float, default=1e-5)
@@ -192,20 +215,8 @@ def main():
     )
     args = parser.parse_args()
 
-    teletron_root = Path(args.teletron_root) if args.teletron_root else Path(__file__).resolve().parent
-    _add_sys_path(teletron_root)
-
-    if not args.teletron_config:
-        args.teletron_config = str(teletron_root / "examples" / "teleai" / "config" / "wan_dpo.py")
-
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this demo")
-
-    config_path = Path(args.teletron_config)
-    if not config_path.exists():
-        raise RuntimeError(f"Teletron config not found: {config_path}")
-    config = _load_config_from_py(config_path)
-    _patch_set_config(config)
 
     device_str = args.device
     if device_str.startswith("cuda"):
@@ -215,9 +226,6 @@ def main():
         torch.cuda.set_device(device.index if device.index is not None else 0)
     else:
         device = torch.device(device_str)
-
-    # Build encoder (this calls TeleaiEncoder.setup(), which loads VAE/TextEncoder, etc.)
-    teletron_encoder, encoder_config = _build_teletron_encoder(config, device, args.encoder_dtype)
 
     # Load DiffSynth dump
     payload = torch.load(args.diffsynth_dump, map_location="cpu")
@@ -236,145 +244,60 @@ def main():
         raise RuntimeError("diffsynth dump missing input_shape")
     _, num_frames, _, height, width = input_shape
 
-    # -----------------------------
-    # 1) Compare VAE weight file hash (exact, recommended)
-    # -----------------------------
-    teletron_vae_path = None
-    if args.teletron_vae_path:
-        teletron_vae_path = Path(args.teletron_vae_path)
-    else:
-        # Auto-pick from TeleaiEncoder.vae_path
-        if hasattr(teletron_encoder, "vae_path") and teletron_encoder.vae_path:
-            teletron_vae_path = _resolve_weight_path(str(teletron_encoder.vae_path), teletron_root, config_path)
-
-    if teletron_vae_path is None:
-        print("[weights] cannot determine teletron VAE path (no override, encoder has no vae_path).")
-    else:
-        if not teletron_vae_path.exists():
-            raise RuntimeError(f"[weights] teletron VAE weight file not found: {teletron_vae_path}")
-        teletron_vae_weight_sha256 = _sha256_file(teletron_vae_path)
-
-        if diffsynth_vae_weight_sha256 is not None:
-            ok = (teletron_vae_weight_sha256 == diffsynth_vae_weight_sha256)
-            print(
-                f"[weights] match={ok} "
-                f"diffsynth_sha256={diffsynth_vae_weight_sha256} "
-                f"teletron_sha256={teletron_vae_weight_sha256}"
-            )
-            print(f"[weights] diffsynth_vae_path={diffsynth_vae_path} model_name={diffsynth_vae_model_name}")
-            print(f"[weights] teletron_vae_path={teletron_vae_path}")
-            if (not ok) and args.strict_weight_hash:
-                raise RuntimeError("VAE weight SHA256 mismatch (file-level).")
-        else:
-            print(f"[weights] teletron_sha256={teletron_vae_weight_sha256} (diffsynth dump missing vae_weight_sha256)")
-
-    # -----------------------------
-    # 2) Compare VAE param-content hash (best-effort)
-    #    TeleaiEncoder loads weights into self.vae.model
-    # -----------------------------
-    teletron_vae_state_sha256 = None
-    if hasattr(teletron_encoder, "vae") and teletron_encoder.vae is not None:
-        target = getattr(teletron_encoder.vae, "model", teletron_encoder.vae)
-        teletron_vae_state_sha256 = _sha256_state_dict(target)
-
-    if diffsynth_vae_state_sha256 is not None or teletron_vae_state_sha256 is not None:
-        print(f"[statehash] diffsynth_vae_state_sha256={diffsynth_vae_state_sha256}")
-        print(f"[statehash] teletron_vae_state_sha256={teletron_vae_state_sha256}")
-        # Note: only strict-compare if you are sure both sides hash the same module (same keys).
-        # You can add a flag if you want strict mode here.
-
-
-    def _first_param_dtype(m):
-        try:
-            return next(m.parameters()).dtype
-        except Exception:
-            return None
-
-    # Teletron VAE module (TeleaiEncoder loads into self.vae.model)
-    tele_vae = teletron_encoder.vae
-    tele_vae_model = getattr(tele_vae, "model", tele_vae)
-
-    print(f"[teletron] model_param_dtype={_first_param_dtype(tele_vae_model)}")
-    print(f"[teletron] encoder_dtype_arg={args.encoder_dtype}")
-    print(f"[teletron] is_autocast_enabled={torch.is_autocast_enabled()}")
-    if torch.cuda.is_available():
-        print(f"[teletron] autocast_gpu_dtype={torch.get_autocast_dtype('cuda')}")
-       # -----------------------------
-    # 3) Run Teletron encode and compare latents (3 paths)
-    # -----------------------------
     torch_dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}[input_dtype]
     images = _build_input(height, width, num_frames, device, torch_dtype)
 
-    # ---- dump-side tiler kwargs (must align) ----
     dump_tiler = payload.get("tiler_kwargs", {})
-    dump_tiler["tiled"] = False
-    print(f"[teletron] diffsynth_tiler_kwargs={dump_tiler}")
+    if not isinstance(dump_tiler, dict):
+        dump_tiler = {}
 
-    # ---- input sanity ----
-    video_cthw = images.permute(0, 2, 1, 3, 4)[0].detach().cpu().contiguous()  # (C,T,H,W)
-    input_bcthw = images.permute(0, 2, 1, 3, 4).detach().cpu().contiguous()    # (B,C,T,H,W)
+    if args.use_teletron_encoder:
+        teletron_root = Path(args.teletron_root) if args.teletron_root else Path(__file__).resolve().parent
+        _add_sys_path(teletron_root)
+        if not args.teletron_config:
+            args.teletron_config = str(teletron_root / "examples" / "teleai" / "config" / "wan_dpo.py")
+        config_path = Path(args.teletron_config)
+        if not config_path.exists():
+            raise RuntimeError(f"Teletron config not found: {config_path}")
+        config = _load_config_from_py(config_path)
+        _patch_set_config(config)
+        teletron_encoder, _ = _build_teletron_encoder(config, device, args.encoder_dtype)
+        teletron_batch = {"images": images}
+        tele_latents = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
+        mode_label = "teletron"
+    else:
+        diffsynth_root = Path(args.diffsynth_root) if args.diffsynth_root else None
+        if diffsynth_root is None:
+            raise RuntimeError("diffsynth root not found; set --diffsynth-root or DIFFSYNTH_ROOT")
+        _add_sys_path(diffsynth_root)
+        vae_path = args.diffsynth_vae_path or diffsynth_vae_path
+        if not vae_path:
+            raise RuntimeError("diffsynth vae path missing; set --diffsynth-vae-path")
+        vae_model_name = args.diffsynth_vae_model_name or diffsynth_vae_model_name or "wan_video_vae"
+        from diffsynth.models.model_manager import ModelManager
 
-    def _sha256_tensor_bytes(t: torch.Tensor) -> str:
-        t = t.detach().cpu().contiguous()
-        return hashlib.sha256(t.view(torch.uint8).numpy().tobytes()).hexdigest()
+        manager = ModelManager(torch_dtype=torch_dtype, device=device, file_path_list=[vae_path])
+        vae = manager.fetch_model(vae_model_name)
+        if vae is None:
+            available = ", ".join(manager.model_name)
+            raise RuntimeError(f"diffsynth vae model '{vae_model_name}' not found. available: {available}")
+        vae_weight_sha256 = _sha256_file(Path(vae_path))
+        vae_state_sha256 = _sha256_state_dict(getattr(vae, "model", vae))
+        if diffsynth_vae_weight_sha256 is not None:
+            ok = (vae_weight_sha256 == diffsynth_vae_weight_sha256)
+            print(f"[diffsynth] weight_hash_match={ok}")
+            if (not ok) and args.strict_weight_hash:
+                raise RuntimeError("VAE weight SHA256 mismatch (file-level).")
+        if diffsynth_vae_state_sha256 is not None:
+            print(f"[diffsynth] state_hash_match={vae_state_sha256 == diffsynth_vae_state_sha256}")
+        video = images.permute(0, 2, 1, 3, 4)[0]
+        tele_latents = vae.encode([video], device=device, **dump_tiler).detach().cpu()
+        mode_label = "diffsynth"
 
-    print(f"[teletron] images dtype={images.dtype} shape={tuple(images.shape)} "
-          f"min={images.min().item():.6g} max={images.max().item():.6g} mean={images.float().mean().item():.6g}")
-    print(f"[teletron] video_cthw sha256={_sha256_tensor_bytes(video_cthw)}")
-    print(f"[teletron] input_bcthw sha256={_sha256_tensor_bytes(input_bcthw)}")
-
-    # ---- helper to summarize latents ----
-    def _summ(name: str, t: torch.Tensor):
-        t = t.detach().cpu()
-        print(f"[{name}] dtype={t.dtype} shape={tuple(t.shape)} "
-              f"min={t.min().item():.6g} max={t.max().item():.6g} mean={t.float().mean().item():.6g}")
-
-    # ---- get teletron vae handle ----
-    tele_vae = teletron_encoder.vae
-    if tele_vae is None:
-        raise RuntimeError("teletron_encoder.vae is None (encoder setup failed?)")
-
-    # ----------------------------------
-    # Path P0: original Teletron pipeline (work_fn)
-    # ----------------------------------
-    teletron_batch = {"images": images}
-    tele_lat_p0 = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
-    _summ("teletron.P0.work_fn", tele_lat_p0)
-
-    # ----------------------------------
-    # Path P1: direct encode with tensor input (B,C,T,H,W)  (matches Teletron encode_video)
-    # ----------------------------------
-    with torch.no_grad():
-        inp = images.permute(0, 2, 1, 3, 4).to(device=torch.cuda.current_device(), dtype=images.dtype)  # (B,C,T,H,W)
-        tele_lat_p1 = tele_vae.encode(
-            inp,
-            device=torch.cuda.current_device(),
-            **dump_tiler
-        ).detach().cpu()
-    _summ("teletron.P1.encode_tensor", tele_lat_p1)
-
-    # ----------------------------------
-    # Path P2: direct encode with list input [(C,T,H,W)] (matches DiffSynth dump)
-    # ----------------------------------
-    with torch.no_grad():
-        vid = images.permute(0, 2, 1, 3, 4)[0].to(device=torch.cuda.current_device(), dtype=images.dtype)  # (C,T,H,W)
-        tele_lat_p2 = tele_vae.encode(
-            [vid],
-            device=torch.cuda.current_device(),
-            **dump_tiler
-        ).detach().cpu()
-    _summ("teletron.P2.encode_list", tele_lat_p2)
-
-    # ---- compare against diffsynth dump ----
-    _summ("diffsynth.ref", latents_ref)
-
-    res0 = _compare_tensors(latents_ref, tele_lat_p0, args.rtol, args.atol)
-    res1 = _compare_tensors(latents_ref, tele_lat_p1, args.rtol, args.atol)
-    res2 = _compare_tensors(latents_ref, tele_lat_p2, args.rtol, args.atol)
-
-    print(f"[compare] P0(work_fn)      allclose={res0['allclose']} max_abs={res0['max_abs']} mean_abs={res0['mean_abs']}")
-    print(f"[compare] P1(encode_tensor) allclose={res1['allclose']} max_abs={res1['max_abs']} mean_abs={res1['mean_abs']}")
-    print(f"[compare] P2(encode_list)   allclose={res2['allclose']} max_abs={res2['max_abs']} mean_abs={res2['mean_abs']}")
+    result = _compare_tensors(latents_ref, tele_latents, args.rtol, args.atol)
+    print(f"[{mode_label}] latents shape={tuple(tele_latents.shape)} dtype={tele_latents.dtype}")
+    print(f"[diffsynth] latents shape={tuple(latents_ref.shape)} dtype={latents_ref.dtype}")
+    print(f"[compare] allclose={result['allclose']} max_abs={result['max_abs']} mean_abs={result['mean_abs']}")
 
 
 
