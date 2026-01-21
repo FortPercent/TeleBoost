@@ -1,4 +1,5 @@
 
+import os
 import torch
 from typing import Dict, Any, Tuple, List,Union
 
@@ -49,6 +50,18 @@ PROPERTY_DIMS = {
     'unprompt_emb': 3,
     'depth_latents': 5,
 }
+
+
+def _dump_model_state_dict(model, model_name, torch_dtype):
+    out_dir = os.path.join(os.getcwd(), "model_dumps")
+    os.makedirs(out_dir, exist_ok=True)
+    dtype_label = str(torch_dtype).replace("torch.", "")
+    out_path = os.path.join(out_dir, f"teletron_{model_name}_{dtype_label}.pth")
+    try:
+        torch.save(model.state_dict(), out_path)
+        print(f"[TeleaiEncoder] saved model state_dict to {out_path}")
+    except Exception as exc:
+        print(f"[TeleaiEncoder] failed to save model state_dict: {exc}")
 
 
 class TeleaiEncoder(BaseEncoder):
@@ -147,6 +160,7 @@ class TeleaiEncoder(BaseEncoder):
             else:
                 self.compression = (4, 16, 16)
         self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True)
+        _dump_model_state_dict(self.vae.model, self.vae_type, torch.bfloat16)
 
         print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
         self.text_encoder = TeleaiTextEncoder().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
