@@ -6,7 +6,6 @@ import tempfile
 import importlib.util
 import hashlib
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -15,6 +14,36 @@ from PIL import Image
 import teletron.utils as teletron_utils
 from teletron.datasets.dpo_dataset import WanDPODataset
 from my_utils import DumpTensorIO
+
+
+_ENCODER_UTILS = None
+
+
+def _load_encoder_utils():
+    global _ENCODER_UTILS
+    if _ENCODER_UTILS is not None:
+        return _ENCODER_UTILS
+    override = os.environ.get("WAN_ENCODER_UTILS_PATH")
+    if override:
+        path = Path(override)
+        if path.is_dir():
+            path = path / "encoder_compare_utils.py"
+    else:
+        path = None
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "encoder_compare_utils.py"
+            if candidate.exists():
+                path = candidate
+                break
+    if path is None or not path.exists():
+        raise RuntimeError("encoder_compare_utils.py not found; set WAN_ENCODER_UTILS_PATH")
+    spec = importlib.util.spec_from_file_location("encoder_compare_utils", str(path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load encoder_compare_utils.py from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _ENCODER_UTILS = module
+    return module
 
 
 def _write_image(path, color, size):
@@ -59,43 +88,6 @@ def _resolve_external_dump(rank):
     if path.exists():
         return path
     return None
-
-
-def _load_encoder_config():
-    config_path = os.environ.get("WAN_DPO_ENCODER_CONFIG_PATH")
-    if not config_path:
-        default_path = Path(__file__).resolve().parents[2] / "examples" / "teleai" / "config" / "wan_dpo.py"
-        if default_path.exists():
-            config_path = str(default_path)
-    if not config_path or not os.path.exists(config_path):
-        return None
-    spec = importlib.util.spec_from_file_location("wan_dpo_config", config_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    config = getattr(module, "config", None)
-    if not isinstance(config, dict):
-        return None
-    model_cfg = config.get("model_config", {})
-    return model_cfg.get("encoder")
-
-
-def _ensure_global_args_for_encoder():
-    from teletron.utils.global_vars import get_args, set_global_args
-
-    try:
-        _ = get_args()
-        return
-    except AssertionError:
-        pass
-    args = SimpleNamespace(
-        encoder_dtype="bfloat16",
-        consumer_models_num=1,
-        micro_batch_size=1,
-        negative_prompt="",
-    )
-    set_global_args(args)
 
 
 def _resolve_dump_rank():
@@ -408,7 +400,9 @@ def _run_pipeline(rank):
     num_frames = 49
     max_pixels = 400000
 
-    encoder_config = _load_encoder_config()
+    encoder_utils = _load_encoder_utils()
+    default_config_path = Path(__file__).resolve().parents[2] / "examples" / "teleai" / "config" / "wan_dpo.py"
+    encoder_config = encoder_utils.load_teletron_encoder_config(default_path=default_config_path)
     dataset_config = {
         "width": width,
         "height": height,
@@ -466,12 +460,8 @@ def _run_pipeline(rank):
                 encoder_name = encoder_config.get("type")
                 if not encoder_name:
                     raise RuntimeError("encoder config missing type field")
-                _ensure_global_args_for_encoder()
-                from teletron.models.encoder_registry import get_encoder
-
                 # Build and initialize the Teletron encoder used for compare.
-                encoder = get_encoder(name=encoder_name, device=torch.cuda.current_device())
-                encoder.setup()
+                encoder = encoder_utils.build_teletron_encoder(encoder_config, device=torch.cuda.current_device())
                 _log_encoder_dtypes(encoder)
                 _log_vae_hashes(encoder, encoder_config)
         else:
