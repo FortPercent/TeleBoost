@@ -155,9 +155,14 @@ def main():
     config = _load_config_from_py(config_path)
     _patch_set_config(config)
 
-    device = torch.device(args.device)
-    if device.type == "cuda":
-        torch.cuda.set_device(device)
+    device_str = args.device
+    if device_str.startswith("cuda"):
+        if device_str == "cuda":
+            device_str = "cuda:0"
+        device = torch.device(device_str)
+        torch.cuda.set_device(device.index if device.index is not None else 0)
+    else:
+        device = torch.device(device_str)
     encoder_dtype = args.encoder_dtype
     teletron_encoder, encoder_config = _build_teletron_encoder(config, device, encoder_dtype)
     vae_cfg = encoder_config.get("vae", {})
