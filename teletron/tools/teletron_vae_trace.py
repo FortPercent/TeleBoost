@@ -126,7 +126,7 @@ def main():
         teletron_root = Path(args.teletron_root)
     else:
         # 脚本在 teletron repo 内，例如 teletron/tools/teletron_vae_trace.py
-        teletron_root = Path(__file__).resolve().parents[1]
+        teletron_root = Path(__file__).resolve().parents[2]
     _add_sys_path(teletron_root)
 
     if args.teletron_config:
