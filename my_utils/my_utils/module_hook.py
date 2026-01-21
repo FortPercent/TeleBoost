@@ -4,6 +4,8 @@ import hashlib
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 from pathlib import Path
+from collections import Counter
+
 import torch
 import torch.nn as nn
 
@@ -27,9 +29,9 @@ def _to_cpu_detached(x: Any) -> Any:
 def _flatten_tensors(x: Any, prefix: str = "") -> List[Tuple[str, torch.Tensor]]:
     """
     Flatten nested structure to list of (key, tensor).
-    key is a stable path like "out", "out.0", "out.key".
+    key is a stable path like "tensor", "0", "0.key", "out.0", etc.
     """
-    out = []
+    out: List[Tuple[str, torch.Tensor]] = []
     if torch.is_tensor(x):
         out.append((prefix or "tensor", x))
     elif isinstance(x, (list, tuple)):
@@ -72,6 +74,32 @@ def _sample_tensor(
     raise ValueError(f"unknown sample mode: {mode}")
 
 
+def _dtype_counts_str(dtypes: List[str]) -> Dict[str, int]:
+    return dict(Counter(dtypes))
+
+
+def _module_param_dtype_runtime(module: nn.Module) -> Dict[str, Any]:
+    """
+    Capture *current* (runtime) param dtypes for this module (recurse=False).
+    This is what you asked for: save at every hook call.
+    """
+    dtypes = [str(p.dtype) for p in module.parameters(recurse=False)]
+    return {
+        "first": dtypes[0] if dtypes else None,
+        "counts": _dtype_counts_str(dtypes) if dtypes else {},
+        "num_params": len(dtypes),
+    }
+
+
+def _module_buffer_dtype_runtime(module: nn.Module) -> Dict[str, Any]:
+    dtypes = [str(b.dtype) for b in module.buffers(recurse=False)]
+    return {
+        "first": dtypes[0] if dtypes else None,
+        "counts": _dtype_counts_str(dtypes) if dtypes else {},
+        "num_buffers": len(dtypes),
+    }
+
+
 @dataclass
 class TraceTensorMeta:
     name: str              # module qualified name
@@ -85,11 +113,14 @@ class TraceTensorMeta:
     min: float
     max: float
     mean: float
+
+
 class ForwardTraceRecorder:
     """
     Ordered forward trace recorder:
     - stores per-call events in a list (execution order)
     - supports modules called multiple times
+    - (NEW) stores module param/buffer dtype snapshot at every hook call
     """
 
     def __init__(
@@ -110,6 +141,9 @@ class ForwardTraceRecorder:
         save_stats_only: bool = False,
         max_modules: Optional[int] = None,
         verbose: bool = False,
+        # NEW knobs:
+        record_param_dtypes_each_call: bool = True,
+        record_buffer_dtypes_each_call: bool = True,
     ):
         self.model = model
         self.name = name
@@ -126,6 +160,9 @@ class ForwardTraceRecorder:
         self.save_stats_only = save_stats_only
         self.max_modules = max_modules
         self.verbose = verbose
+
+        self.record_param_dtypes_each_call = record_param_dtypes_each_call
+        self.record_buffer_dtypes_each_call = record_buffer_dtypes_each_call
 
         self.handles: List[torch.utils.hooks.RemovableHandle] = []
         self._module_count = 0
@@ -152,8 +189,9 @@ class ForwardTraceRecorder:
         cpu_obj = _to_cpu_detached(obj)
         flat = _flatten_tensors(cpu_obj, prefix="")
 
-        store = {}
-        metas = []
+        store: Dict[str, torch.Tensor] = {}
+        metas: List[Dict[str, Any]] = []
+
         for key, t in flat:
             if not torch.is_tensor(t):
                 continue
@@ -192,15 +230,27 @@ class ForwardTraceRecorder:
             call_idx = self._call_idx
             self._call_idx += 1
 
-            ev = {
+            ev: Dict[str, Any] = {
                 "idx": call_idx,  # ✅ execution order
                 "module_name": module_name,
                 "module_type": module.__class__.__name__,
                 "time": time.time(),
+
+                # NEW: runtime dtype snapshots (per call)
+                "param_dtypes": None,
+                "buffer_dtypes": None,
+
                 "inputs": None,
                 "outputs": None,
                 "meta": [],  # list of TraceTensorMeta dicts
             }
+
+            if self.record_param_dtypes_each_call:
+                # recurse=False only (this module's own params)
+                ev["param_dtypes"] = _module_param_dtype_runtime(module)
+
+            if self.record_buffer_dtypes_each_call:
+                ev["buffer_dtypes"] = _module_buffer_dtype_runtime(module)
 
             if self.record_inputs:
                 store_in, metas_in = self._process(module_name, "in", inputs)
@@ -252,7 +302,13 @@ class ForwardTraceRecorder:
             "cast_float32": self.cast_float32,
             "sample_mode": self.sample_mode,
             "sample_max_elems": self.sample_max_elems,
+            "sample_seed": self.sample_seed,
             "save_stats_only": self.save_stats_only,
+
+            # NEW:
+            "record_param_dtypes_each_call": self.record_param_dtypes_each_call,
+            "record_buffer_dtypes_each_call": self.record_buffer_dtypes_each_call,
+
             "events": self.events,  # ✅ ordered list
             "extra": extra or {},
         }
