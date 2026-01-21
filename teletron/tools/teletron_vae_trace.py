@@ -11,7 +11,7 @@ import torch
 
 # 你已保存的 hook 工具类
 # forward_trace.py 里需要暴露 ForwardTraceRecorder
-from forward_trace import ForwardTraceRecorder
+from my_utils import ForwardTraceRecorder
 
 
 def _add_sys_path(path: Path) -> None:
