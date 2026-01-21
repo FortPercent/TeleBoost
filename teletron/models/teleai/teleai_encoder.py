@@ -160,7 +160,7 @@ class TeleaiEncoder(BaseEncoder):
             else:
                 self.compression = (4, 16, 16)
         self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu', weights_only=False), strict=True)
-        _dump_model_state_dict(self.vae.model, self.vae_type, torch.bfloat16)
+        # _dump_model_state_dict(self.vae.model, self.vae_type, torch.bfloat16)
 
         print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
         self.text_encoder = TeleaiTextEncoder().to(device=self.device, dtype=torch.bfloat16).eval().requires_grad_(False)
