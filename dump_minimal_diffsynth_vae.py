@@ -1,22 +1,16 @@
 #!/usr/bin/env python
 # Usage:
 #   python dump_minimal_diffsynth_vae.py --vae-path /path/to/Wan2.1_VAE.pth \
-#     --out /tmp/min_vae_latents.pt --device cuda \
-#     --vae-module teletron.models.teleai.models.dit.diffsynth_wan_video_vae
+#     --vae-code /path/to/diffsynth_wan_video_vae.py \
+#     --out /tmp/min_vae_latents.pt --device cuda
 import argparse
 import hashlib
-import importlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
 
 import torch
-
-
-def _add_sys_path(path: Path) -> None:
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
 
 
 def _parse_pair(value, default):
@@ -82,11 +76,10 @@ def _unwrap_state_dict(obj):
 
 def main():
     parser = argparse.ArgumentParser(description="Minimal DiffSynth VAE init + latent dump.")
-    parser.add_argument("--module-root", default="", help="Optional root to add to sys.path.")
     parser.add_argument(
-        "--vae-module",
-        default="teletron.models.teleai.models.dit.diffsynth_wan_video_vae",
-        help="Module path that provides WanVideoVAE.",
+        "--vae-code",
+        default="",
+        help="Path to a standalone diffsynth_wan_video_vae.py file.",
     )
     parser.add_argument("--vae-class", default="WanVideoVAE", help="VAE class name.")
     parser.add_argument("--vae-path", required=True, help="VAE weight file path.")
@@ -101,9 +94,6 @@ def main():
     parser.add_argument("--out", default="minimal_vae_latents.pt", help="Output .pt path.")
     args = parser.parse_args()
 
-    if args.module_root:
-        _add_sys_path(Path(args.module_root))
-
     device_str = args.device
     if device_str.startswith("cuda"):
         if device_str == "cuda":
@@ -116,10 +106,17 @@ def main():
 
     torch_dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}[args.dtype]
 
-    module = importlib.import_module(args.vae_module)
+    vae_code = Path(args.vae_code) if args.vae_code else None
+    if vae_code is None or not vae_code.exists():
+        raise RuntimeError("missing --vae-code or file not found")
+    spec = importlib.util.spec_from_file_location("minimal_diff_vae", str(vae_code))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load module from {vae_code}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     vae_class = getattr(module, args.vae_class, None)
     if vae_class is None:
-        raise RuntimeError(f"missing class '{args.vae_class}' in module '{args.vae_module}'")
+        raise RuntimeError(f"missing class '{args.vae_class}' in {vae_code}")
 
     vae = vae_class().to(device=device, dtype=torch_dtype).eval().requires_grad_(False)
     vae_path = Path(args.vae_path)
@@ -161,7 +158,7 @@ def main():
             "input_dtype": args.dtype,
             "tiler_kwargs": tiler_kwargs,
             "vae_class": args.vae_class,
-            "vae_module": args.vae_module,
+            "vae_module": str(vae_code),
             "vae_path": str(vae_path),
             "vae_weight_sha256": _sha256_file(vae_path),
             "vae_state_sha256": _sha256_state_dict(target),
