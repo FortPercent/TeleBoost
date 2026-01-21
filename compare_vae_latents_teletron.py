@@ -288,7 +288,8 @@ def main():
     # -----------------------------
     torch_dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}[input_dtype]
     images = _build_input(height, width, num_frames, device, torch_dtype)
-
+    video_list = [images.permute(0,2,1,3,4)[0]]   # list[(C,T,H,W)]
+    latents2 = diffsynth_vae.encode(video_list, device=device, **tiler_kwargs)
     # Teletron work_fn expects {"images": (B,T,C,H,W)} (per your pipeline)
     teletron_batch = {"images": images}
     teletron_latents = teletron_encoder.work_fn["latents"](batch=teletron_batch).detach().cpu()
