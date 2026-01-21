@@ -16,9 +16,6 @@ def load_trace(path: Path) -> dict:
 
 
 def get_events(obj: dict) -> list[dict]:
-    """
-    Expect new recorder format: payload["events"] is a list in forward order.
-    """
     if "events" in obj and isinstance(obj["events"], list):
         return obj["events"]
     raise RuntimeError(
@@ -51,9 +48,6 @@ def event_module_name(ev: dict) -> str:
 
 
 def event_outputs(ev: dict) -> dict[str, torch.Tensor] | None:
-    """
-    outputs are expected to be a dict key->tensor (already flattened in recorder).
-    """
     x = ev.get("outputs", None)
     if x is None:
         x = ev.get("output", None)
@@ -82,7 +76,6 @@ def event_param_md5(ev: dict) -> str | None:
 
 
 def event_param_md5_per_param(ev: dict) -> dict | None:
-    # recorder stores dict: {param_name: {md5, shape, dtype, numel}}
     x = ev.get("param_md5_per_param", None)
     return x if isinstance(x, dict) else None
 
@@ -101,9 +94,6 @@ def event_buffer_md5_per_buffer(ev: dict) -> dict | None:
 # Compare primitives
 # ----------------------------
 def compare_dtype_snap(a: dict | None, b: dict | None) -> tuple[bool, str]:
-    """
-    Return (ok, reason). If either is missing, treat as ok (optional metadata).
-    """
     if a is None or b is None:
         return True, ""
     if a.get("counts", {}) != b.get("counts", {}):
@@ -129,12 +119,6 @@ def compare_tensors(a: torch.Tensor, b: torch.Tensor, rtol: float, atol: float):
 
 
 def diff_md5_maps(a_map: dict | None, b_map: dict | None):
-    """
-    Compare per-param/per-buffer maps:
-      name -> {md5, shape, dtype, numel}
-    Returns (only_a, only_b, diff) where diff is list of tuples
-      (name, a_md5, b_md5, a_dtype, b_dtype, a_shape, b_shape, a_numel, b_numel)
-    """
     a_map = a_map or {}
     b_map = b_map or {}
     a_keys = set(a_map.keys())
@@ -163,6 +147,33 @@ def diff_md5_maps(a_map: dict | None, b_map: dict | None):
     return only_a, only_b, diff
 
 
+def print_per_param_md5_diff(title: str, t_ev: dict, d_ev: dict, topk: int):
+    t_map = event_param_md5_per_param(t_ev) if title == "param" else event_buffer_md5_per_buffer(t_ev)
+    d_map = event_param_md5_per_param(d_ev) if title == "param" else event_buffer_md5_per_buffer(d_ev)
+
+    if t_map is None or d_map is None:
+        print(f"  (per-{title} md5 map missing; enable record_{title}_md5_per_{title}=True in hook)")
+        return
+
+    only_t, only_d, diff = diff_md5_maps(t_map, d_map)
+    if only_t or only_d:
+        print(f"  name mismatch: teletron_only={len(only_t)} diffsynth_only={len(only_d)}")
+        if only_t:
+            print(f"    teletron-only examples: {only_t[:min(10,len(only_t))]}")
+        if only_d:
+            print(f"    diffsynth-only examples: {only_d[:min(10,len(only_d))]}")
+
+    if not diff:
+        print(f"  per-{title} md5: OK (all shared entries match)")
+        return
+
+    print(f"  per-{title} md5: DIFF count={len(diff)} (showing top {min(topk, len(diff))})")
+    for (name, a_md5, b_md5, a_dtype, b_dtype, a_shape, b_shape, a_numel, b_numel) in diff[:topk]:
+        print(f"    - {name}:")
+        print(f"        teletron md5={a_md5} dtype={a_dtype} shape={a_shape} numel={a_numel}")
+        print(f"        diffsynth md5={b_md5} dtype={b_dtype} shape={b_shape} numel={b_numel}")
+
+
 # ----------------------------
 # Alignment
 # ----------------------------
@@ -177,9 +188,6 @@ def build_byname_pairs(
     strip_prefixes: list[str],
     regex_subs: list[tuple[str, str]],
 ):
-    """
-    Pair by (normalized_module_name, kth_call_of_that_module).
-    """
     def index_events(events: list[dict]):
         buckets = {}
         counter = {}
@@ -201,86 +209,77 @@ def build_byname_pairs(
 
 
 # ----------------------------
-# Pretty printers
+# Full-scan mode (md5)
 # ----------------------------
-def _print_param_md5_report(prefix: str, t_ev: dict, d_ev: dict, topk: int, show_ok: bool):
+def scan_md5_all(
+    pairs,
+    mode: str,
+    strip_prefixes,
+    regex_subs,
+    *,
+    only_mismatch: bool,
+    check_param: bool,
+    check_buffer: bool,
+    print_per_entry_diff: bool,
+    per_entry_topk: int,
+):
     """
-    Print per-module param md5 + per-param diffs (if present).
+    Walk all aligned calls and compare param_md5 / buffer_md5.
     """
-    t_md5 = event_param_md5(t_ev)
-    d_md5 = event_param_md5(d_ev)
-    t_map = event_param_md5_per_param(t_ev)
-    d_map = event_param_md5_per_param(d_ev)
+    param_bad = []
+    buffer_bad = []
 
-    if t_md5 == d_md5 and not show_ok:
-        return
+    def where_str(align_key, t_ev, d_ev):
+        if mode == "strict":
+            return f"pos={align_key} (t.idx={t_ev.get('idx')} d.idx={d_ev.get('idx')})"
+        return f"key={align_key}"
 
-    print(f"\n  [{prefix}] module param_md5:")
-    print(f"    teletron: {t_md5}")
-    print(f"    diffsynth: {d_md5}")
-    if t_md5 == d_md5:
-        print("    -> OK (module-level param md5 match)")
+    for (t_ev, d_ev, align_key) in pairs:
+        t_raw = event_module_name(t_ev)
+        d_raw = event_module_name(d_ev)
+        t_name = normalize_name(t_raw, strip_prefixes, regex_subs)
+        d_name = normalize_name(d_raw, strip_prefixes, regex_subs)
+        where = where_str(align_key, t_ev, d_ev)
+        # name mismatch is not necessarily a bug; still show in line
+        name_show = f"{t_name} vs {d_name}"
 
-    # per-param diff if available
-    if t_map is None or d_map is None:
-        print("    (per-param md5 map missing on one side; enable record_param_md5_per_param=True in hook)")
-        return
+        if check_param:
+            t_md5 = event_param_md5(t_ev)
+            d_md5 = event_param_md5(d_ev)
+            ok = (t_md5 == d_md5)
+            if (not only_mismatch) or (not ok):
+                print(f"[param_md5] {'OK ' if ok else 'BAD'} {where}  {name_show}  tele={t_md5} diff={d_md5}")
+            if not ok:
+                param_bad.append((where, name_show, t_md5, d_md5, t_ev, d_ev))
+                if print_per_entry_diff:
+                    print("  -> per-param md5 diff:")
+                    print_per_param_md5_diff("param", t_ev, d_ev, per_entry_topk)
 
-    only_t, only_d, diff = diff_md5_maps(t_map, d_map)
-    if only_t or only_d:
-        print(f"    name mismatch: teletron_only={len(only_t)} diffsynth_only={len(only_d)}")
-        if only_t:
-            print(f"      teletron-only examples: {only_t[:min(10,len(only_t))]}")
-        if only_d:
-            print(f"      diffsynth-only examples: {only_d[:min(10,len(only_d))]}")
+        if check_buffer:
+            t_b = event_buffer_md5(t_ev)
+            d_b = event_buffer_md5(d_ev)
+            ok = (t_b == d_b)
+            if (not only_mismatch) or (not ok):
+                print(f"[buffer_md5] {'OK ' if ok else 'BAD'} {where}  {name_show}  tele={t_b} diff={d_b}")
+            if not ok:
+                buffer_bad.append((where, name_show, t_b, d_b, t_ev, d_ev))
+                if print_per_entry_diff:
+                    print("  -> per-buffer md5 diff:")
+                    print_per_param_md5_diff("buffer", t_ev, d_ev, per_entry_topk)
 
-    if not diff:
-        print("    per-param md5: OK (all shared params match)")
-        return
-
-    print(f"    per-param md5: DIFF count={len(diff)} (showing top {min(topk, len(diff))})")
-    for (name, a_md5, b_md5, a_dtype, b_dtype, a_shape, b_shape, a_numel, b_numel) in diff[:topk]:
-        print(f"      - {name}:")
-        print(f"          teletron md5={a_md5} dtype={a_dtype} shape={a_shape} numel={a_numel}")
-        print(f"          diffsynth md5={b_md5} dtype={b_dtype} shape={b_shape} numel={b_numel}")
-
-
-def _print_buffer_md5_report(prefix: str, t_ev: dict, d_ev: dict, topk: int, show_ok: bool):
-    t_md5 = event_buffer_md5(t_ev)
-    d_md5 = event_buffer_md5(d_ev)
-    t_map = event_buffer_md5_per_buffer(t_ev)
-    d_map = event_buffer_md5_per_buffer(d_ev)
-
-    if t_md5 == d_md5 and not show_ok:
-        return
-
-    print(f"\n  [{prefix}] module buffer_md5:")
-    print(f"    teletron: {t_md5}")
-    print(f"    diffsynth: {d_md5}")
-    if t_md5 == d_md5:
-        print("    -> OK (module-level buffer md5 match)")
-
-    if t_map is None or d_map is None:
-        print("    (per-buffer md5 map missing on one side; enable record_buffer_md5_per_buffer=True in hook)")
-        return
-
-    only_t, only_d, diff = diff_md5_maps(t_map, d_map)
-    if only_t or only_d:
-        print(f"    name mismatch: teletron_only={len(only_t)} diffsynth_only={len(only_d)}")
-        if only_t:
-            print(f"      teletron-only examples: {only_t[:min(10,len(only_t))]}")
-        if only_d:
-            print(f"      diffsynth-only examples: {only_d[:min(10,len(only_d))]}")
-
-    if not diff:
-        print("    per-buffer md5: OK (all shared buffers match)")
-        return
-
-    print(f"    per-buffer md5: DIFF count={len(diff)} (showing top {min(topk, len(diff))})")
-    for (name, a_md5, b_md5, a_dtype, b_dtype, a_shape, b_shape, a_numel, b_numel) in diff[:topk]:
-        print(f"      - {name}:")
-        print(f"          teletron md5={a_md5} dtype={a_dtype} shape={a_shape} numel={a_numel}")
-        print(f"          diffsynth md5={b_md5} dtype={b_dtype} shape={b_shape} numel={b_numel}")
+    print("\n==================== MD5 SCAN SUMMARY ====================")
+    if check_param:
+        print(f"param_md5 mismatches: {len(param_bad)}")
+        if param_bad:
+            w, n, tm, dm, _, _ = param_bad[0]
+            print(f"  first param_md5 mismatch: {w}  {n}")
+            print(f"    teletron={tm}\n    diffsynth={dm}")
+    if check_buffer:
+        print(f"buffer_md5 mismatches: {len(buffer_bad)}")
+        if buffer_bad:
+            w, n, tm, dm, _, _ = buffer_bad[0]
+            print(f"  first buffer_md5 mismatch: {w}  {n}")
+            print(f"    teletron={tm}\n    diffsynth={dm}")
 
 
 # ----------------------------
@@ -288,7 +287,7 @@ def _print_buffer_md5_report(prefix: str, t_ev: dict, d_ev: dict, topk: int, sho
 # ----------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="Compare two ordered forward traces and find the first divergence in execution order."
+        description="Compare two ordered forward traces and find divergences (tensor/dtype/md5)."
     )
     ap.add_argument("--teletron", required=True)
     ap.add_argument("--diffsynth", required=True)
@@ -298,31 +297,38 @@ def main():
     ap.add_argument("--mode", choices=["strict", "by-name"], default="strict",
                     help="strict: align by forward index; by-name: align by (module_name, call_k)")
 
-    # normalization knobs
     ap.add_argument("--strip-prefix", action="append", default=[],
                     help="Prefix to strip from module names (repeatable)")
     ap.add_argument("--regex-sub", action="append", default=[],
                     help=r"Regex substitution 'PATTERN=>REPL' (repeatable). Example: '^model\.'=>''")
 
-    # what to compare
-    ap.add_argument("--check-param-dtype", action="store_true",
-                    help="Compare per-call param dtype snapshot before comparing tensors.")
-    ap.add_argument("--check-buffer-dtype", action="store_true",
-                    help="Compare per-call buffer dtype snapshot before comparing tensors.")
-    ap.add_argument("--check-param-md5", action="store_true",
-                    help="Compare per-call module param_md5 (and per-param md5 if present).")
-    ap.add_argument("--check-buffer-md5", action="store_true",
-                    help="Compare per-call module buffer_md5 (and per-buffer md5 if present).")
-    ap.add_argument("--show-md5-ok", action="store_true",
-                    help="Also print md5 info even when md5 matches (useful to confirm plumbing).")
+    # dtype
+    ap.add_argument("--check-param-dtype", action="store_true")
+    ap.add_argument("--check-buffer-dtype", action="store_true")
+
+    # md5 (first-bad mode)
+    ap.add_argument("--check-param-md5", action="store_true")
+    ap.add_argument("--check-buffer-md5", action="store_true")
+
+    # NEW: full scan md5
+    ap.add_argument("--scan-param-md5-all", action="store_true",
+                    help="Scan ALL aligned calls and report param_md5 match/mismatch for each call.")
+    ap.add_argument("--scan-buffer-md5-all", action="store_true",
+                    help="Scan ALL aligned calls and report buffer_md5 match/mismatch for each call.")
+    ap.add_argument("--only-md5-mismatch", action="store_true",
+                    help="In md5 scan mode, only print mismatched lines.")
+    ap.add_argument("--print-per-param-md5-diff", action="store_true",
+                    help="In md5 scan mode, if a call mismatches, also print per-param/per-buffer md5 diff (if saved).")
     ap.add_argument("--param-topk", type=int, default=20,
-                    help="For per-param md5 diffs, print at most top-k entries (in name order).")
+                    help="For per-param/per-buffer md5 diffs, print at most top-k entries.")
+    ap.add_argument("--stop-after-md5-scan", action="store_true",
+                    help="If set, exit after md5 full scan (do not run tensor first-bad).")
+
+    # tensor
     ap.add_argument("--ignore-tensors", action="store_true",
                     help="Only compare metadata (dtype/md5), skip tensor outputs.")
-
-    # output controls
     ap.add_argument("--print-ok", action="store_true",
-                    help="Print OK line for each aligned call (can be verbose).")
+                    help="Print OK line for each aligned call (verbose).")
     ap.add_argument("--topk", type=int, default=20,
                     help="After first mismatch, print top-k mismatched tensor keys within that call.")
 
@@ -334,7 +340,6 @@ def main():
     d_events = get_events(d_obj)
 
     regex_subs = parse_regex_subs(args.regex_sub)
-
     default_strip = [
         "teletron.vae_model.",
         "diffsynth.vae_model.",
@@ -359,12 +364,28 @@ def main():
         if only_d:
             print("[by-name] diffsynth-only examples:", only_d[:10])
 
+    # -------- NEW: full scan md5 --------
+    if args.scan_param_md5_all or args.scan_buffer_md5_all:
+        scan_md5_all(
+            pairs,
+            args.mode,
+            strip_prefixes,
+            regex_subs,
+            only_mismatch=bool(args.only_md5_mismatch),
+            check_param=bool(args.scan_param_md5_all),
+            check_buffer=bool(args.scan_buffer_md5_all),
+            print_per_entry_diff=bool(args.print_per_param_md5_diff),
+            per_entry_topk=int(args.param_topk),
+        )
+        if args.stop_after_md5_scan:
+            return
+
+    # -------- original: first-bad tensor (and optional dtype/md5 checks) --------
     def where_str(align_key, t_ev, d_ev):
         if args.mode == "strict":
             return f"pos={align_key} (t.idx={t_ev.get('idx')} d.idx={d_ev.get('idx')})"
         return f"key={align_key}"
 
-    # walk in aligned order and stop at first divergence
     for (t_ev, d_ev, align_key) in pairs:
         t_raw = event_module_name(t_ev)
         d_raw = event_module_name(d_ev)
@@ -372,7 +393,6 @@ def main():
         d_name = normalize_name(d_raw, strip_prefixes, regex_subs)
         where = where_str(align_key, t_ev, d_ev)
 
-        # 0) dtype snapshots
         if args.check_param_dtype:
             ok, reason = compare_dtype_snap(event_param_dtypes(t_ev), event_param_dtypes(d_ev))
             if not ok:
@@ -380,10 +400,6 @@ def main():
                 print(f"  param_dtypes mismatch: {reason}")
                 print(f"  teletron.param_dtypes={event_param_dtypes(t_ev)}")
                 print(f"  diffsynth.param_dtypes={event_param_dtypes(d_ev)}")
-                if args.check_param_md5:
-                    _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-                if args.check_buffer_md5:
-                    _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
                 return
 
         if args.check_buffer_dtype:
@@ -393,74 +409,57 @@ def main():
                 print(f"  buffer_dtypes mismatch: {reason}")
                 print(f"  teletron.buffer_dtypes={event_buffer_dtypes(t_ev)}")
                 print(f"  diffsynth.buffer_dtypes={event_buffer_dtypes(d_ev)}")
-                if args.check_param_md5:
-                    _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-                if args.check_buffer_md5:
-                    _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
                 return
 
-        # 0.5) md5 snapshots (can be checked even when tensors match)
         if args.check_param_md5:
             t_md5 = event_param_md5(t_ev)
             d_md5 = event_param_md5(d_ev)
             if t_md5 != d_md5:
                 print(f"[FIRST BAD] {where}  module={t_name} vs {d_name}")
                 print("  param_md5 mismatch detected BEFORE tensor compare.")
-                _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-                if args.check_buffer_md5:
-                    _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
+                print(f"  teletron.param_md5={t_md5}")
+                print(f"  diffsynth.param_md5={d_md5}")
+                if args.print_per_param_md5_diff:
+                    print("  -> per-param md5 diff:")
+                    print_per_param_md5_diff("param", t_ev, d_ev, int(args.param_topk))
                 return
-            elif args.show_md5_ok:
-                # print ok md5 line but continue
-                print(f"[MD5 OK] {where}  {t_name}  param_md5={t_md5}")
 
         if args.check_buffer_md5:
-            t_bmd5 = event_buffer_md5(t_ev)
-            d_bmd5 = event_buffer_md5(d_ev)
-            if t_bmd5 != d_bmd5:
+            t_b = event_buffer_md5(t_ev)
+            d_b = event_buffer_md5(d_ev)
+            if t_b != d_b:
                 print(f"[FIRST BAD] {where}  module={t_name} vs {d_name}")
                 print("  buffer_md5 mismatch detected BEFORE tensor compare.")
-                _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-                if args.check_param_md5:
-                    _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
+                print(f"  teletron.buffer_md5={t_b}")
+                print(f"  diffsynth.buffer_md5={d_b}")
+                if args.print_per_param_md5_diff:
+                    print("  -> per-buffer md5 diff:")
+                    print_per_param_md5_diff("buffer", t_ev, d_ev, int(args.param_topk))
                 return
-            elif args.show_md5_ok:
-                print(f"[MD5 OK] {where}  {t_name}  buffer_md5={t_bmd5}")
 
         if args.ignore_tensors:
             if args.print_ok:
                 print(f"[OK ] {where}  {t_name}")
             continue
 
-        # 1) outputs exist?
         t_out = event_outputs(t_ev)
         d_out = event_outputs(d_ev)
         if t_out is None or d_out is None:
             print(f"[FIRST BAD] {where}  module={t_name} vs {d_name}")
             print(f"  missing outputs: teletron={t_out is None} diffsynth={d_out is None}")
-            if args.check_param_md5:
-                _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-            if args.check_buffer_md5:
-                _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
             return
 
-        # 2) key sets must match (within this aligned call)
         t_keys = set(t_out.keys())
         d_keys = set(d_out.keys())
         only_tk = sorted(t_keys - d_keys)
         only_dk = sorted(d_keys - t_keys)
         if only_tk or only_dk:
             print(f"[FIRST BAD] {where}  module={t_name} vs {d_name}")
-            print(f"  tensor-key mismatch:")
+            print("  tensor-key mismatch:")
             print(f"    teletron-only keys (first 20): {only_tk[:20]}")
             print(f"    diffsynth-only keys (first 20): {only_dk[:20]}")
-            if args.check_param_md5:
-                _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-            if args.check_buffer_md5:
-                _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
             return
 
-        # 3) compare tensors: find mismatches in this call
         mism = []
         for k in sorted(t_keys):
             res = compare_tensors(t_out[k], d_out[k], args.rtol, args.atol)
@@ -472,16 +471,8 @@ def main():
                 print(f"[OK ] {where}  {t_name}")
             continue
 
-        # FIRST divergence found at this call
         print(f"[FIRST BAD] {where}  module={t_name} vs {d_name}")
 
-        # show param/buffer md5 + per-param/per-buffer diffs (this is what you asked)
-        if args.check_param_md5:
-            _print_param_md5_report("param-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-        if args.check_buffer_md5:
-            _print_buffer_md5_report("buffer-md5", t_ev, d_ev, args.param_topk, args.show_md5_ok)
-
-        # representative mismatch (worst by max_abs, shape mismatch => inf)
         def score(item):
             _, r = item
             if "reason" in r:
@@ -491,29 +482,20 @@ def main():
         mism_sorted = sorted(mism, key=score, reverse=True)
         k0, r0 = mism_sorted[0]
         if "reason" in r0:
-            print(f"\n  tensor_key={k0}  {r0['reason']}")
+            print(f"  tensor_key={k0}  {r0['reason']}")
         else:
-            print(f"\n  tensor_key={k0}  max_abs={r0['max_abs']:.6g} mean_abs={r0['mean_abs']:.6g} "
+            print(f"  tensor_key={k0}  max_abs={r0['max_abs']:.6g} mean_abs={r0['mean_abs']:.6g} "
                   f"dtype=({r0['a_dtype']},{r0['b_dtype']})")
 
-        # also print top-k mismatched tensor keys in this call
         topk = min(args.topk, len(mism_sorted))
-        print(f"\n  [top {topk} mismatched tensors in this call]")
-        for kk, rr in mism_sorted[:topk]:
-            if "reason" in rr:
-                print(f"    - {kk}: {rr['reason']}")
-            else:
-                print(f"    - {kk}: max_abs={rr['max_abs']:.6g} mean_abs={rr['mean_abs']:.6g} "
-                      f"dtype=({rr['a_dtype']},{rr['b_dtype']})")
-
-        # and show dtype snapshots (for debugging drift)
-        if args.check_param_dtype:
-            print(f"\n  teletron.param_dtypes={event_param_dtypes(t_ev)}")
-            print(f"  diffsynth.param_dtypes={event_param_dtypes(d_ev)}")
-        if args.check_buffer_dtype:
-            print(f"\n  teletron.buffer_dtypes={event_buffer_dtypes(t_ev)}")
-            print(f"  diffsynth.buffer_dtypes={event_buffer_dtypes(d_ev)}")
-
+        if topk > 1:
+            print(f"\n  [top {topk} mismatched tensors in this call]")
+            for kk, rr in mism_sorted[:topk]:
+                if "reason" in rr:
+                    print(f"    - {kk}: {rr['reason']}")
+                else:
+                    print(f"    - {kk}: max_abs={rr['max_abs']:.6g} mean_abs={rr['mean_abs']:.6g} "
+                          f"dtype=({rr['a_dtype']},{rr['b_dtype']})")
         return
 
     print("[done] No divergence found within aligned pairs.")
