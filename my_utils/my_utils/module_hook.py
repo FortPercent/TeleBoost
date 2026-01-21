@@ -85,19 +85,11 @@ class TraceTensorMeta:
     min: float
     max: float
     mean: float
-
-
 class ForwardTraceRecorder:
     """
-    Recursively attaches forward hooks to a model and records per-module outputs.
-    Designed for deterministic debugging and cross-system comparisons.
-
-    Features:
-    - include/exclude name regex
-    - skip container-like modules (Sequential, ModuleList, etc.)
-    - record inputs and/or outputs
-    - sample large tensors (head/rand) to control size
-    - store in float32 (optional) for stable comparison
+    Ordered forward trace recorder:
+    - stores per-call events in a list (execution order)
+    - supports modules called multiple times
     """
 
     def __init__(
@@ -111,12 +103,12 @@ class ForwardTraceRecorder:
         exclude_name_regex: Optional[str] = None,
         include_module_types: Optional[Tuple[type, ...]] = None,
         exclude_module_types: Optional[Tuple[type, ...]] = (nn.Sequential, nn.ModuleList, nn.ModuleDict),
-        sample_mode: str = "none",   # "none" | "head" | "rand"
+        sample_mode: str = "none",
         sample_max_elems: int = 200_000,
         sample_seed: int = 0,
-        cast_float32: bool = False,  # if True, store tensors in fp32 (recommended for compare)
-        save_stats_only: bool = False,  # if True, do not store tensor values; only store meta+stats
-        max_modules: Optional[int] = None,  # limit number of hooked modules
+        cast_float32: bool = False,
+        save_stats_only: bool = False,
+        max_modules: Optional[int] = None,
         verbose: bool = False,
     ):
         self.model = model
@@ -136,13 +128,16 @@ class ForwardTraceRecorder:
         self.verbose = verbose
 
         self.handles: List[torch.utils.hooks.RemovableHandle] = []
-        self.records: Dict[str, Dict[str, Any]] = {}  # module_name -> {"inputs":..., "outputs":..., "meta":[...]}
         self._module_count = 0
         self._start_time = None
 
+        # ✅ ordered, per-call trace
+        self.events: List[Dict[str, Any]] = []
+        self._call_idx = 0
+
     def _should_hook(self, module_name: str, module: nn.Module) -> bool:
         if module is self.model:
-            return False  # skip root to reduce redundancy; change if you want
+            return False
         if self.include_re and not self.include_re.search(module_name):
             return False
         if self.exclude_re and self.exclude_re.search(module_name):
@@ -151,53 +146,74 @@ class ForwardTraceRecorder:
             return False
         if self.exclude_types and isinstance(module, self.exclude_types):
             return False
-        # Don't hook modules with no parameters AND no buffers? optional; leave as-is for full trace.
         return True
+
+    def _process(self, module_name: str, kind: str, obj: Any):
+        cpu_obj = _to_cpu_detached(obj)
+        flat = _flatten_tensors(cpu_obj, prefix="")
+
+        store = {}
+        metas = []
+        for key, t in flat:
+            if not torch.is_tensor(t):
+                continue
+            tt = t.contiguous()
+            if self.cast_float32:
+                tt = tt.float()
+
+            sampled = _sample_tensor(
+                tt,
+                mode=self.sample_mode,
+                max_elems=self.sample_max_elems,
+                seed=self.sample_seed,
+            )
+
+            meta = TraceTensorMeta(
+                name=module_name,
+                kind=kind,
+                key=key,
+                shape=list(tt.shape),
+                dtype=str(tt.dtype),
+                device=str(tt.device),
+                sha256=_tensor_bytes_sha256(sampled),
+                min=float(tt.float().min().item()) if tt.numel() else 0.0,
+                max=float(tt.float().max().item()) if tt.numel() else 0.0,
+                mean=float(tt.float().mean().item()) if tt.numel() else 0.0,
+            )
+            metas.append(asdict(meta))
+
+            if not self.save_stats_only:
+                store[key] = sampled
+
+        return store, metas
 
     def _hook_fn(self, module_name: str):
         def fn(module: nn.Module, inputs: Tuple[Any, ...], outputs: Any):
-            rec = self.records.setdefault(module_name, {"inputs": None, "outputs": None, "meta": []})
+            call_idx = self._call_idx
+            self._call_idx += 1
 
-            def process(kind: str, obj: Any):
-                cpu_obj = _to_cpu_detached(obj)
-
-                # For stable compare, cast to fp32 on CPU (optional)
-                flat = _flatten_tensors(cpu_obj, prefix="")
-                processed_store = {}
-                for key, t in flat:
-                    if not torch.is_tensor(t):
-                        continue
-                    tt = t.contiguous()
-                    if self.cast_float32:
-                        tt = tt.float()
-
-                    # sample to reduce size
-                    sampled = _sample_tensor(tt, mode=self.sample_mode, max_elems=self.sample_max_elems, seed=self.sample_seed)
-
-                    meta = TraceTensorMeta(
-                        name=module_name,
-                        kind=kind,
-                        key=key,
-                        shape=list(tt.shape),
-                        dtype=str(tt.dtype),
-                        device=str(tt.device),
-                        sha256=_tensor_bytes_sha256(sampled),
-                        min=float(tt.float().min().item()) if tt.numel() else 0.0,
-                        max=float(tt.float().max().item()) if tt.numel() else 0.0,
-                        mean=float(tt.float().mean().item()) if tt.numel() else 0.0,
-                    )
-                    rec["meta"].append(asdict(meta))
-
-                    if not self.save_stats_only:
-                        processed_store[key] = sampled  # sampled tensor (maybe full)
-
-                return processed_store
+            ev = {
+                "idx": call_idx,  # ✅ execution order
+                "module_name": module_name,
+                "module_type": module.__class__.__name__,
+                "time": time.time(),
+                "inputs": None,
+                "outputs": None,
+                "meta": [],  # list of TraceTensorMeta dicts
+            }
 
             if self.record_inputs:
-                # inputs is a tuple; store flattened form
-                rec["inputs"] = process("in", inputs)
+                store_in, metas_in = self._process(module_name, "in", inputs)
+                ev["inputs"] = store_in
+                ev["meta"].extend(metas_in)
+
             if self.record_outputs:
-                rec["outputs"] = process("out", outputs)
+                store_out, metas_out = self._process(module_name, "out", outputs)
+                ev["outputs"] = store_out
+                ev["meta"].extend(metas_out)
+
+            # ✅ append in real forward order
+            self.events.append(ev)
 
         return fn
 
@@ -229,6 +245,7 @@ class ForwardTraceRecorder:
         payload = {
             "trace_name": self.name,
             "num_modules_hooked": self._module_count,
+            "num_events": len(self.events),
             "elapsed_sec": (time.time() - self._start_time) if self._start_time else None,
             "record_inputs": self.record_inputs,
             "record_outputs": self.record_outputs,
@@ -236,7 +253,7 @@ class ForwardTraceRecorder:
             "sample_mode": self.sample_mode,
             "sample_max_elems": self.sample_max_elems,
             "save_stats_only": self.save_stats_only,
-            "records": self.records,
+            "events": self.events,  # ✅ ordered list
             "extra": extra or {},
         }
         torch.save(payload, str(path))
