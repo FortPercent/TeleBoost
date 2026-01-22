@@ -199,7 +199,7 @@ config = dict(
             ),
             image_encoder=dict(
                 path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
-                torch_compile=True
+                torch_compile=False
             ),
             # depth_model=dict(
             #     path="/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth",
@@ -209,7 +209,8 @@ config = dict(
 
         training=dict(
             diffusion=dict(
-                max_timestep_boundary=0.358,
+                # max_timestep_boundary=0.358,
+                max_timestep_boundary=1.0,
                 min_timestep_boundary=0.0,
             ),
 
