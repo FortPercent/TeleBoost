@@ -387,21 +387,21 @@ class DistDataProducer:
         # 2. 生产数据
         # 先取一个数据
         raw_batch = next(self.data_iterators[mode_to_process])
-        raw_tensor_kv = self._collect_tensor_kv(raw_batch)
-        if raw_tensor_kv:
-            dump_object_summary(
-                raw_tensor_kv,
-                self._get_raw_tensor_dump_path(),
-                meta={
-                    "rank": self.rank,
-                    "mode": mode_to_process,
-                    "iteration": self.iteration,
-                    "stage": "raw_tensors",
-                },
-                max_items=len(raw_tensor_kv),
-                max_depth=2,
-                logger=self.logger,
-            )
+        # raw_tensor_kv = self._collect_tensor_kv(raw_batch)
+        # if raw_tensor_kv:
+        #     dump_object_summary(
+        #         raw_tensor_kv,
+        #         self._get_raw_tensor_dump_path(),
+        #         meta={
+        #             "rank": self.rank,
+        #             "mode": mode_to_process,
+        #             "iteration": self.iteration,
+        #             "stage": "raw_tensors",
+        #         },
+        #         max_items=len(raw_tensor_kv),
+        #         max_depth=2,
+        #         logger=self.logger,
+        #     )
         # dump_object_summary(
         #     raw_batch,
         #     self._get_debug_dump_path(),
