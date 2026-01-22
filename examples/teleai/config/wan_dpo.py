@@ -4,7 +4,7 @@ import torch
 
 dst_size = (832, 480)
 dst_fps = 16
-dst_num_frames = 81
+dst_num_frames = 49
 
 config = dict(
     dataset=dict(
@@ -30,7 +30,7 @@ config = dict(
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
             # "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part2.csv",
         ],
-        dataset_repeat=1,
+        dataset_repeat=2,
 
         # === DPO 语义 ===
         chosen_video_key="chosen",
@@ -51,7 +51,7 @@ config = dict(
         width_division_factor=16,
 
         # 可选
-        max_pixels=2073600,
+        max_pixels=1920 * 1080,
         
 
         transforms=[
@@ -65,15 +65,15 @@ config = dict(
                 output_key="raw_first_image",  # 这个是PIL list的首帧
             ),
             # Compare DiffSynth image-embed preprocess dumps against Teletron output.
-            dict(
-                type="CompareImageEmbedFromVideo",
-                video_key="video",
-                compare_input=True,
-                compare_end=False,
-                torch_dtype="bfloat16",
-                min_value=-1,
-                max_value=1,
-            ),
+            # dict(
+            #     type="CompareImageEmbedFromVideo",
+            #     video_key="video",
+            #     compare_input=True,
+            #     compare_end=False,
+            #     torch_dtype="bfloat16",
+            #     min_value=-1,
+            #     max_value=1,
+            # ),
             dict(
                 type="PreprocessVideoToTensor",
                 input_key="video",

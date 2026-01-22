@@ -66,7 +66,7 @@ export PYTHONPATH=$PYTHONPATH:/nvfile-heatstorage/ai_infra/code/lit117/qiuyang/V
 # export MEMORY_SNAPSHOT=1
 # export PROF_SAVE_PATH="./dpo_train_profile"
 # Compare with DiffSynth pre-VAE dumps (dataset raw + pre-VAE tensors).
-export WAN_DPO_PREVAE_COMPARE=1
+export WAN_DPO_PREVAE_COMPARE=0
 # Raw dataset JSONL (supports {rank} placeholder or *_rank{rank}.jsonl auto suffix).
 export WAN_DPO_DATASET_DUMP_FILE="./dpo_dumps/dataset_raw_rank{rank}.jsonl"
 
@@ -80,17 +80,17 @@ export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
 # export WAN_DPO_DUMP_RANK=0
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=1
+CP=2
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=8
+N_GPU_FOR_TRAIN=16
 N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
 # EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
-EXPR_NAME=test_dpo_i2v
+EXPR_NAME=align_dpo_480p_i2v
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
@@ -198,7 +198,7 @@ TRAINING_ARGS=(
     # --save-dumps
     # --save-dumps-interval 1
     # --save-dumps-dir ./test_data/saved_inputs_${EXPR_NAME}
-    --save-dumps-dir /nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/test_data/saved_inputs_test_dpo_i2v
+    # --save-dumps-dir /nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/test_data/saved_inputs_test_dpo_i2v
 )
 
 MODEL_PARALLEL_ARGS=(
