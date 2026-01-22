@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# Compare two minimal VAE latent dumps from different environments.
+# - Prints metadata and SHA256 hashes for quick sanity checks.
+# - Runs tensor allclose and reports max/mean absolute diff.
 # Usage:
 #   python compare_minimal_vae_latents.py \
 #     --a /tmp/min_vae_latents.pt \

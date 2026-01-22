@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# Compare Teletron VAE latents against a DiffSynth dump using identical synthetic input.
+# - Loads Teletron config to build the encoder/vae.
+# - Reconstructs the deterministic input from dump metadata.
+# - Runs VAE encode with the same tiler settings and reports diff stats.
 # Usage:
 #   python compare_vae_latents_teletron.py --diffsynth-dump /tmp/diffsynth_vae_latents.pt --device cuda
 import argparse

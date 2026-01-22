@@ -66,6 +66,7 @@ def extra_args(parser):
     group.add_argument("--compare-saved-losses", action="store_true")
     group.add_argument("--compare-losses-rtol", type=float, default=1e-5)
     group.add_argument("--compare-losses-atol", type=float, default=1e-8)
+    group.add_argument("--noise-seed", type=int, default=None)
     
     return parser
 
@@ -84,31 +85,14 @@ def _compute_single_loss(
     noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
     loss_weight = flow_scheduler.training_weight(timestep)
 
-    if args.test_with_pseudo_data:
-        dp_rank = mpu.get_data_parallel_rank() 
-        curr_iter = args.curr_iteration
-        input_dict = torch.load(
-            f"../test_data/saved_inputs_{args.test_resolution}/input_dict_iter{curr_iter}_rank{dp_rank}.pt",
-            weights_only=False,
-            map_location="cpu",
-        )
-        output_tensor_list = model(
-            x=input_dict["noisy_latents"].cuda(),
-            timestep=input_dict["timestep"].cuda(),
-            context=input_dict["prompt_emb"]["context"].cuda(),
-            clip_feature=input_dict["image_emb"]["clip_feature"].cuda(),
-            y=input_dict["image_emb"]["y"].cuda(),
-        )
-        training_target = input_dict["training_target"].cuda()
-        loss_weight = input_dict["loss_weight"].cuda()
-    else:
-        output_tensor_list = model(
-            x=noisy_latents,
-            timestep=timestep,
-            context=context,
-            clip_feature=clip_feature,
-            y=y,
-        )
+  
+    output_tensor_list = model(
+        x=noisy_latents,
+        timestep=timestep,
+        context=context,
+        clip_feature=clip_feature,
+        y=y,
+    )
     print(f"noisy_latents = {noisy_latents.shape},output_tensor_list = {output_tensor_list.shape} training_target = {training_target.shape}")
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
@@ -383,8 +367,47 @@ def _check_payload_inputs(payload, inputs, rtol=1e-5, atol=1e-8):
     return mismatches
 
 
+def _summarize_scheduler(scheduler, max_values=20):
+    if scheduler is None:
+        return {}
+    summary = {"class": scheduler.__class__.__name__}
+    sigmas = getattr(scheduler, "sigmas", None)
+    if isinstance(sigmas, torch.Tensor):
+        summary["num_inference_steps"] = int(sigmas.numel())
+    for key, value in scheduler.__dict__.items():
+        if key.startswith("_"):
+            continue
+        if torch.is_tensor(value):
+            t = value.detach().cpu()
+            entry = {"shape": list(t.shape), "dtype": str(t.dtype)}
+            if t.numel() <= max_values:
+                entry["values"] = [float(x) for x in t.flatten().tolist()]
+            elif t.numel() > 0:
+                flat = t.float().flatten()
+                entry["stats"] = {
+                    "min": float(flat.min()),
+                    "max": float(flat.max()),
+                    "mean": float(flat.mean()),
+                    "std": float(flat.std()),
+                }
+                entry["preview"] = [float(x) for x in flat[:max_values].tolist()]
+            summary[key] = entry
+        elif isinstance(value, (int, float, bool)) or value is None:
+            summary[key] = value
+        elif isinstance(value, str):
+            summary[key] = value
+        elif isinstance(value, (list, tuple)):
+            preview = list(value[:max_values])
+            summary[key] = {"len": len(value), "preview": preview}
+        elif isinstance(value, dict):
+            summary[key] = {"keys": list(value.keys())}
+        else:
+            summary[key] = {"type": type(value).__name__}
+    return summary
+
+
 def forward_step(data_iterator, model, time_step=None):
-    flow_scheduler = FlowMatchScheduler(shift=1, sigma_min=0.0, extra_one_step=True)
+    flow_scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True, num_train_timesteps=1000)
     flow_scheduler.set_timesteps(1000, training=True)
 
     dataset_config = set_config().get("dataset", {})
@@ -490,21 +513,24 @@ def forward_step(data_iterator, model, time_step=None):
                 group=mpu.get_tensor_context_parallel_group(),
             )
 
-    if time_step is not None:
-        timestep = torch.tensor(
-            [time_step],
-            dtype=torch.bfloat16,
-            device=torch.cuda.current_device(),
-        )
-
     broadcast_tensor(timestep)
 
     # =========================
     # noise (正负样本独立)
     # =========================
     if not use_saved_inputs:
-        noise_chosen = torch.randn_like(chosen_latents)
-        noise_reject = torch.randn_like(reject_latents)
+        base_seed = getattr(args, "noise_seed", None)
+        curr_iter = int(getattr(args, "curr_iteration", 0))
+        if base_seed is not None:
+            seed_chosen = int(base_seed) + curr_iter * 2
+            seed_reject = int(base_seed) + curr_iter * 2 + 1
+            gen_chosen = torch.Generator(device=chosen_latents.device).manual_seed(seed_chosen)
+            gen_reject = torch.Generator(device=reject_latents.device).manual_seed(seed_reject)
+            noise_chosen = torch.randn_like(chosen_latents, generator=gen_chosen)
+            noise_reject = torch.randn_like(reject_latents, generator=gen_reject)
+        else:
+            noise_chosen = torch.randn_like(chosen_latents)
+            noise_reject = torch.randn_like(reject_latents)
 
         broadcast_tensor(noise_chosen)
         broadcast_tensor(noise_reject)
@@ -683,6 +709,7 @@ def forward_step(data_iterator, model, time_step=None):
                     "rank": int(torch.distributed.get_rank()),
                     "dp_rank": dp_rank,
                 },
+                "scheduler_params": _summarize_scheduler(flow_scheduler),
                 "timestep": timestep,
                 "context": context,
                 "chosen": {
