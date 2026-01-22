@@ -47,7 +47,7 @@ def dpo_loss_func(output_tensor):
     else:
         averaged = average_losses_across_data_parallel_group([dpo_loss_mean.detach()])
         loss_dict = {"loss": averaged[0]}
-    print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss = {loss_for_backward}")
+    print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss scaled = {loss_for_backward}")
     return loss_for_backward, loss_dict
 
 
