@@ -406,6 +406,114 @@ def _summarize_scheduler(scheduler, max_values=20):
     return summary
 
 
+def _load_saved_payload(args, device):
+    save_dir = (
+        getattr(args, "save_dumps_dir", None)
+        or getattr(args, "save_inputs_dir", None)
+        or f"../test_data/saved_inputs_{args.test_resolution}"
+    )
+    dp_rank = int(mpu.get_data_parallel_rank())
+    curr_iter = int(getattr(args, "curr_iteration", 0))
+    load_path = os.path.join(
+        save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
+    )
+    if not os.path.exists(load_path):
+        raise FileNotFoundError(f"Saved inputs not found: {load_path}")
+    tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+    if torch.distributed.get_rank() == tp_cp_src_rank:
+        payload = torch.load(load_path, weights_only=False, map_location="cpu")
+        payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
+        chosen_keys = sorted(list(payload.get("chosen", {}).keys())) if isinstance(payload, dict) else []
+        rejected_keys = sorted(list(payload.get("rejected", {}).keys())) if isinstance(payload, dict) else []
+        print(
+            f"[DPO load] iter={curr_iter} dp_rank={dp_rank} path={load_path} keys={payload_keys}"
+        )
+        print(f"[DPO load] chosen keys={chosen_keys}")
+        print(f"[DPO load] rejected keys={rejected_keys}")
+    else:
+        payload = None
+    payload = _broadcast_saved_payload(payload, device=device)
+    context = payload["context"]
+    chosen_clip_feature = payload["chosen"]["clip_feature"]
+    reject_clip_feature = payload["rejected"]["clip_feature"]
+    chosen_y = payload["chosen"]["y"]
+    reject_y = payload["rejected"]["y"]
+    timestep = payload["timestep"].to(
+        dtype=torch.bfloat16,
+        device=device,
+    )
+    return payload, context, chosen_clip_feature, reject_clip_feature, chosen_y, reject_y, timestep
+
+
+def _load_batch_inputs(batch, chosen_key, rejected_key):
+    context = batch["context"]  # shared text context
+    chosen_latents = batch[chosen_key]["latents"]
+    reject_latents = batch[rejected_key]["latents"]
+    chosen_clip_feature = batch[chosen_key].get(
+        "img_clip_feature", batch[chosen_key].get("clip_feature")
+    )
+    reject_clip_feature = batch[rejected_key].get(
+        "img_clip_feature", batch[rejected_key].get("clip_feature")
+    )
+    chosen_y = batch[chosen_key].get("img_emb_y")
+    reject_y = batch[rejected_key].get("img_emb_y")
+    return (
+        context,
+        chosen_latents,
+        reject_latents,
+        chosen_clip_feature,
+        reject_clip_feature,
+        chosen_y,
+        reject_y,
+    )
+
+
+def _broadcast_tensor(input_tensor: torch.Tensor):
+    tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+    if mpu.get_tensor_context_parallel_world_size() > 1:
+        dist.broadcast(
+            input_tensor,
+            tp_cp_src_rank,
+            group=mpu.get_tensor_context_parallel_group(),
+        )
+
+
+def _sample_timestep(flow_scheduler, diffusion_config, device):
+    min_timestep_boundary = int(
+        diffusion_config.get("min_timestep_boundary")
+        * flow_scheduler.num_train_timesteps
+    )
+    max_timestep_boundary = int(
+        diffusion_config.get("max_timestep_boundary")
+        * flow_scheduler.num_train_timesteps
+    )
+    timestep_range = [min_timestep_boundary, max_timestep_boundary]
+    timestep_id = torch.randint(timestep_range[0], timestep_range[1], (1,))
+    timestep = flow_scheduler.timesteps[timestep_id].to(
+        dtype=torch.bfloat16,
+        device=device,
+    )
+    return timestep, timestep_id, timestep_range
+
+
+def _generate_noise(chosen_latents, reject_latents, base_seed, curr_iter):
+    if base_seed is not None:
+        seed_chosen = int(base_seed) + curr_iter * 2
+        seed_reject = int(base_seed) + curr_iter * 2 + 1
+        print(
+            f"[Rank {torch.distributed.get_rank()}] noise seeds: "
+            f"chosen={seed_chosen}, reject={seed_reject}"
+        )
+        gen_chosen = torch.Generator(device=chosen_latents.device).manual_seed(seed_chosen)
+        gen_reject = torch.Generator(device=reject_latents.device).manual_seed(seed_reject)
+        noise_chosen = torch.randn_like(chosen_latents, generator=gen_chosen)
+        noise_reject = torch.randn_like(reject_latents, generator=gen_reject)
+    else:
+        noise_chosen = torch.randn_like(chosen_latents)
+        noise_reject = torch.randn_like(reject_latents)
+    return noise_chosen, noise_reject
+
+
 def forward_step(data_iterator, model, time_step=None):
     flow_scheduler = FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True, num_train_timesteps=1000)
     flow_scheduler.set_timesteps(1000, training=True)
@@ -424,57 +532,27 @@ def forward_step(data_iterator, model, time_step=None):
     compare_saved_losses = bool(getattr(args, "compare_saved_losses", False))
 
     if use_saved_inputs:
-        save_dir = (
-            getattr(args, "save_dumps_dir", None)
-            or getattr(args, "save_inputs_dir", None)
-            or f"../test_data/saved_inputs_{args.test_resolution}"
-        )
-        dp_rank = int(mpu.get_data_parallel_rank())
-        curr_iter = int(getattr(args, "curr_iteration", 0))
-        load_path = os.path.join(
-            save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
-        )
-        if not os.path.exists(load_path):
-            raise FileNotFoundError(f"Saved inputs not found: {load_path}")
-        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
-        if torch.distributed.get_rank() == tp_cp_src_rank:
-            payload = torch.load(load_path, weights_only=False, map_location="cpu")
-            payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
-            chosen_keys = sorted(list(payload.get("chosen", {}).keys())) if isinstance(payload, dict) else []
-            rejected_keys = sorted(list(payload.get("rejected", {}).keys())) if isinstance(payload, dict) else []
-            print(
-                f"[DPO load] iter={curr_iter} dp_rank={dp_rank} path={load_path} keys={payload_keys}"
-            )
-            print(f"[DPO load] chosen keys={chosen_keys}")
-            print(f"[DPO load] rejected keys={rejected_keys}")
-        else:
-            payload = None
-        payload = _broadcast_saved_payload(payload, device=torch.cuda.current_device())
-        context = payload["context"]
-        chosen_clip_feature = payload["chosen"]["clip_feature"]
-        reject_clip_feature = payload["rejected"]["clip_feature"]
-        chosen_y = payload["chosen"]["y"]
-        reject_y = payload["rejected"]["y"]
-        timestep = payload["timestep"].to(
-            dtype=torch.bfloat16,
-            device=torch.cuda.current_device(),
-        )
+        # from diffsynth dumps
+        (
+            payload,
+            context,
+            chosen_clip_feature,
+            reject_clip_feature,
+            chosen_y,
+            reject_y,
+            timestep,
+        ) = _load_saved_payload(args, device=torch.cuda.current_device())
     else:
-        context = batch["context"]  # shared text context
-        chosen_latents = batch[chosen_key]["latents"]
-        reject_latents = batch[rejected_key]["latents"]
-
-        # clip feature / img_emb_y（正负样本各自的）
-        chosen_clip_feature = batch[chosen_key].get(
-            "img_clip_feature", batch[chosen_key].get("clip_feature")
-        )
-        reject_clip_feature = batch[rejected_key].get(
-            "img_clip_feature", batch[rejected_key].get("clip_feature")
-        )
-
-        chosen_y = batch[chosen_key].get("img_emb_y")
-        reject_y = batch[rejected_key].get("img_emb_y")
-
+        payload = None
+        (
+            context,
+            chosen_latents,
+            reject_latents,
+            chosen_clip_feature,
+            reject_clip_feature,
+            chosen_y,
+            reject_y,
+        ) = _load_batch_inputs(batch, chosen_key, rejected_key)
     # =========================
     # timestep sampling
     # =========================
@@ -485,56 +563,32 @@ def forward_step(data_iterator, model, time_step=None):
         .get("diffusion", {})
     )
 
-    min_timestep_boundary = int(
-        diffusion_config.get("min_timestep_boundary")
-        * flow_scheduler.num_train_timesteps
-    )
-    max_timestep_boundary = int(
-        diffusion_config.get("max_timestep_boundary")
-        * flow_scheduler.num_train_timesteps
-    )
-
-    timestep_range = [min_timestep_boundary, max_timestep_boundary]
+    timestep_range = None
+    timestep_id = None
     if not use_saved_inputs:
-        timestep_id = torch.randint(
-            timestep_range[0], timestep_range[1], (1,)
-        )
-        timestep = flow_scheduler.timesteps[timestep_id].to(
-            dtype=torch.bfloat16,
+        timestep, timestep_id, timestep_range = _sample_timestep(
+            flow_scheduler,
+            diffusion_config,
             device=torch.cuda.current_device(),
         )
 
-    def broadcast_tensor(input: torch.Tensor):
-        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
-        if mpu.get_tensor_context_parallel_world_size() > 1:
-            dist.broadcast(
-                input,
-                tp_cp_src_rank,
-                group=mpu.get_tensor_context_parallel_group(),
-            )
-
-    broadcast_tensor(timestep)
-
+    _broadcast_tensor(timestep)
+    print(f"[Rank {torch.distributed.get_rank()}] timestep = {timestep}, timestep_id = {timestep_id}")
     # =========================
-    # noise (正负样本独立)
+    # noise (chosen/reject independent)
     # =========================
     if not use_saved_inputs:
         base_seed = getattr(args, "noise_seed", None)
         curr_iter = int(getattr(args, "curr_iteration", 0))
-        if base_seed is not None:
-            seed_chosen = int(base_seed) + curr_iter * 2
-            seed_reject = int(base_seed) + curr_iter * 2 + 1
-            gen_chosen = torch.Generator(device=chosen_latents.device).manual_seed(seed_chosen)
-            gen_reject = torch.Generator(device=reject_latents.device).manual_seed(seed_reject)
-            noise_chosen = torch.randn_like(chosen_latents, generator=gen_chosen)
-            noise_reject = torch.randn_like(reject_latents, generator=gen_reject)
-        else:
-            noise_chosen = torch.randn_like(chosen_latents)
-            noise_reject = torch.randn_like(reject_latents)
+        noise_chosen, noise_reject = _generate_noise(
+            chosen_latents,
+            reject_latents,
+            base_seed=base_seed,
+            curr_iter=curr_iter,
+        )
 
-        broadcast_tensor(noise_chosen)
-        broadcast_tensor(noise_reject)
-
+        _broadcast_tensor(noise_chosen)
+        _broadcast_tensor(noise_reject)
     # =========================
     # forward & loss
     # =========================
@@ -681,6 +735,7 @@ def forward_step(data_iterator, model, time_step=None):
     # 只用 advantage 的数值算系数，不让系数本身反传（很关键）
     with torch.no_grad():
         # d/dadv [-logsigmoid(beta*adv)] = beta * sigmoid(-beta*adv)
+        print(f"beta = {beta}")
         coeff = beta * torch.sigmoid(-beta * advantage)
         # 对应你 dpo_loss 的 mean()
         coeff = coeff / coeff.numel()
