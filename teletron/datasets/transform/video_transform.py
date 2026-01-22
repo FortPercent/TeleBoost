@@ -217,6 +217,7 @@ class InjectRawFirstImageFromVideo:
                 data_dict[self.output_key] = raw_first.contiguous()
             else:
                 # PIL ---> Tensor
+                # 这里因为dataloader后面会collate fn，会打包到一起，不是tensor的话有问题，所以先转成tensor
                 raw_first = torch.from_numpy(np.array(first)).permute(2, 0, 1).contiguous()
                 data_dict[self.output_key] = raw_first.unsqueeze(0)
         return data_dict
