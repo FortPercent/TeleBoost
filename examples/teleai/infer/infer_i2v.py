@@ -10,8 +10,8 @@ from prompts.HardPrompt import PROMPT_CONFIGS
 from prompts.i2v150Prompt import PROMPT_CONFIGS
 from prompts.flf2vPrompt import PROMPT_CONFIGS
 
-CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wwan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20/iter_0000100/mp_rank_00/model_optim_rng.pt" # ema_model.pt
-SAVEDIR = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo/iter_0000100/results"
+CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/align_dpo_480p_i2v/iter_0000300/mp_rank_00/model_optim_rng.pt" # ema_model.pt
+SAVEDIR = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/align_dpo_480p_i2v/iter_0000300/results"
 
 GPU_IDS = [0]
 
