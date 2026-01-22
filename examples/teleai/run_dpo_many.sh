@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.48.175"
+MASTER_ADDR="10.244.67.250"
 MASTER_PORT="11329"
 
 while [[ $# -gt 0 ]]; do
