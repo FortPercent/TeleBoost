@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+# Minimal, dependency-light DiffSynth VAE dump for cross-env verification.
+# - Loads a standalone VAE module by file path (no Teletron/DiffSynth package init).
+# - Loads raw weights directly with torch.load + load_state_dict.
+# - Builds a deterministic input tensor via torch.linspace.
+# - Runs VAE encode and saves latents + metadata to a .pt file.
 # Usage:
 #   python dump_minimal_diffsynth_vae.py --vae-path /path/to/Wan2.1_VAE.pth \
 #     --vae-code /path/to/diffsynth_wan_video_vae.py \
