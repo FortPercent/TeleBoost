@@ -320,6 +320,7 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_k
         y = torch.concat([msk, y], dim=1)
     
     elif 'raw_first_image' in batch:
+        print(f"get_img_emb_y: using raw_first_image to get y=========================")
         raw_first_image = batch["raw_first_image"]
         pil_image = _raw_image_to_pil(raw_first_image)
         image = preprocess_image(pil_image.resize((width, height))).to(torch.cuda.current_device())
