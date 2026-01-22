@@ -498,19 +498,38 @@ def _sample_timestep(flow_scheduler, diffusion_config, device):
 
 def _generate_noise(chosen_latents, reject_latents, base_seed, curr_iter):
     if base_seed is not None:
+        # 计算当前的随机种子
         seed_chosen = int(base_seed) + curr_iter * 2
         seed_reject = int(base_seed) + curr_iter * 2 + 1
+        
+        # 打印日志 (如果你在多卡训练，建议加上 rank 区分)
         print(
             f"[Rank {torch.distributed.get_rank()}] noise seeds: "
             f"chosen={seed_chosen}, reject={seed_reject}"
         )
+        
+        # 创建 Generator
         gen_chosen = torch.Generator(device=chosen_latents.device).manual_seed(seed_chosen)
         gen_reject = torch.Generator(device=reject_latents.device).manual_seed(seed_reject)
-        noise_chosen = torch.randn_like(chosen_latents, generator=gen_chosen)
-        noise_reject = torch.randn_like(reject_latents, generator=gen_reject)
+        
+        # 【修正点】：使用 torch.randn 替代 randn_like
+        noise_chosen = torch.randn(
+            chosen_latents.shape, 
+            device=chosen_latents.device, 
+            dtype=chosen_latents.dtype, 
+            generator=gen_chosen
+        )
+        noise_reject = torch.randn(
+            reject_latents.shape, 
+            device=reject_latents.device, 
+            dtype=reject_latents.dtype, 
+            generator=gen_reject
+        )
     else:
+        # 如果没有 seed，直接使用默认的 randn_like 即可
         noise_chosen = torch.randn_like(chosen_latents)
         noise_reject = torch.randn_like(reject_latents)
+        
     return noise_chosen, noise_reject
 
 
