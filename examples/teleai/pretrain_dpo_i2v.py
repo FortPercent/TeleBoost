@@ -456,109 +456,113 @@ def _load_stage_dict(dump_root: str, pair_id: int, stage: str, branch: str):
     return root_dict
 
 def _load_saved_payload(args, device):
-    # ====== 你第一框架 dumper 的根目录（注意要指到 pid_xxxx 那层） ======
-    # 例如：dump_dataset/pid_1528321
     dump_root = (
         getattr(args, "diffsynth_dump_root", None)
         or getattr(args, "save_inputs_dir", None)
         or getattr(args, "save_dumps_dir", None)
     )
     if dump_root is None:
-        raise ValueError("Please set args.diffsynth_dump_root to your dumper root, e.g. dump_dataset/pid_xxx")
+        raise ValueError("Please set args.diffsynth_dump_root, e.g. dump_dataset/pid_xxx")
 
-    # ====== 选择你要对齐的 sample ======
     pair_id = int(getattr(args, "saved_pair_id", 0))
-
     dp_rank = int(mpu.get_data_parallel_rank())
     tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
 
+    def _pick_optional(root, candidates):
+        for k in candidates:
+            try:
+                return _load_value_from_root_dict(root, k)
+            except Exception:
+                pass
+        return None
+
     if torch.distributed.get_rank() == tp_cp_src_rank:
-        # -------- 1) 从 chosen/rejected_inputs 里拿 context / clip_feature / y --------
+        # 1) dict roots
         chosen_root = _load_stage_dict(dump_root, pair_id, stage="chosen_inputs", branch="chosen")
         rejected_root = _load_stage_dict(dump_root, pair_id, stage="rejected_inputs", branch="rejected")
 
-        context = _load_value_from_root_dict(chosen_root, "context")
+        # context：你如果认为必须存在，就别 optional
+        context = _pick_optional(chosen_root, ["context", "prompt_emb", "prompt_embedding"])
 
-        # 你截图里 y/clip_feature 的命名可能不完全一样，先用候选名兜底
-        def _pick(root, candidates):
-            last_err = None
-            for k in candidates:
-                try:
-                    return _load_value_from_root_dict(root, k)
-                except Exception as e:
-                    last_err = e
-            raise last_err
+        chosen_clip_feature = _pick_optional(chosen_root, ["clip_feature", "chosen_clip_feature", "clip_feat"])
+        reject_clip_feature = _pick_optional(rejected_root, ["clip_feature", "reject_clip_feature", "rejected_clip_feature", "clip_feat"])
 
-        chosen_clip_feature = _pick(chosen_root, ["clip_feature", "chosen_clip_feature", "clip_feat"])
-        reject_clip_feature = _pick(rejected_root, ["clip_feature", "reject_clip_feature", "rejected_clip_feature", "clip_feat"])
-        chosen_y = _pick(chosen_root, ["y", "chosen_y"])
-        reject_y = _pick(rejected_root, ["y", "reject_y", "rejected_y"])
+        chosen_y = _pick_optional(chosen_root, ["y", "chosen_y"])
+        reject_y = _pick_optional(rejected_root, ["y", "reject_y", "rejected_y"])
 
-        # -------- 2) 从 training_loss dump 里拿 timestep/noisy_latents/target/weight/noise_pred --------
-        
-        timestep_chosen = _load_stage_tensor(dump_root, pair_id, "training_loss__timesteps", "chosen")
+        # 2) tensors from training_loss stages (这些一般应当必需，否则你就没法复现 loss)
+        timestep_chosen  = _load_stage_tensor(dump_root, pair_id, "training_loss__timesteps", "chosen")
         timestep_rejected = _load_stage_tensor(dump_root, pair_id, "training_loss__timesteps", "rejected")
-        chosen_noisy_latents   = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noisy_latents", branch="chosen")
-        reject_noisy_latents   = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noisy_latents", branch="rejected")
 
-        chosen_training_target = _load_stage_tensor(dump_root, pair_id, stage="training_loss__training_target", branch="chosen")
-        reject_training_target = _load_stage_tensor(dump_root, pair_id, stage="training_loss__training_target", branch="rejected")
+        chosen_noisy_latents = _load_stage_tensor(dump_root, pair_id, "training_loss__noisy_latents", "chosen")
+        reject_noisy_latents = _load_stage_tensor(dump_root, pair_id, "training_loss__noisy_latents", "rejected")
 
-        chosen_loss_weight     = _load_stage_tensor(dump_root, pair_id, stage="training_loss__loss_weight", branch="chosen")
-        reject_loss_weight     = _load_stage_tensor(dump_root, pair_id, stage="training_loss__loss_weight", branch="rejected")
+        chosen_training_target = _load_stage_tensor(dump_root, pair_id, "training_loss__training_target", "chosen")
+        reject_training_target = _load_stage_tensor(dump_root, pair_id, "training_loss__training_target", "rejected")
 
-        # 可选：对比用（如果你 dump 了）
+        chosen_loss_weight = _load_stage_tensor(dump_root, pair_id, "training_loss__loss_weight", "chosen")
+        reject_loss_weight = _load_stage_tensor(dump_root, pair_id, "training_loss__loss_weight", "rejected")
+
+        # optional compare tensors
+        chosen_noise_pred = None
+        reject_noise_pred = None
         try:
-            chosen_noise_pred = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noise_pred", branch="chosen")
+            chosen_noise_pred = _load_stage_tensor(dump_root, pair_id, "training_loss__noise_pred", "chosen")
         except Exception:
-            chosen_noise_pred = None
+            pass
         try:
-            reject_noise_pred = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noise_pred", branch="rejected")
+            reject_noise_pred = _load_stage_tensor(dump_root, pair_id, "training_loss__noise_pred", "rejected")
         except Exception:
-            reject_noise_pred = None
+            pass
 
         payload = {
+            "meta": {"dp_rank": dp_rank, "pair_id": pair_id, "dump_root": dump_root},
             "context": context,
             "chosen": {
-                "clip_feature": chosen_clip_feature,
+                "clip_feature": chosen_clip_feature,   # may be None
+                "y": chosen_y,                         # may be None
                 "timestep": timestep_chosen,
-                "y": chosen_y,
                 "noisy_latents": chosen_noisy_latents,
                 "training_target": chosen_training_target,
                 "loss_weight": chosen_loss_weight,
-                "noise_pred": chosen_noise_pred,
+                "noise_pred": chosen_noise_pred,       # optional
             },
             "rejected": {
+                "clip_feature": reject_clip_feature,   # may be None
+                "y": reject_y,                         # may be None
                 "timestep": timestep_rejected,
-                "clip_feature": reject_clip_feature,
-                "y": reject_y,
                 "noisy_latents": reject_noisy_latents,
                 "training_target": reject_training_target,
                 "loss_weight": reject_loss_weight,
-                "noise_pred": reject_noise_pred,
+                "noise_pred": reject_noise_pred,       # optional
             },
         }
 
         print(f"[DPO load from dumper] dp_rank={dp_rank} pair_id={pair_id} root={dump_root}")
-        print(f"[DPO load] keys={sorted(list(payload.keys()))}")
-        print(f"[DPO load] chosen keys={sorted(list(payload['chosen'].keys()))}")
-        print(f"[DPO load] rejected keys={sorted(list(payload['rejected'].keys()))}")
+        print(f"[DPO load] keys={sorted(payload.keys())}")
+        print(f"[DPO load] chosen keys={sorted(payload['chosen'].keys())}")
+        print(f"[DPO load] rejected keys={sorted(payload['rejected'].keys())}")
 
     else:
         payload = None
 
-    # 广播到所有 rank（保持你原有逻辑）
+    # broadcast to all ranks
     payload = _broadcast_saved_payload(payload, device=device)
 
-    # ====== 按你原函数签名返回 ======
-    context = payload["context"]
-    chosen_clip_feature = payload["chosen"]["clip_feature"]
-    reject_clip_feature = payload["rejected"]["clip_feature"]
-    chosen_y = payload["chosen"]["y"]
-    reject_y = payload["rejected"]["y"]
+    # move timesteps to desired dtype/device here (after broadcast)
+    timestep_c = payload["chosen"]["timestep"].to(dtype=torch.bfloat16, device=device)
+    timestep_r = payload["rejected"]["timestep"].to(dtype=torch.bfloat16, device=device)
+    payload["chosen"]["timestep"] = timestep_c
+    payload["rejected"]["timestep"] = timestep_r
 
-    timestep = payload["timestep"].to(dtype=torch.bfloat16, device=device)
-    return payload, context, chosen_clip_feature, reject_clip_feature, chosen_y, reject_y, timestep_chosen, timestep_rejected
+    # return as you use in forward_step
+    context = payload["context"]
+    chosen_clip_feature = payload["chosen"]["clip_feature"]   # can be None
+    reject_clip_feature = payload["rejected"]["clip_feature"] # can be None
+    chosen_y = payload["chosen"]["y"]                         # can be None
+    reject_y = payload["rejected"]["y"]                       # can be None
+
+    return payload, context, chosen_clip_feature, reject_clip_feature, chosen_y, reject_y, timestep_c, timestep_r
 
 
 
