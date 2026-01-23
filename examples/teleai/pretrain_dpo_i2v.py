@@ -406,43 +406,158 @@ def _summarize_scheduler(scheduler, max_values=20):
     return summary
 
 
+
+
+import os, glob, json
+import torch
+
+def _find_latest_dump_dir(sample_dir: str, stage: str, branch: str):
+    pat = os.path.join(sample_dir, f"*__{stage}__{branch}")
+    cands = sorted([d for d in glob.glob(pat) if os.path.isdir(d)])
+    return cands[-1] if cands else None
+
+def _load_tensor_dump_root(dump_dir: str):
+    pt = os.path.join(dump_dir, "data", "root.pt")
+    if not os.path.exists(pt):
+        raise FileNotFoundError(f"Missing tensor root.pt: {pt}")
+    return torch.load(pt, map_location="cpu", weights_only=False)
+
+def _load_value_from_root_dict(root_dict_dir: str, key: str):
+    pt = os.path.join(root_dict_dir, f"{key}.pt")
+    js = os.path.join(root_dict_dir, f"{key}.json")
+
+    if os.path.exists(pt):
+        return torch.load(pt, map_location="cpu", weights_only=False)
+    if os.path.exists(js):
+        with open(js, "r", encoding="utf-8") as f:
+            return json.load(f)["value"]
+    raise KeyError(f"Key '{key}' not found under {root_dict_dir}")
+
+def _load_stage_tensor(dump_root: str, pair_id: int, stage: str, branch: str):
+    sample_dir = os.path.join(dump_root, f"sample_{int(pair_id)}")
+    if not os.path.isdir(sample_dir):
+        raise FileNotFoundError(f"sample_dir not found: {sample_dir}")
+
+    d = _find_latest_dump_dir(sample_dir, stage=stage, branch=branch)
+    if d is None:
+        raise FileNotFoundError(f"dump not found: sample={pair_id} stage={stage} branch={branch}")
+    return _load_tensor_dump_root(d)
+
+def _load_stage_dict(dump_root: str, pair_id: int, stage: str, branch: str):
+    sample_dir = os.path.join(dump_root, f"sample_{int(pair_id)}")
+    d = _find_latest_dump_dir(sample_dir, stage=stage, branch=branch)
+    if d is None:
+        raise FileNotFoundError(f"dump not found: sample={pair_id} stage={stage} branch={branch}")
+    root_dict = os.path.join(d, "data", "root__dict")
+    if not os.path.isdir(root_dict):
+        raise FileNotFoundError(f"Missing root__dict: {root_dict}")
+    return root_dict
+
 def _load_saved_payload(args, device):
-    save_dir = (
-        getattr(args, "save_dumps_dir", None)
+    # ====== 你第一框架 dumper 的根目录（注意要指到 pid_xxxx 那层） ======
+    # 例如：dump_dataset/pid_1528321
+    dump_root = (
+        getattr(args, "diffsynth_dump_root", None)
         or getattr(args, "save_inputs_dir", None)
-        or f"../test_data/saved_inputs_{args.test_resolution}"
+        or getattr(args, "save_dumps_dir", None)
     )
+    if dump_root is None:
+        raise ValueError("Please set args.diffsynth_dump_root to your dumper root, e.g. dump_dataset/pid_xxx")
+
+    # ====== 选择你要对齐的 sample ======
+    pair_id = int(getattr(args, "saved_pair_id", 0))
+
     dp_rank = int(mpu.get_data_parallel_rank())
-    curr_iter = int(getattr(args, "curr_iteration", 0))
-    load_path = os.path.join(
-        save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
-    )
-    if not os.path.exists(load_path):
-        raise FileNotFoundError(f"Saved inputs not found: {load_path}")
     tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
+
     if torch.distributed.get_rank() == tp_cp_src_rank:
-        payload = torch.load(load_path, weights_only=False, map_location="cpu")
-        payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
-        chosen_keys = sorted(list(payload.get("chosen", {}).keys())) if isinstance(payload, dict) else []
-        rejected_keys = sorted(list(payload.get("rejected", {}).keys())) if isinstance(payload, dict) else []
-        print(
-            f"[DPO load] iter={curr_iter} dp_rank={dp_rank} path={load_path} keys={payload_keys}"
-        )
-        print(f"[DPO load] chosen keys={chosen_keys}")
-        print(f"[DPO load] rejected keys={rejected_keys}")
+        # -------- 1) 从 chosen/rejected_inputs 里拿 context / clip_feature / y --------
+        chosen_root = _load_stage_dict(dump_root, pair_id, stage="chosen_inputs", branch="chosen")
+        rejected_root = _load_stage_dict(dump_root, pair_id, stage="rejected_inputs", branch="rejected")
+
+        context = _load_value_from_root_dict(chosen_root, "context")
+
+        # 你截图里 y/clip_feature 的命名可能不完全一样，先用候选名兜底
+        def _pick(root, candidates):
+            last_err = None
+            for k in candidates:
+                try:
+                    return _load_value_from_root_dict(root, k)
+                except Exception as e:
+                    last_err = e
+            raise last_err
+
+        chosen_clip_feature = _pick(chosen_root, ["clip_feature", "chosen_clip_feature", "clip_feat"])
+        reject_clip_feature = _pick(rejected_root, ["clip_feature", "reject_clip_feature", "rejected_clip_feature", "clip_feat"])
+        chosen_y = _pick(chosen_root, ["y", "chosen_y"])
+        reject_y = _pick(rejected_root, ["y", "reject_y", "rejected_y"])
+
+        # -------- 2) 从 training_loss dump 里拿 timestep/noisy_latents/target/weight/noise_pred --------
+        
+        timestep_chosen = _load_stage_tensor(dump_root, pair_id, "training_loss__timesteps", "chosen")
+        timestep_rejected = _load_stage_tensor(dump_root, pair_id, "training_loss__timesteps", "rejected")
+        chosen_noisy_latents   = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noisy_latents", branch="chosen")
+        reject_noisy_latents   = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noisy_latents", branch="rejected")
+
+        chosen_training_target = _load_stage_tensor(dump_root, pair_id, stage="training_loss__training_target", branch="chosen")
+        reject_training_target = _load_stage_tensor(dump_root, pair_id, stage="training_loss__training_target", branch="rejected")
+
+        chosen_loss_weight     = _load_stage_tensor(dump_root, pair_id, stage="training_loss__loss_weight", branch="chosen")
+        reject_loss_weight     = _load_stage_tensor(dump_root, pair_id, stage="training_loss__loss_weight", branch="rejected")
+
+        # 可选：对比用（如果你 dump 了）
+        try:
+            chosen_noise_pred = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noise_pred", branch="chosen")
+        except Exception:
+            chosen_noise_pred = None
+        try:
+            reject_noise_pred = _load_stage_tensor(dump_root, pair_id, stage="training_loss__noise_pred", branch="rejected")
+        except Exception:
+            reject_noise_pred = None
+
+        payload = {
+            "context": context,
+            "chosen": {
+                "clip_feature": chosen_clip_feature,
+                "timestep": timestep_chosen,
+                "y": chosen_y,
+                "noisy_latents": chosen_noisy_latents,
+                "training_target": chosen_training_target,
+                "loss_weight": chosen_loss_weight,
+                "noise_pred": chosen_noise_pred,
+            },
+            "rejected": {
+                "timestep": timestep_rejected,
+                "clip_feature": reject_clip_feature,
+                "y": reject_y,
+                "noisy_latents": reject_noisy_latents,
+                "training_target": reject_training_target,
+                "loss_weight": reject_loss_weight,
+                "noise_pred": reject_noise_pred,
+            },
+        }
+
+        print(f"[DPO load from dumper] dp_rank={dp_rank} pair_id={pair_id} root={dump_root}")
+        print(f"[DPO load] keys={sorted(list(payload.keys()))}")
+        print(f"[DPO load] chosen keys={sorted(list(payload['chosen'].keys()))}")
+        print(f"[DPO load] rejected keys={sorted(list(payload['rejected'].keys()))}")
+
     else:
         payload = None
+
+    # 广播到所有 rank（保持你原有逻辑）
     payload = _broadcast_saved_payload(payload, device=device)
+
+    # ====== 按你原函数签名返回 ======
     context = payload["context"]
     chosen_clip_feature = payload["chosen"]["clip_feature"]
     reject_clip_feature = payload["rejected"]["clip_feature"]
     chosen_y = payload["chosen"]["y"]
     reject_y = payload["rejected"]["y"]
-    timestep = payload["timestep"].to(
-        dtype=torch.bfloat16,
-        device=device,
-    )
-    return payload, context, chosen_clip_feature, reject_clip_feature, chosen_y, reject_y, timestep
+
+    timestep = payload["timestep"].to(dtype=torch.bfloat16, device=device)
+    return payload, context, chosen_clip_feature, reject_clip_feature, chosen_y, reject_y, timestep_chosen, timestep_rejected
+
 
 
 def _load_batch_inputs(batch, chosen_key, rejected_key):
@@ -559,7 +674,8 @@ def forward_step(data_iterator, model, time_step=None):
             reject_clip_feature,
             chosen_y,
             reject_y,
-            timestep,
+            timestep_c,
+            timestep_r,
         ) = _load_saved_payload(args, device=torch.cuda.current_device())
     else:
         payload = None
@@ -585,14 +701,22 @@ def forward_step(data_iterator, model, time_step=None):
     timestep_range = None
     timestep_id = None
     if not use_saved_inputs:
-        timestep, timestep_id, timestep_range = _sample_timestep(
+        timestep_c, timestep_id_c, timestep_range = _sample_timestep(
+        flow_scheduler,
+        diffusion_config,
+        device=torch.cuda.current_device(),
+    )
+        timestep_r, timestep_id_r, _ = _sample_timestep(
             flow_scheduler,
             diffusion_config,
             device=torch.cuda.current_device(),
         )
 
-    _broadcast_tensor(timestep)
-    print(f"[Rank {torch.distributed.get_rank()}] timestep = {timestep}, timestep_id = {timestep_id}")
+    _broadcast_tensor(timestep_c)
+    _broadcast_tensor(timestep_r)
+    if dist.get_rank() == mpu.get_tensor_context_parallel_src_rank():
+        print(f"[Rank {dist.get_rank()}] timestep_c={timestep_c}, id_c={timestep_id_c}")
+        print(f"[Rank {dist.get_rank()}] timestep_r={timestep_r}, id_r={timestep_id_r}")
     # =========================
     # noise (chosen/reject independent)
     # =========================
@@ -623,7 +747,8 @@ def forward_step(data_iterator, model, time_step=None):
         reject_loss_weight = payload["rejected"]["loss_weight"]
         reject_noise_pred = payload["rejected"].get("noise_pred")
         input_checks = {
-            "timestep": (payload["timestep"], timestep),
+            "chosen.timestep": (payload["chosen"]["timestep"], timestep_c),
+            "rejected.timestep": (payload["rejected"]["timestep"], timestep_r),
             "context": (payload["context"], context),
             "chosen.clip_feature": (payload["chosen"]["clip_feature"], chosen_clip_feature),
             "chosen.y": (payload["chosen"]["y"], chosen_y),
@@ -660,7 +785,7 @@ def forward_step(data_iterator, model, time_step=None):
                 chosen_clip_feature,
                 chosen_y,
                 model,
-                timestep,
+                timestep_c,
                 expected_noise_pred=chosen_noise_pred,
                 compare_name="chosen.noise_pred",
                 rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
@@ -676,7 +801,7 @@ def forward_step(data_iterator, model, time_step=None):
                 chosen_y,
                 flow_scheduler,
                 model,
-                timestep,
+                timestep_c,
                 noise_chosen,
                 return_debug=True,
             )
@@ -690,7 +815,7 @@ def forward_step(data_iterator, model, time_step=None):
                 chosen_y,
                 flow_scheduler,
                 model,
-                timestep,
+                timestep_c,
                 noise_chosen,
             )
         )
@@ -706,7 +831,7 @@ def forward_step(data_iterator, model, time_step=None):
                 reject_clip_feature,
                 reject_y,
                 model,
-                timestep,
+                timestep_r,
                 expected_noise_pred=reject_noise_pred,
                 compare_name="rejected.noise_pred",
                 rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
@@ -722,7 +847,7 @@ def forward_step(data_iterator, model, time_step=None):
                 reject_y,
                 flow_scheduler,
                 model,
-                timestep,
+                timestep_r,
                 noise_reject,
                 return_debug=True,
             )
@@ -736,7 +861,7 @@ def forward_step(data_iterator, model, time_step=None):
                 reject_y,
                 flow_scheduler,
                 model,
-                timestep,
+                timestep_r,
                 noise_reject,
             )
         )
@@ -784,16 +909,18 @@ def forward_step(data_iterator, model, time_step=None):
                     "dp_rank": dp_rank,
                 },
                 "scheduler_params": _summarize_scheduler(flow_scheduler),
-                "timestep": timestep,
+                
                 "context": context,
                 "chosen": {
                     "clip_feature": chosen_clip_feature,
                     "y": chosen_y,
+                    "timestep_c": timestep_c,
                     **debug_chosen,
                 },
                 "rejected": {
                     "clip_feature": reject_clip_feature,
                     "y": reject_y,
+                    "timestep_r": timestep_r,
                     **debug_reject,
                 },
                 "losses": {
