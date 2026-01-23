@@ -192,8 +192,10 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
+    --diffsynth_dump_root 
+    --saved_pair_id 0 
     # --noise-seed 42
-    # --use-saved-inputs
+    --use-saved-inputs
     # --compare-saved-losses
     # --save-dumps
     # --save-dumps-interval 1
