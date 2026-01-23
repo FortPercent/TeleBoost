@@ -629,7 +629,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         # ===== 0️⃣ 取原始样本（完整 dict）=====
         raw = self.data[data_id % len(self.data)].copy()
         # print(f"[UnifiedDataset __getitem__] raw keys: {_fmt_keys(raw)}")
-        self._log_data_dump(data_id, raw, "raw_data")
+        # self._log_data_dump(data_id, raw, "raw_data")
         # ===== 1️⃣ path → VideoDecoder（只处理 video key）=====
         for key in self.data_file_keys:
             if key not in raw:
@@ -641,7 +641,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
                 # 现在这里会得到chosen和rejected的PIL列表
                 raw[key] = self.main_data_operator(raw[key])
         # print(f"[UnifiedDataset __getitem__] after decode video keys: {[k for k in self.data_file_keys if k in raw]}")
-        self._log_data_dump(data_id, raw, "after_video_decode")
+        # self._log_data_dump(data_id, raw, "after_video_decode")
         # ===== 2️⃣ 明确“公共字段”=====
         # 除了 chosen / rejected，其它都视为公共字段，prompt
         shared_fields = {
@@ -671,10 +671,10 @@ class UnifiedDataset(torch.utils.data.Dataset):
             if self.pipeline is not None:
                 # print(f"before pp = {data_i.keys()}")
                 # self._log_data(data_id, data_i, f"before_pipeline_{key}")
-                self._log_data_dump(data_id, data_i, f"before_pipeline", branch=key)
+                # self._log_data_dump(data_id, data_i, f"before_pipeline", branch=key)
                 data_i = self.pipeline(data_i)
                 # print(f"after pp = {data_i.keys()}")
-                self._log_data_dump(data_id, data_i, f"after_pipeline", branch=key)
+                # self._log_data_dump(data_id, data_i, f"after_pipeline", branch=key)
             for k, v in shared_fields.items():
                 data_i.setdefault(k, v)
             out[key] = data_i
@@ -682,7 +682,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
         # print(f"[UnifiedDataset __getitem__] output branches: {_fmt_keys(out)}")
 
-        self._log_data_dump(data_id, out, "processed")
+        # self._log_data_dump(data_id, out, "processed")
         return out
 
     def __len__(self):
