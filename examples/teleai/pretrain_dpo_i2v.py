@@ -194,7 +194,6 @@ def _broadcast_saved_payload(payload, device):
     src_rank = mpu.get_tensor_context_parallel_src_rank()
     group = mpu.get_tensor_context_parallel_group()
     tensor_paths = [
-        ("timestep",),
         ("context",),
         ("chosen", "clip_feature"),
         ("chosen", "y"),
@@ -204,6 +203,8 @@ def _broadcast_saved_payload(payload, device):
         ("chosen", "noise_pred"),
         ("chosen", "training_target"),
         ("chosen", "loss_weight"),
+        ("chosen", "timestep"),
+        ("rejected", "timestep"),
         ("rejected", "clip_feature"),
         ("rejected", "y"),
         ("rejected", "latents"),
@@ -550,10 +551,10 @@ def _load_saved_payload(args, device):
     payload = _broadcast_saved_payload(payload, device=device)
 
     # move timesteps to desired dtype/device here (after broadcast)
-    timestep_c = payload["chosen"]["timesteps"].to(dtype=torch.bfloat16, device=device)
-    timestep_r = payload["rejected"]["timesteps"].to(dtype=torch.bfloat16, device=device)
-    payload["chosen"]["timesteps"] = timestep_c
-    payload["rejected"]["timesteps"] = timestep_r
+    timestep_c = payload["chosen"]["timestep"].to(dtype=torch.bfloat16, device=device)
+    timestep_r = payload["rejected"]["timestep"].to(dtype=torch.bfloat16, device=device)
+    payload["chosen"]["timestep"] = timestep_c
+    payload["rejected"]["timestep"] = timestep_r
 
     # return as you use in forward_step
     context = payload["context"]
