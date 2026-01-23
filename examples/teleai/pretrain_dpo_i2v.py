@@ -706,7 +706,8 @@ def forward_step(data_iterator, model, time_step=None):
     )
 
     timestep_range = None
-    timestep_id = None
+    timestep_id_c = None
+    timestep_id_r = None
     if not use_saved_inputs:
         timestep_c, timestep_id_c, timestep_range = _sample_timestep(
         flow_scheduler,
