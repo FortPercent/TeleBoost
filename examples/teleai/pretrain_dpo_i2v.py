@@ -323,15 +323,24 @@ def _compare_losses(saved_losses, current_losses, rtol, atol):
     return results
 
 
-def _compare_input_tensor(name, expected, actual, rtol=1e-5, atol=1e-8):
+def _compare_input_tensor(
+    name,
+    expected,
+    actual,
+    rtol=1e-5,
+    atol=1e-8,
+    cast_mode="float32",  # "none" | "float32" | "to_actual" | "to_expected"
+):
     if expected is None and actual is None:
         return None
     if expected is None or actual is None:
         return {"name": name, "reason": "one is None"}
+
     if not torch.is_tensor(expected) or not torch.is_tensor(actual):
         if expected == actual:
             return None
         return {"name": name, "reason": "non-tensor mismatch"}
+
     if expected.shape != actual.shape:
         return {
             "name": name,
@@ -339,25 +348,74 @@ def _compare_input_tensor(name, expected, actual, rtol=1e-5, atol=1e-8):
             "expected_shape": list(expected.shape),
             "actual_shape": list(actual.shape),
         }
-    if expected.dtype != actual.dtype:
-        return {
-            "name": name,
-            "reason": "dtype mismatch",
-            "expected_dtype": str(expected.dtype),
-            "actual_dtype": str(actual.dtype),
-        }
-    if torch.equal(expected, actual):
+
+    dtype_mismatch = (expected.dtype != actual.dtype)
+    device_mismatch = (expected.device != actual.device)
+
+    # ---- choose comparison dtype/device ----
+    e = expected
+    a = actual
+    # move to same device for compare (cheap)
+    if device_mismatch:
+        e = e.to(device=a.device)
+
+    # cast for value-compare
+    if cast_mode == "none":
+        # keep original dtypes; if dtype mismatch, compare will be meaningless for allclose in many cases
+        pass
+    elif cast_mode == "float32":
+        e = e.float()
+        a = a.float()
+    elif cast_mode == "to_actual":
+        e = e.to(dtype=a.dtype)
+    elif cast_mode == "to_expected":
+        a = a.to(dtype=e.dtype)
+    else:
+        raise ValueError(f"Unknown cast_mode={cast_mode}")
+
+    # If they are exactly equal after casting
+    if torch.equal(e, a):
+        if dtype_mismatch or device_mismatch:
+            return {
+                "name": name,
+                "reason": "equal_after_cast",
+                "expected_dtype": str(expected.dtype),
+                "actual_dtype": str(actual.dtype),
+                "cast_mode": cast_mode,
+            }
         return None
-    allclose = torch.allclose(expected, actual, rtol=rtol, atol=atol)
+
+    allclose = torch.allclose(e, a, rtol=rtol, atol=atol)
     if allclose:
+        # still report dtype mismatch if you care
+        if dtype_mismatch or device_mismatch:
+            return {
+                "name": name,
+                "reason": "allclose_after_cast",
+                "expected_dtype": str(expected.dtype),
+                "actual_dtype": str(actual.dtype),
+                "cast_mode": cast_mode,
+            }
         return None
-    diff = (expected - actual).abs()
-    return {
+
+    diff = (e - a).abs()
+    out = {
         "name": name,
         "reason": "value mismatch",
-        "max_abs": diff.max().item(),
-        "mean_abs": diff.mean().item(),
+        "max_abs": float(diff.max().item()),
+        "mean_abs": float(diff.mean().item()),
+        "rtol": rtol,
+        "atol": atol,
+        "cast_mode": cast_mode,
     }
+    if dtype_mismatch:
+        out["expected_dtype"] = str(expected.dtype)
+        out["actual_dtype"] = str(actual.dtype)
+    if device_mismatch:
+        out["expected_device"] = str(expected.device)
+        out["actual_device"] = str(actual.device)
+    return out
+
 
 
 def _check_payload_inputs(payload, inputs, rtol=1e-5, atol=1e-8):
@@ -709,6 +767,7 @@ def forward_step(data_iterator, model, time_step=None):
     timestep_id_c = None
     timestep_id_r = None
     if not use_saved_inputs:
+        # normal timestep sampling
         timestep_c, timestep_id_c, timestep_range = _sample_timestep(
         flow_scheduler,
         diffusion_config,
