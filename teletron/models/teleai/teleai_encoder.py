@@ -285,7 +285,10 @@ class TeleaiEncoder(BaseEncoder):
             如果输入是样本列表，返回一个包含两个列表的列表，分别对应每个样本的编码结果。
         """
         if not self._is_dpo_batch(raw_batch):
-            return self._encode_single(raw_batch)
+            res_batch = self._encode_single(raw_batch)
         else:
-            return self._encode_dpo(raw_batch)
-                
+            res_batch = self._encode_dpo(raw_batch)
+        from my_utils import get_dumper
+        dumper = get_dumper()
+        dumper.dump(stage="teleai_encoder_output", obj=res_batch, data_id=None)
+        return res_batch
