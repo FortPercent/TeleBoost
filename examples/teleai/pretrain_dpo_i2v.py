@@ -61,6 +61,8 @@ def extra_args(parser):
     group.add_argument("--test-resolution", type=str, default="360")
     group.add_argument("--save-dumps", action="store_true")
     group.add_argument("--save-dumps-dir", type=str, default=None)
+    group.add_argument("--saved-pair-id", type=int, default=0)
+    group.add_argument("--diffsynth-dump-root", type=str, default=None)
     group.add_argument("--save-dumps-interval", type=int, default=1)
     group.add_argument("--use-saved-inputs", action="store_true")
     group.add_argument("--compare-saved-losses", action="store_true")
