@@ -332,6 +332,19 @@ class UnifiedDataset(torch.utils.data.Dataset):
         from teletron.datasets.base_dataset import Compose
         self.pipeline = Compose(pipeline) if pipeline is not None else None
         self.load_metadata(metadata_path)
+        try:
+            from my_utils import UniversalDumper, DumpConfig, get_dumper
+            self.dumper = get_dumper(DumpConfig(
+                root_dir="./dump_dataset",
+                enable=True,
+                image_format="png",
+                max_list_elems=64,
+                max_dict_items=128,
+                save_tensor_cpu=False,
+            )
+            )
+        except Exception as e:
+            print(f"UnifiedDataset: failed to create dumper: {e}")
     
     @staticmethod
     def default_image_operator(
@@ -371,7 +384,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         max_pixels=1920*1080, height=None, width=None,
         height_division_factor=16, width_division_factor=16,
         num_frames=81, time_division_factor=4, time_division_remainder=1,
-        torch_dtype=torch.float32, device="cpu", pattern="B C T H W",
+        torch_dtype=torch.bfloat16, device="cpu", pattern="B C T H W",
         min_value=-1, max_value=1,
     ):
         return UnifiedDataset.default_video_operator(
@@ -598,6 +611,11 @@ class UnifiedDataset(torch.utils.data.Dataset):
             f"stage={stage} keys={data_keys}"
         )
 
+    def _log_data_dump(self, data_id, data, stage, branch=None):
+        # branch 你可以传 chosen / rejected 或 pipeline 名称
+        if self._get_dp_rank() == 0:
+            self.dumper.dump(stage=stage, obj=data, data_id=data_id, branch=branch)
+
     def __getitem__(self, data_id):
         if self.load_from_cache:
             data = self.cached_data[data_id % len(self.cached_data)]
@@ -610,7 +628,8 @@ class UnifiedDataset(torch.utils.data.Dataset):
 
         # ===== 0️⃣ 取原始样本（完整 dict）=====
         raw = self.data[data_id % len(self.data)].copy()
-        print(f"[UnifiedDataset __getitem__] raw keys: {_fmt_keys(raw)}")
+        # print(f"[UnifiedDataset __getitem__] raw keys: {_fmt_keys(raw)}")
+        self._log_data_dump(data_id, raw, "raw_data")
         # ===== 1️⃣ path → VideoDecoder（只处理 video key）=====
         for key in self.data_file_keys:
             if key not in raw:
@@ -621,15 +640,15 @@ class UnifiedDataset(torch.utils.data.Dataset):
             else:
                 # 现在这里会得到chosen和rejected的PIL列表
                 raw[key] = self.main_data_operator(raw[key])
-        print(f"[UnifiedDataset __getitem__] after decode video keys: {[k for k in self.data_file_keys if k in raw]}")
-
+        # print(f"[UnifiedDataset __getitem__] after decode video keys: {[k for k in self.data_file_keys if k in raw]}")
+        self._log_data_dump(data_id, raw, "after_video_decode")
         # ===== 2️⃣ 明确“公共字段”=====
         # 除了 chosen / rejected，其它都视为公共字段，prompt
         shared_fields = {
             k: v for k, v in raw.items()
             if k not in self.data_file_keys
         }
-        print(f"[UnifiedDataset __getitem__] shared fields: {_fmt_keys(shared_fields)}")
+        # print(f"[UnifiedDataset __getitem__] shared fields: {_fmt_keys(shared_fields)}")
 
         out = {}
 
@@ -651,16 +670,19 @@ class UnifiedDataset(torch.utils.data.Dataset):
             # 跑 dict-level pipeline
             if self.pipeline is not None:
                 # print(f"before pp = {data_i.keys()}")
-                self._log_data(data_id, data_i, f"before_pipeline_{key}")
+                # self._log_data(data_id, data_i, f"before_pipeline_{key}")
+                self._log_data_dump(data_id, data_i, f"before_pipeline", branch=key)
                 data_i = self.pipeline(data_i)
                 # print(f"after pp = {data_i.keys()}")
+                self._log_data_dump(data_id, data_i, f"after_pipeline", branch=key)
             for k, v in shared_fields.items():
                 data_i.setdefault(k, v)
             out[key] = data_i
-            print(f"[UnifiedDataset __getitem__] branch '{key}' keys: {_fmt_keys(data_i)}")
+            # print(f"[UnifiedDataset __getitem__] branch '{key}' keys: {_fmt_keys(data_i)}")
 
-        print(f"[UnifiedDataset __getitem__] output branches: {_fmt_keys(out)}")
-        self._log_data(data_id, out, "processed")
+        # print(f"[UnifiedDataset __getitem__] output branches: {_fmt_keys(out)}")
+
+        self._log_data_dump(data_id, out, "processed")
         return out
 
     def __len__(self):
@@ -721,7 +743,7 @@ class WanDPODataset(UnifiedDataset):
             num_frames=num_frames,
             time_division_factor=time_division_factor,
             time_division_remainder=time_division_remainder,
-            torch_dtype=torch.float32,  # 按需改成 bfloat16/float16
+            torch_dtype=torch.bfloat16,
             device="cpu",
             pattern="B C T H W",
             min_value=-1,
