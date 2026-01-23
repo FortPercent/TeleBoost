@@ -482,3 +482,145 @@ class DumperSingleton:
 def get_dumper(cfg=None):
     """Functional alias."""
     return DumperSingleton.get(cfg)
+
+
+
+
+
+
+import os
+import json
+import glob
+import pickle
+
+try:
+    import torch
+except Exception:
+    torch = None
+
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+try:
+    from PIL import Image
+except Exception:
+    Image = None
+
+
+class UniversalLoader:
+    """
+    Load objects saved by UniversalDumper.
+    """
+
+    def __init__(self, root_dir: str):
+        self.root_dir = root_dir
+
+    def list_dumps(self, data_id: int):
+        """Return all dump dirs for a sample id, sorted by folder name."""
+        sample_dir = os.path.join(self.root_dir, f"sample_{int(data_id)}")
+        if not os.path.isdir(sample_dir):
+            return []
+        dirs = [os.path.join(sample_dir, d) for d in os.listdir(sample_dir)]
+        dirs = [d for d in dirs if os.path.isdir(d) and os.path.isfile(os.path.join(d, "manifest.json"))]
+        return sorted(dirs)
+
+    def find_dump(self, data_id: int, stage: str, branch: str = None, pick: str = "latest"):
+        """
+        Find a dump directory for (data_id, stage, branch).
+        pick: "latest" or "earliest"
+        """
+        dirs = self.list_dumps(data_id)
+        stage = str(stage)
+        branch = None if branch is None else str(branch)
+
+        matched = []
+        for d in dirs:
+            with open(os.path.join(d, "manifest.json"), "r", encoding="utf-8") as f:
+                m = json.load(f)
+            if m.get("stage") != stage:
+                continue
+            if branch is not None and m.get("branch") != branch:
+                continue
+            if branch is None and m.get("branch") is not None:
+                # 如果你想 stage 不区分 branch，这里可以放宽；默认严格：branch=None 只匹配 branch=None
+                continue
+            matched.append((d, m))
+
+        if not matched:
+            return None
+
+        matched = sorted(matched, key=lambda x: x[0])
+        return matched[-1][0] if pick == "latest" else matched[0][0]
+
+    def load(self, dump_dir: str):
+        """Load the root object from a dump dir (the one referred by manifest['saved_root'])."""
+        with open(os.path.join(dump_dir, "manifest.json"), "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        saved_root = manifest["saved_root"]
+        return self._load_saved(saved_root)
+
+    def load_stage(self, data_id: int, stage: str, branch: str = None, pick: str = "latest"):
+        dump_dir = self.find_dump(data_id, stage=stage, branch=branch, pick=pick)
+        if dump_dir is None:
+            raise FileNotFoundError(f"No dump found for data_id={data_id}, stage={stage}, branch={branch}")
+        return self.load(dump_dir)
+
+    # ---------- internals ----------
+
+    def _load_saved(self, saved: dict):
+        kind = saved.get("kind")
+
+        if kind == "primitive_json":
+            with open(saved["path"], "r", encoding="utf-8") as f:
+                return json.load(f)["value"]
+
+        if kind == "pil_image":
+            if Image is None:
+                raise RuntimeError("PIL not available but trying to load pil_image")
+            img = Image.open(saved["path"])
+            img.load()
+            return img
+
+        if kind == "torch_tensor":
+            if torch is None:
+                raise RuntimeError("torch not available but trying to load torch_tensor")
+            return torch.load(saved["pt"], map_location="cpu")
+
+        if kind == "numpy":
+            if np is None:
+                raise RuntimeError("numpy not available but trying to load numpy")
+            return np.load(saved["path"], allow_pickle=False)
+
+        if kind == "dict_dir":
+            # read _index.json then reconstruct dict
+            idx_path = saved["index"]
+            with open(idx_path, "r", encoding="utf-8") as f:
+                idx = json.load(f)
+            out = {}
+            for it in idx["items"]:
+                key = it["key"]
+                out[key] = self._load_saved(it["saved"])
+            return out
+
+        if kind == "seq_dir":
+            idx_path = saved["index"]
+            with open(idx_path, "r", encoding="utf-8") as f:
+                idx = json.load(f)
+            elems = []
+            for it in idx["elems"]:
+                elems.append(self._load_saved(it["saved"]))
+            # 原来是 list 还是 tuple，我们这里默认恢复 list（更常用）
+            return elems
+
+        if kind == "pickle":
+            with open(saved["path"], "rb") as f:
+                return pickle.load(f)
+
+        if kind == "repr_txt":
+            # 不可恢复对象，返回 repr 文本
+            with open(saved["path"], "r", encoding="utf-8") as f:
+                return f.read()
+
+        raise ValueError(f"Unknown saved kind: {kind}")
