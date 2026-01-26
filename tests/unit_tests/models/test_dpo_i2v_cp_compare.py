@@ -78,9 +78,16 @@ def _compute_single_loss(
     timestep,
     noise,
 ):
-    training_target = flow_scheduler.training_target(latents, noise, timestep)
-    noisy_latents = flow_scheduler.add_noise(latents, noise, timestep)
-    loss_weight = flow_scheduler.training_weight(timestep)
+    # Keep model inputs on CUDA, but compute scheduler scalars on CPU to avoid device mismatch.
+    timestep_cpu = timestep.detach().float().cpu()
+    timesteps_cpu = flow_scheduler.timesteps.detach().float().cpu()
+    sigmas_cpu = flow_scheduler.sigmas.detach().float().cpu()
+    weights_cpu = flow_scheduler.linear_timesteps_weights.detach().float().cpu()
+    timestep_id = torch.argmin((timesteps_cpu - timestep_cpu).abs())
+    sigma = sigmas_cpu[timestep_id].to(device=latents.device, dtype=latents.dtype)
+    loss_weight = weights_cpu[timestep_id].to(device=latents.device, dtype=latents.dtype)
+    training_target = noise - latents
+    noisy_latents = (1 - sigma) * latents + sigma * noise
 
     output_tensor = model(
         x=noisy_latents,
