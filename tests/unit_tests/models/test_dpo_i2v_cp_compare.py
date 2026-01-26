@@ -474,17 +474,28 @@ class testDPOI2VCPCompare(TestCase):
         grad_base = {k: torch.from_numpy(v) for k, v in base_payload["grads"].items()}
         grad_cp = {k: torch.from_numpy(v) for k, v in cp_payload["grads"].items()}
         grad_dists = []
+        max_grad_dist = None
+        max_grad_name = None
         tp_rank = 0
         for name in grad_base:
             if name not in grad_cp:
                 continue
             dist = tp_normalized_euclid_dist(tp_rank, name, grad_base[name], grad_cp[name])
             grad_dists.append(dist)
+            if max_grad_dist is None or dist > max_grad_dist:
+                max_grad_dist = dist
+                max_grad_name = name
         if grad_dists:
-            print(f"[Test] grad dist: max={max(grad_dists):.6f}, mean={sum(grad_dists)/len(grad_dists):.6f}")
+            print(
+                f"[Test] grad dist: max={max_grad_dist:.6f} ({max_grad_name}), "
+                f"mean={sum(grad_dists)/len(grad_dists):.6f}"
+            )
 
-        if grad_dists and max(grad_dists) < 0.02:
+        if grad_dists and max_grad_dist is not None and max_grad_dist < 0.02:
             bwd_msg = DPO_CP_BWD_SUCCESS
         else:
-            bwd_msg = f"{DPO_CP_BWD_FAIL} max_grad_dist={max(grad_dists) if grad_dists else 'N/A'}"
-        self.assertTrue(grad_dists and max(grad_dists) < 0.02, bwd_msg)
+            bwd_msg = (
+                f"{DPO_CP_BWD_FAIL} max_grad_dist={max_grad_dist if grad_dists else 'N/A'} "
+                f"param={max_grad_name if grad_dists else 'N/A'}"
+            )
+        self.assertTrue(grad_dists and max_grad_dist is not None and max_grad_dist < 0.02, bwd_msg)
