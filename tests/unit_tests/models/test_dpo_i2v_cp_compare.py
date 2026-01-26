@@ -275,16 +275,20 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
 
     (loss_reject_scaled + loss_chosen_scaled).backward()
 
+    import numpy as np
+
     grad_names = [
         "patch_emb.weight",
         "blocks.0.self_attn.query.weight",
         "blocks.0.ffn.0.weight",
         "head.head.weight",
     ]
-    grad_payload: Dict[str, torch.Tensor] = {}
+
+    # 把 grads 变成 numpy，避免 Queue 传 torch.Tensor 触发 storage fd
+    grad_payload: Dict[str, np.ndarray] = {}
     for name, param in model.named_parameters():
         if name in grad_names and param.grad is not None:
-            grad_payload[name] = param.grad.detach().float().cpu()
+            grad_payload[name] = param.grad.detach().float().cpu().numpy()
 
     if torch.distributed.get_rank() == src_rank:
         payload = {
@@ -292,8 +296,9 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
             "loss_chosen": float(loss_chosen.detach().float().cpu().item()),
             "loss_reject": float(loss_reject.detach().float().cpu().item()),
             "dpo_loss": float(dpo_loss_for_log.detach().float().cpu().item()),
-            "output_chosen": output_chosen.detach().float().cpu(),
-            "output_reject": output_reject.detach().float().cpu(),
+            # outputs 也转 numpy，避免 Queue 传 Tensor
+            "output_chosen": output_chosen.detach().float().cpu().numpy(),
+            "output_reject": output_reject.detach().float().cpu().numpy(),
             "grads": grad_payload,
         }
         q.put(payload)
@@ -324,10 +329,10 @@ class testDPOI2VCPCompare(TestCase):
         self.assertIsNotNone(cp_payload, "missing cp payload")
 
         # forward compare
-        out_c_base = base_payload["output_chosen"]
-        out_c_cp = cp_payload["output_chosen"]
-        out_r_base = base_payload["output_reject"]
-        out_r_cp = cp_payload["output_reject"]
+        out_c_base = torch.from_numpy(base_payload["output_chosen"])
+        out_c_cp = torch.from_numpy(cp_payload["output_chosen"])
+        out_r_base = torch.from_numpy(base_payload["output_reject"])
+        out_r_cp = torch.from_numpy(cp_payload["output_reject"])
 
         dist_c = _normalized_euclid_dist(out_c_base, out_c_cp)
         dist_r = _normalized_euclid_dist(out_r_base, out_r_cp)
@@ -344,8 +349,8 @@ class testDPOI2VCPCompare(TestCase):
         self.assertAlmostEqual(base_payload["dpo_loss"], cp_payload["dpo_loss"], places=2)
 
         # backward compare
-        grad_base = base_payload["grads"]
-        grad_cp = cp_payload["grads"]
+        grad_base = {k: torch.from_numpy(v) for k, v in base_payload["grads"].items()}
+        grad_cp = {k: torch.from_numpy(v) for k, v in cp_payload["grads"].items()}
         grad_dists = []
         for name in grad_base:
             if name not in grad_cp:
