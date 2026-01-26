@@ -63,7 +63,7 @@ def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
         try:
             TensorWatch.run_name = run_tag
         except Exception:
-            pass
+            passvscode-remote://k8s-container%2Bcontext%3Ddefault%2Bpodname%3Def280315711c1b782108c6361af45d1b-taskrole1-0%2Bnamespace%3Ddefault%2Bname%3Dapp%2Bimage%3Dstorage-docker-registry-agent.gemini-comp%253a5004%252ftuvsnor8hhlv%252fmyk%253aomni/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/tests/tensorwatch_data/teleai_tp1_cp1/rank_0/step_0/tensorwatch.json vscode-remote://k8s-container%2Bcontext%3Ddefault%2Bpodname%3Def280315711c1b782108c6361af45d1b-taskrole1-0%2Bnamespace%3Ddefault%2Bname%3Dapp%2Bimage%3Dstorage-docker-registry-agent.gemini-comp%253a5004%252ftuvsnor8hhlv%252fmyk%253aomni/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/tests/unit_tests/models/test_parallel_teleai_model.py
 
     watch_module_forward_backward(model, use_megatron=False, use_deepspeed=False)
     if hasattr(TensorWatch, "is_save_tensor"):
