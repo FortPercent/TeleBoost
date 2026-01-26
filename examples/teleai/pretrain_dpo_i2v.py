@@ -952,8 +952,8 @@ def forward_step(data_iterator, model, time_step=None):
         coeff = coeff / coeff.numel()
 
     # 两个“等价”的反传项： +coeff*loss_reject  和  -coeff*loss_chosen
-    loss_reject_scaled = (coeff * loss_reject).sum()
-    loss_chosen_scaled = (-coeff * loss_chosen).sum()
+    loss_reject_scaled = (-coeff * loss_reject).sum()
+    loss_chosen_scaled = (coeff * loss_chosen).sum()
 
     # 这个只是用来日志/显示，不参与反传（可选）
     dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
