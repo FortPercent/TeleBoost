@@ -159,6 +159,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     cfg.sequence_parallel = False
 
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
+    print(f"[Rank {rank}] init_process_group done (world_size={world_size}, tp={tp_size}, cp={cp_size})")
 
     assert len(CUDA_DEVICES) >= world_size, "GPU number is not enough"
     cuda_rank = CUDA_DEVICES[rank]
@@ -176,12 +177,14 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
         nccl_communicator_config_path=None,
         distributed_timeout_minutes=30,
     )
+    print(f"[Rank {rank}] model parallel init done")
 
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     model = ParallelTeleaiModel(cfg).to(device=device, dtype=torch.bfloat16)
     model.train()
     model.zero_grad(set_to_none=True)
+    print(f"[Rank {rank}] model init done")
 
     # ---- build scheduler ----
     flow_scheduler = FlowMatchScheduler(
@@ -191,6 +194,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     flow_scheduler.sigmas = flow_scheduler.sigmas.to(device)
     flow_scheduler.timesteps = flow_scheduler.timesteps.to(device)
     flow_scheduler.linear_timesteps_weights = flow_scheduler.linear_timesteps_weights.to(device)
+    print(f"[Rank {rank}] scheduler init done")
 
     # ---- random inputs (broadcast within CP group) ----
     dtype = torch.bfloat16
@@ -223,6 +227,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     y = _make_or_broadcast(
         (batch, y_channels, latent_frames, height, width), dtype, device, seed + 4, "y"
     )
+    print(f"[Rank {rank}] inputs ready: latents={chosen_latents.shape}, y={y.shape}, context={context.shape}")
 
     src_rank = mpu.get_tensor_context_parallel_src_rank()
     if torch.distributed.get_rank() == src_rank:
@@ -235,12 +240,15 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
         timestep_r = torch.empty((1,), device=device, dtype=dtype)
     _broadcast_tensor(timestep_c)
     _broadcast_tensor(timestep_r)
+    if torch.distributed.get_rank() == src_rank:
+        print(f"[Rank {rank}] timesteps ready: t_c={float(timestep_c.item()):.4f}, t_r={float(timestep_r.item()):.4f}")
 
     noise_chosen, noise_reject = _generate_noise_pair(
         chosen_latents, reject_latents, base_seed=seed + 10, curr_iter=0
     )
     _broadcast_tensor(noise_chosen)
     _broadcast_tensor(noise_reject)
+    print(f"[Rank {rank}] noise ready")
 
     # ---- forward + loss (DPO-style) ----
     output_chosen, loss_chosen = _compute_single_loss(
@@ -263,6 +271,11 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
         timestep_r,
         noise_reject,
     )
+    if torch.distributed.get_rank() == src_rank:
+        print(
+            f"[Rank {rank}] forward done: loss_chosen={float(loss_chosen.detach().float().cpu().item()):.6f}, "
+            f"loss_reject={float(loss_reject.detach().float().cpu().item()):.6f}"
+        )
 
     beta = float(model_config["dit"]["train"]["dpo"]["beta"])
     advantage = (loss_reject - loss_chosen).clamp(-20, 20)
@@ -274,20 +287,15 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     dpo_loss_for_log = (-torch.nn.functional.logsigmoid(beta * advantage)).mean().detach()
 
     (loss_reject_scaled + loss_chosen_scaled).backward()
+    if torch.distributed.get_rank() == src_rank:
+        print(f"[Rank {rank}] backward done")
 
     import numpy as np
-
-    grad_names = [
-        "patch_emb.weight",
-        "blocks.0.self_attn.query.weight",
-        "blocks.0.ffn.0.weight",
-        "head.head.weight",
-    ]
 
     # 把 grads 变成 numpy，避免 Queue 传 torch.Tensor 触发 storage fd
     grad_payload: Dict[str, np.ndarray] = {}
     for name, param in model.named_parameters():
-        if name in grad_names and param.grad is not None:
+        if param.grad is not None:
             grad_payload[name] = param.grad.detach().float().cpu().numpy()
 
     if torch.distributed.get_rank() == src_rank:
@@ -302,6 +310,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
             "grads": grad_payload,
         }
         q.put(payload)
+        print(f"[Rank {rank}] payload queued")
 
     torch.distributed.destroy_process_group()
 
@@ -322,6 +331,7 @@ class testDPOI2VCPCompare(TestCase):
     def test_dpo_i2v_cp_compare(self):
         baseline = _launch_dpo_cp_compare(world_size=1, tp_size=1, cp_size=1, seed=1234, port=12455)
         cp_run = _launch_dpo_cp_compare(world_size=2, tp_size=1, cp_size=2, seed=1234, port=12456)
+        print(f"[Test] payloads: baseline={len(baseline)}, cp_run={len(cp_run)}")
 
         base_payload = next((x for x in baseline if x.get("rank") == 0), None)
         cp_payload = next((x for x in cp_run if x.get("rank") == 0), None)
@@ -336,6 +346,7 @@ class testDPOI2VCPCompare(TestCase):
 
         dist_c = _normalized_euclid_dist(out_c_base, out_c_cp)
         dist_r = _normalized_euclid_dist(out_r_base, out_r_cp)
+        print(f"[Test] forward dist: chosen={dist_c:.6f}, reject={dist_r:.6f}")
 
         if dist_c < 0.01 and dist_r < 0.01:
             fwd_msg = DPO_CP_FWD_SUCCESS
@@ -347,6 +358,11 @@ class testDPOI2VCPCompare(TestCase):
         self.assertAlmostEqual(base_payload["loss_chosen"], cp_payload["loss_chosen"], places=2)
         self.assertAlmostEqual(base_payload["loss_reject"], cp_payload["loss_reject"], places=2)
         self.assertAlmostEqual(base_payload["dpo_loss"], cp_payload["dpo_loss"], places=2)
+        print(
+            f"[Test] losses: chosen={base_payload['loss_chosen']:.6f}/{cp_payload['loss_chosen']:.6f}, "
+            f"reject={base_payload['loss_reject']:.6f}/{cp_payload['loss_reject']:.6f}, "
+            f"dpo={base_payload['dpo_loss']:.6f}/{cp_payload['dpo_loss']:.6f}"
+        )
 
         # backward compare
         grad_base = {k: torch.from_numpy(v) for k, v in base_payload["grads"].items()}
@@ -357,6 +373,8 @@ class testDPOI2VCPCompare(TestCase):
                 continue
             dist = _normalized_euclid_dist(grad_base[name], grad_cp[name])
             grad_dists.append(dist)
+        if grad_dists:
+            print(f"[Test] grad dist: max={max(grad_dists):.6f}, mean={sum(grad_dists)/len(grad_dists):.6f}")
 
         if grad_dists and max(grad_dists) < 0.02:
             bwd_msg = DPO_CP_BWD_SUCCESS
