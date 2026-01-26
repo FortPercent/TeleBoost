@@ -152,7 +152,7 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
         parallel_teleai_model,
         rank,
         run_tag=f"teleai_cp{cp_size}",
-        enable_tensorwatch=cp_size > 1,
+        # enable_tensorwatch=cp_size > 1,
     )
     
     
