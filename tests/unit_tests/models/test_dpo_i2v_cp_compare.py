@@ -26,6 +26,63 @@ def _normalized_euclid_dist(a: torch.Tensor, b: torch.Tensor) -> float:
     return 0.5 * torch.norm(a - b).item() / denom
 
 
+def tp_normalized_euclid_dist(rank, name, output, parallel_output):
+    col_w = [
+        "self_attn.query.weight",
+        "self_attn.key.weight",
+        "self_attn.value.weight",
+        "ffn.0.weight",
+        "cross_attn.query.weight",
+        "cross_attn.key.weight",
+        "cross_attn.value.weight",
+        "cross_attn.img_key.weight",
+        "cross_attn.img_value.weight",
+    ]
+
+    col_b = [
+        "self_attn.query.bias",
+        "self_attn.key.bias",
+        "self_attn.value.bias",
+        "ffn.0.bias",
+        "cross_attn.query.bias",
+        "cross_attn.key.bias",
+        "cross_attn.value.bias",
+        "cross_attn.img_key.bias",
+        "cross_attn.img_value.bias",
+    ]
+
+    row_w = [
+        "ffn.2.weight",
+        "self_attn.out_proj.weight",
+        "cross_attn.out_proj.weight",
+    ]
+
+    norm_w = [
+        "self_attn.norm_query.weight",
+        "self_attn.norm_key.weight",
+        "cross_attn.norm_query.weight",
+        "cross_attn.norm_key.weight",
+        "cross_attn.norm_image_key.weight",
+    ]
+
+    def normalized_euclid_dist(name, output, parallel_output):
+        return _normalized_euclid_dist(output, parallel_output)
+
+    if any(cw in name for cw in col_w):
+        size = parallel_output.shape[0]
+        return normalized_euclid_dist(name, output[rank * size:(rank + 1) * size, :], parallel_output)
+    if any(cb in name for cb in col_b):
+        size = parallel_output.shape[0]
+        return normalized_euclid_dist(name, output[rank * size:(rank + 1) * size], parallel_output)
+    if any(rw in name for rw in row_w):
+        size = parallel_output.shape[1]
+        return normalized_euclid_dist(name, output[:, rank * size:(rank + 1) * size], parallel_output)
+    if any(nw in name for nw in norm_w):
+        size = parallel_output.shape[0]
+        return normalized_euclid_dist(name, output[rank * size:(rank + 1) * size], parallel_output)
+    return normalized_euclid_dist(name, output, parallel_output)
+
+
 def _broadcast_tensor(tensor: torch.Tensor):
     if mpu.get_tensor_context_parallel_world_size() > 1:
         dist_group = mpu.get_tensor_context_parallel_group()
@@ -368,10 +425,11 @@ class testDPOI2VCPCompare(TestCase):
         grad_base = {k: torch.from_numpy(v) for k, v in base_payload["grads"].items()}
         grad_cp = {k: torch.from_numpy(v) for k, v in cp_payload["grads"].items()}
         grad_dists = []
+        tp_rank = 0
         for name in grad_base:
             if name not in grad_cp:
                 continue
-            dist = _normalized_euclid_dist(grad_base[name], grad_cp[name])
+            dist = tp_normalized_euclid_dist(tp_rank, name, grad_base[name], grad_cp[name])
             grad_dists.append(dist)
         if grad_dists:
             print(f"[Test] grad dist: max={max(grad_dists):.6f}, mean={sum(grad_dists)/len(grad_dists):.6f}")
