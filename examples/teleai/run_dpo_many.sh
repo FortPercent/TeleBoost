@@ -7,7 +7,7 @@ set -e
 
 NODE_RANK=""
 NNODES=""
-MASTER_ADDR="10.244.21.83"
+MASTER_ADDR="10.244.67.252"
 MASTER_PORT="11329"
 
 while [[ $# -gt 0 ]]; do
@@ -80,17 +80,17 @@ export WAN_DPO_PREVAE_TENSOR_DIR="./dpo_dumps"
 # export WAN_DPO_DUMP_RANK=0
 ####################################### IMPORTANT ARGS #######################################
 # Parallel config
-CP=4
+CP=2
 TP=1 # not support
 
 # Multi-node config
 N_MOE=1
-N_GPU_FOR_TRAIN=12
-N_GPU_FOR_DATA=3
+N_GPU_FOR_TRAIN=16
+N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
 # EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
-EXPR_NAME=align_dpo_480p_i2v_49
+EXPR_NAME=align_dpo_i2v_480_49_new
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
@@ -103,7 +103,8 @@ echo "Launching: $TRAIN_SCRIPT"
 TENSORBOARD_LOGS_PATH=./logs/${EXPR_NAME}
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/high_noise_I2V
 # CHECKPOINT_PATH_LOAD=/workspace/high_noise_I2V
-CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/high_noise_teletron
+# CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/high_noise_teletron
+CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/align_dpo_i2v_480_49_new
 # CHECKPOINT_PATH_LOAD=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/wan_22_14b_720p_81_dpo_lr_2e_6_clipgrad_20
 CHECKPOINT_PATH_SAVE=/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/${EXPR_NAME}
 ####################################### IMPORTANT ARGS END #######################################
@@ -192,10 +193,10 @@ TRAINING_ARGS=(
     --distributed-timeout-minutes 60
     --override-opt_param-scheduler
     --data-parallel-random-init
-    --diffsynth_dump_root /nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/dump_dataset/pid_1570240
-    --saved_pair_id 0 
+    # --diffsynth_dump_root /nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/dump_dataset/pid_1570240
+    # --saved_pair_id 0 
     # --noise-seed 42
-    --use-saved-inputs
+    # --use-saved-inputs
     # --compare-saved-losses
     # --save-dumps
     # --save-dumps-interval 1

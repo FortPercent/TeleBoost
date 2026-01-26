@@ -212,7 +212,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, run_t
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
     args.activation_offload = False
-    args.num_layers = 1
+    args.num_layers = 2
     args.num_attention_heads = 40
     args.distributed_vae = False
     args.consumer_models_num = 1
@@ -232,7 +232,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, run_t
                 text_dim=4096,
                 out_dim=16,
                 num_heads=40,
-                num_layers=1,
+                num_layers=2,
                 eps=1e-6,
                 has_image_pos_emb=False,
             ),
