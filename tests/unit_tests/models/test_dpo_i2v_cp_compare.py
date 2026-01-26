@@ -125,6 +125,46 @@ def _generate_noise_pair(chosen_latents, reject_latents, base_seed, curr_iter):
     return noise_chosen, noise_reject
 
 
+def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
+    if not enable_tensorwatch:
+        return None
+    try:
+        from tensorwatch import watch_module_forward_backward, TensorWatch
+    except Exception as exc:
+        print(f"[Rank {rank}] TensorWatch import failed: {exc}")
+        return None
+
+    base_dir = os.path.join(os.getcwd(), "tensorwatch_data")
+    os.makedirs(base_dir, exist_ok=True)
+
+    if hasattr(TensorWatch, "reset"):
+        try:
+            TensorWatch.reset()
+        except Exception:
+            pass
+    if hasattr(TensorWatch, "set_save_dir"):
+        try:
+            TensorWatch.set_save_dir(base_dir)
+        except Exception:
+            pass
+    if hasattr(TensorWatch, "set_run_name"):
+        try:
+            TensorWatch.set_run_name(run_tag)
+        except Exception:
+            pass
+    elif hasattr(TensorWatch, "run_name"):
+        try:
+            TensorWatch.run_name = run_tag
+        except Exception:
+            pass
+
+    watch_module_forward_backward(model, use_megatron=True, use_deepspeed=False)
+    if hasattr(TensorWatch, "is_save_tensor"):
+        TensorWatch.is_save_tensor = True
+    print(f"[Rank {rank}] TensorWatch enabled: {base_dir} (run={run_tag})")
+    return TensorWatch
+
+
 def _compute_single_loss(
     latents,
     context,
@@ -162,7 +202,7 @@ def _compute_single_loss(
 
 @patch("teletron.utils.set_config")
 @patch("teletron.utils.get_args")
-def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_get_args, mock_set_config):
+def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, run_tag, enable_tensorwatch, mock_get_args, mock_set_config):
     from teletron.models.teleai import ParallelTeleaiModel
     from megatron.core.transformer import TransformerConfig
     from teletron.core.parallel_state import initialize_model_parallel_base
@@ -239,9 +279,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     model = ParallelTeleaiModel(cfg).to(device=device, dtype=torch.bfloat16)
-    from tensorwatch import watch_module_forward_backward, TensorWatch
-    watch_module_forward_backward(model, use_megatron=True, use_deepspeed=False)
-    TensorWatch.is_save_tensor = True
+    tensorwatch = _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=enable_tensorwatch)
     model.train()
     model.zero_grad(set_to_none=True)
     print(f"[Rank {rank}] model init done")
@@ -349,7 +387,8 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     # DPO-style: backward on reject then chosen (accumulate grads)
     loss_reject_scaled.backward()
     loss_chosen_scaled.backward()
-    TensorWatch.step()
+    if tensorwatch is not None and hasattr(tensorwatch, "step"):
+        tensorwatch.step()
     if torch.distributed.get_rank() == src_rank:
         print(f"[Rank {rank}] backward done (reject + chosen)")
 
@@ -378,12 +417,12 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     torch.distributed.destroy_process_group()
 
 
-def _launch_dpo_cp_compare(world_size, tp_size, cp_size, seed, port):
+def _launch_dpo_cp_compare(world_size, tp_size, cp_size, seed, port, run_tag, enable_tensorwatch):
     assert world_size == tp_size * cp_size
     os.environ["WORLD_SIZE"] = str(world_size)
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
-    q = spawn(world_size, dpo_i2v_cp_compare_worker, tp_size, cp_size, seed)
+    q = spawn(world_size, dpo_i2v_cp_compare_worker, tp_size, cp_size, seed, run_tag, enable_tensorwatch)
     responses = []
     while not q.empty():
         responses.append(q.get())
@@ -392,8 +431,12 @@ def _launch_dpo_cp_compare(world_size, tp_size, cp_size, seed, port):
 
 class testDPOI2VCPCompare(TestCase):
     def test_dpo_i2v_cp_compare(self):
-        baseline = _launch_dpo_cp_compare(world_size=1, tp_size=1, cp_size=1, seed=1234, port=12455)
-        cp_run = _launch_dpo_cp_compare(world_size=2, tp_size=1, cp_size=2, seed=1234, port=12456)
+        baseline = _launch_dpo_cp_compare(
+            world_size=1, tp_size=1, cp_size=1, seed=1234, port=12455, run_tag="cp1", enable_tensorwatch=True
+        )
+        cp_run = _launch_dpo_cp_compare(
+            world_size=2, tp_size=1, cp_size=2, seed=1234, port=12456, run_tag="cp2", enable_tensorwatch=True
+        )
         print(f"[Test] payloads: baseline={len(baseline)}, cp_run={len(cp_run)}")
 
         base_payload = next((x for x in baseline if x.get("rank") == 0), None)
