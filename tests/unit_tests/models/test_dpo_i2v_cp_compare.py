@@ -239,6 +239,9 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     model = ParallelTeleaiModel(cfg).to(device=device, dtype=torch.bfloat16)
+    from tensorwatch import watch_module_forward_backward, TensorWatch
+    watch_module_forward_backward(model)
+    TensorWatch.is_save_tensor = True
     model.train()
     model.zero_grad(set_to_none=True)
     print(f"[Rank {rank}] model init done")
@@ -343,9 +346,12 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     loss_chosen_scaled = (-coeff * loss_chosen).sum()
     dpo_loss_for_log = (-torch.nn.functional.logsigmoid(beta * advantage)).mean().detach()
 
-    (loss_reject_scaled + loss_chosen_scaled).backward()
+    # DPO-style: backward on reject then chosen (accumulate grads)
+    loss_reject_scaled.backward()
+    loss_chosen_scaled.backward()
+    TensorWatch.step()
     if torch.distributed.get_rank() == src_rank:
-        print(f"[Rank {rank}] backward done")
+        print(f"[Rank {rank}] backward done (reject + chosen)")
 
     import numpy as np
 
