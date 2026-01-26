@@ -151,7 +151,7 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     tensorwatch = _setup_tensorwatch(
         parallel_teleai_model,
         rank,
-        run_tag=f"teleai_cp{cp_size}",
+        run_tag=f"teleai_tp{tp_size}_cp{cp_size}",
         # enable_tensorwatch=cp_size > 1,
     )
     
@@ -329,6 +329,15 @@ def launch_multiprocess_testing(world_size, tp_size, cp_size):
     return responses
 
 class testParallelWanModel(TestCase):
+    def test_single(self):
+        world_size = 1
+        responses = launch_multiprocess_testing(world_size, 1, 1)
+
+        correct_responses = [f"{TELEAI_MODEL_BWD_SUCCESS} rank{rank}" for rank in range(world_size)]
+        correct_responses += [f"{TELEAI_MODEL_FWD_SUCCESS} rank{rank}" for rank in range(world_size)]
+        
+        self.assertEqual(sorted(responses), correct_responses)
+
     def test_tp(self):
         world_size = tensor_model_parallel_world_size = 2
         responses = launch_multiprocess_testing(world_size, tensor_model_parallel_world_size, 1)
