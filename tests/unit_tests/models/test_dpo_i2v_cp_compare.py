@@ -240,7 +240,7 @@ def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, mock_
     torch.cuda.manual_seed_all(seed)
     model = ParallelTeleaiModel(cfg).to(device=device, dtype=torch.bfloat16)
     from tensorwatch import watch_module_forward_backward, TensorWatch
-    watch_module_forward_backward(model)
+    watch_module_forward_backward(model, use_megatron=True, use_deepspeed=False)
     TensorWatch.is_save_tensor = True
     model.train()
     model.zero_grad(set_to_none=True)
