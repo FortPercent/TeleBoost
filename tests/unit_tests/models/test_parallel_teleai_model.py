@@ -65,7 +65,7 @@ def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
         except Exception:
             pass
 
-    watch_module_forward_backward(model, use_megatron=True, use_deepspeed=False)
+    watch_module_forward_backward(model, use_megatron=False, use_deepspeed=False)
     if hasattr(TensorWatch, "is_save_tensor"):
         TensorWatch.is_save_tensor = True
     print(f"[Rank {rank}] TensorWatch enabled: {base_dir} (run={run_tag})")
