@@ -7,6 +7,7 @@ from unittest.mock import patch, Mock
 from unit_tests.test_utils import spawn
 from megatron.core import mpu
 import logging
+import os
 
 TELEAI_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
 TELEAI_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
@@ -29,6 +30,47 @@ class TeleaiParams:
     num_layers: int = 1
     has_image_input: bool = True
     has_image_pos_emb: bool = False
+
+
+def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
+    if not enable_tensorwatch:
+        return None
+    try:
+        from tensorwatch import watch_module_forward_backward, TensorWatch
+    except Exception as exc:
+        print(f"[Rank {rank}] TensorWatch import failed: {exc}")
+        return None
+
+    base_dir = os.path.join(os.getcwd(), "tensorwatch_data")
+    os.makedirs(base_dir, exist_ok=True)
+
+    if hasattr(TensorWatch, "reset"):
+        try:
+            TensorWatch.reset()
+        except Exception:
+            pass
+    if hasattr(TensorWatch, "set_save_dir"):
+        try:
+            TensorWatch.set_save_dir(base_dir)
+        except Exception:
+            pass
+    if hasattr(TensorWatch, "set_run_name"):
+        try:
+            TensorWatch.set_run_name(run_tag)
+        except Exception:
+            pass
+    elif hasattr(TensorWatch, "run_name"):
+        try:
+            TensorWatch.run_name = run_tag
+        except Exception:
+            pass
+
+    watch_module_forward_backward(model, use_megatron=True, use_deepspeed=False)
+    if hasattr(TensorWatch, "is_save_tensor"):
+        TensorWatch.is_save_tensor = True
+    print(f"[Rank {rank}] TensorWatch enabled: {base_dir} (run={run_tag})")
+    return TensorWatch
+
 
 @patch("teletron.utils.set_config")
 @patch("teletron.utils.get_args")
@@ -106,6 +148,12 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     teleai_model = TeleaiModel(**asdict(teleaiConfig)).cuda(cuda_rank).to(torch.bfloat16)
     torch.manual_seed(1234)
     parallel_teleai_model = ParallelTeleaiModel(cfg).cuda(cuda_rank).to(torch.bfloat16)
+    tensorwatch = _setup_tensorwatch(
+        parallel_teleai_model,
+        rank,
+        run_tag=f"teleai_cp{cp_size}",
+        enable_tensorwatch=cp_size > 1,
+    )
     
     
     parallel_teleai_model.load_state_dict(tp_load_state_dict(teleai_model))
@@ -131,6 +179,8 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
 
     teleai_model_output.backward(torch.ones_like(teleai_model_output))
     parallel_teleai_model_output.backward(torch.ones_like(parallel_teleai_model_output))
+    if tensorwatch is not None and hasattr(tensorwatch, "step"):
+        tensorwatch.step()
     model_grads = {name: param.grad for name, param in teleai_model.named_parameters() if param.grad is not None}
     parallel_model_grads = {name: param.grad for name, param in parallel_teleai_model.named_parameters() if param.grad is not None}
     grad_allclose = True
