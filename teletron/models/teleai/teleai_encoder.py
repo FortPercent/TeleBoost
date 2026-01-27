@@ -231,47 +231,51 @@ class TeleaiEncoder(BaseEncoder):
         return out
 
     def _encode_dpo(self, raw_batch: Dict[str, Any]) -> Dict[str, Any]:
+        # 建议将 streams 放在 self 中初始化，避免反复创建
+        if not hasattr(self, "_chosen_stream"):
+            self._chosen_stream = torch.cuda.Stream(device=self.device)
+            self._rejected_stream = torch.cuda.Stream(device=self.device)
+
         dataset_config = set_config().get("dataset", {})
         chosen_key = dataset_config.get("chosen_video_key", "chosen")
         rejected_key = dataset_config.get("rejected_video_key", "rejected")
-        branches = (chosen_key, rejected_key)
-
+        
         schema = self.get_output_schema()
         out = {}
 
-        # ========== 1️⃣ prompt / context：只算一次 ==========
-        shared_input = raw_batch[chosen_key]  # chosen / rejected 共用 prompt
-
-        for key in schema:
-            if key in ["context", "prompt_emb", "unprompt_emb"]:
+        # 1. Prompt 编码 (Default Stream)
+        shared_input = raw_batch[chosen_key]
+        for key in ["context", "prompt_emb", "unprompt_emb"]:
+            if key in schema:
                 out[key] = self.work_fn[key](batch=shared_input)
 
-        # ========== 2️⃣ image / latent：CUDA stream 并行 ==========
-        streams = {
-            chosen_key: torch.cuda.Stream(device=self.device),
-            rejected_key: torch.cuda.Stream(device=self.device),
-        }
+        # 确保 Default Stream 里的 Prompt 编码完成后，再让并行流读取
+        current_stream = torch.cuda.current_stream()
+        self._chosen_stream.wait_stream(current_stream)
+        self._rejected_stream.wait_stream(current_stream)
 
-        branch_outputs = {}
+        # 2. Chosen/Rejected 并行
+        branch_outputs = {chosen_key: {}, rejected_key: {}}
+        
+        # 定义内部处理逻辑
+        def _proc_branch(branch_name, stream):
+            with torch.cuda.stream(stream):
+                branch_input = raw_batch[branch_name]
+                for key in schema:
+                    if key not in ["context", "prompt_emb", "unprompt_emb"]:
+                        branch_outputs[branch_name][key] = self.work_fn[key](batch=branch_input)
 
-        for branch in branches:
-            branch_outputs[branch] = {}
-            branch_input = raw_batch[branch]
+        
+        # 简单的逻辑依然按你原来的写，但注意 wait_stream
+        _proc_branch(chosen_key, self._chosen_stream)
+        _proc_branch(rejected_key, self._rejected_stream)
 
-            for key in schema:
-                if key in ["context", "prompt_emb", "unprompt_emb"]:
-                    continue
-
-                with torch.cuda.stream(streams[branch]):
-                    branch_outputs[branch][key] = self.work_fn[key](batch=branch_input)
-
-        # ========== 3️⃣ 同步 ==========
-        for s in streams.values():
-            s.synchronize()
+        # 3. 同步
+        self._chosen_stream.synchronize()
+        self._rejected_stream.synchronize()
 
         out.update(branch_outputs)
         return out
-
 
     def encode(self, raw_batch: Union[Dict[str, Any]]) -> Union[List[Any], List[List[Any]]]:
         """
