@@ -14,17 +14,25 @@ config = dict(
         dataset_base_path="",
         # no use
         # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/VideoRL/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re.csv",
-        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        # dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced.csv",
         data_path_list=[
             # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv"
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part0.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part1.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part2.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part3.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part4.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part5.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part6.csv",
-            "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part7.csv"
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part0.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part1.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part2.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part3.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part4.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part5.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part6.csv",
+            "/nvfile-heatstorage/AIGC_H100/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_enhanced_part7.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part1.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part2.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part3.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part4.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part5.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part6.csv",
+            # "/nvfile-heatstorage/AIGC_H100/VideoRL/jiangshiqi/DiffSynth-Studio-main/data/out_parts/prompt_video_pairs_matched_image.part7.csv"
             
             # "/nvfile-heatstorage/AIGC_H100/VideoRL/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part0.csv",
             # "/nvfile-heatstorage/AIGC_H100/VideoRL/liangyzh/dmz_trans/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",

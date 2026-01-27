@@ -90,7 +90,7 @@ N_GPU_FOR_DATA=8
 
 # EXPR_NAME=sr_720p
 # EXPR_NAME=wwan_22_14b_720p_81_dpo_lr_1_5e_6_clipgrad_1
-EXPR_NAME=align_dpo_i2v_480_49_new
+EXPR_NAME=align_dpo_i2v_480_49_new_after_400
 # EXPR_NAME=expr_480p_bf16
 
 TRAIN_SCRIPT=${1:-"examples/teleai/pretrain_dpo_i2v.py"}
