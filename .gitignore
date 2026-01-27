@@ -5,6 +5,8 @@ __pycache__
 build
 .coverage_*
 *.egg
+*.jsonl
+*.mp4
 *.egg-info
 *~
 slurm*
