@@ -332,19 +332,19 @@ class UnifiedDataset(torch.utils.data.Dataset):
         from teletron.datasets.base_dataset import Compose
         self.pipeline = Compose(pipeline) if pipeline is not None else None
         self.load_metadata(metadata_path)
-        try:
-            from my_utils import UniversalDumper, DumpConfig, get_dumper
-            self.dumper = get_dumper(DumpConfig(
-                root_dir="./dump_dataset",
-                enable=True,
-                image_format="png",
-                max_list_elems=64,
-                max_dict_items=128,
-                save_tensor_cpu=False,
-            )
-            )
-        except Exception as e:
-            print(f"UnifiedDataset: failed to create dumper: {e}")
+        # try:
+        #     from my_utils import UniversalDumper, DumpConfig, get_dumper
+        #     self.dumper = get_dumper(DumpConfig(
+        #         root_dir="./dump_dataset",
+        #         enable=True,
+        #         image_format="png",
+        #         max_list_elems=64,
+        #         max_dict_items=128,
+        #         save_tensor_cpu=False,
+        #     )
+        #     )
+        # except Exception as e:
+        #     print(f"UnifiedDataset: failed to create dumper: {e}")
     
     @staticmethod
     def default_image_operator(
