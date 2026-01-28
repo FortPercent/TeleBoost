@@ -113,9 +113,9 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         else:
             rank = 0
         base_dir = getattr(get_args(), "profile_path", None) or "."
-        debug_path = os.path.join(base_dir, f"consumer/shape_debug_rank_{rank}.jsonl")
+        # debug_path = os.path.join(base_dir, f"consumer/shape_debug_rank_{rank}.jsonl")
 
-        dump_tensor_shape(x, debug_path, "x_input")
+        # dump_tensor_shape(x, debug_path, "x_input")
         t_emb = sinusoidal_embedding_1d(self.freq_dim, timestep)
         t = self.time_emb(t_emb)
         t_mod = self.time_proj(t)
@@ -126,7 +126,7 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         if y is not None:
             # has image input
             x = torch.cat([x, y], dim=1)
-            dump_tensor_shape(x, debug_path, "x_after_cat_y")
+            # dump_tensor_shape(x, debug_path, "x_after_cat_y")
 
         if self.has_image_input:
             if clip_feature is not None:
@@ -135,10 +135,10 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
 
         if cn_images is not None:
             x = torch.cat([x, cn_images], dim=1)
-            dump_tensor_shape(x, debug_path, "x_after_cat_cn_images")
+            # dump_tensor_shape(x, debug_path, "x_after_cat_cn_images")
 
         x, (f, h, w) = self.patchify(x)
-        dump_tensor_shape(x, debug_path, "x_after_patchify")
+        # dump_tensor_shape(x, debug_path, "x_after_patchify")
 
         head_dim = self.dim // self.num_heads
         freq_f = precompute_freqs_cis(head_dim - 2 * (head_dim // 3), f).view(f, 1, 1, -1).expand(f, h, w, -1)
@@ -148,7 +148,7 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
         x = self.split_input(x, dim=1)
-        dump_tensor_shape(x, debug_path, "x_after_split_input")
+        # dump_tensor_shape(x, debug_path, "x_after_split_input")
         # 预分配alltoall buffer
         set_global_all_to_all_buffer(x.numel())
         freqs = self.split_input(freqs, dim=0)
@@ -157,13 +157,13 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         for block in self.blocks:
             x = block(x, context_emb, t_mod, freqs)
         x = self.gather_output(x, dim=1)
-        dump_tensor_shape(x, debug_path, "x_after_gather_output")
+        # dump_tensor_shape(x, debug_path, "x_after_gather_output")
 
         # Now x is in full shape, just do regular forward
         x = self.head(x, t)
-        dump_tensor_shape(x, debug_path, "x_after_head")
+        # dump_tensor_shape(x, debug_path, "x_after_head")
         x = self.unpatchify(x, (f, h, w))
-        dump_tensor_shape(x, debug_path, "x_after_unpatchify")
+        # dump_tensor_shape(x, debug_path, "x_after_unpatchify")
         return x
 
     def state_dict_for_save_checkpoint(self, destination=None, prefix='', keep_vars=False):
