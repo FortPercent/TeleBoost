@@ -16,7 +16,6 @@ pip install -e .
 pip install func_timeout
 pip install nvitop
 pip install -e /nvfile-heatstorage/ai_infra/code/lit117/qiuyang/diffusers-main
-pip install ray[default]
 pip install tensordict
 pip install etcd3
 pip install -e my_utils/
