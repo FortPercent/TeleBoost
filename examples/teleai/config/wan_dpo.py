@@ -209,8 +209,8 @@ config = dict(
 
         training=dict(
             diffusion=dict(
-                # max_timestep_boundary=0.358,
-                max_timestep_boundary=1.0,
+                max_timestep_boundary=0.358,
+                # max_timestep_boundary=1.0,
                 min_timestep_boundary=0.0,
             ),
 
