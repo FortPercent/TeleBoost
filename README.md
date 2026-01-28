@@ -15,7 +15,7 @@ deepspeed等，见requirements.txt
 
 ### 安装 
 ```
-pip install -e Teletron --no-build-isolation
+bash install.sh
 ```
 
 ### shell脚本和配置文件py设置方法
