@@ -10,4 +10,4 @@
 <img src=../assets/rewards/opensource_flux_more_steps.png width="49%">
 <div>
 
-# 星期三中午之前完成 /nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo
+# 星期三中午之前完成 /nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpoc
