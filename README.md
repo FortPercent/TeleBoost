@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Dancegrpo
 =======
 ## More Discussion on FLUX
@@ -10,5 +9,3 @@
 <div align="center">
 <img src=../assets/rewards/opensource_flux_more_steps.png width="49%">
 <div>
-
->>>>>>> e2cc68227b986d4fcdadc0991d5fa7818e4012f5
