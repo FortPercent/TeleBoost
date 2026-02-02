@@ -1,0 +1,149 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+trainer:
+  type: diffusion
+  use_rm: True
+
+data:
+  type: diffusion
+
+actor_rollout_ref:
+  type: diffusion
+  wan_version: wan21
+  model:
+    vae_model_path: data/flux
+    data_json_path: data/rl_embeddings/videos2caption.json
+  actor:
+    timestep_fraction: 0.6
+    clip_range: 1e-4
+    adv_clip_max: 5.0
+    eta: 0.3
+    max_grad_norm: 1.0
+  rollout:
+    ulysses_sequence_parallel_size: 1.0
+  video_fps: 25
+  guide_scale: 5.0
+  cfg: 0.0
+  h: 720
+  w: 720
+  num_frames: 1
+  sampling_steps: 16
+  lr_warmup_steps: 0
+  use_hpsv2: True
+  shift: 8.0
+  timestep_fraction: 0.6
+  init_same_noise: True
+
+
+reward_model:
+  enable: False
+  
+  strategy: diffusion
+
+  type: qwen
+
+  aesthetic:
+    clip_model_path: /path/to/ViT-L-14.pt
+    aes_model_path: /path/to/sa_0_4_vit_l_14_linear.pth
+  raft:
+    model_path: /path/to/raft-things.pth
+  videoclip:
+    model_path: /path/to/VideoCLIP-XL.bin
+  videophy:
+    model_path: /gemini/space/wyb/model/arena_model/videocon_physics
+
+  reward_manager: dancegrpo
+  # Rollout model config.
+  rollout:
+
+    # actor_rollout_ref.rollout.name: hf/vllm/sglang.
+    name: vllm
+
+    # sync: LLM, async: AsyncLLM
+    mode: sync
+
+    # Sampling temperature for rollout.
+    temperature: 1.0
+
+    # Top-k sampling parameter. -1 for vLLM rollout, 0 for HF rollout.
+    top_k: -1
+
+    # Top-p sampling parameter. Default 1.0.
+    top_p: 1
+
+    # https://arxiv.org/abs/2410.21236
+    use_fire_sampling: False
+
+    # typically the same as data max prompt length
+    prompt_length: ${data.max_prompt_length}
+
+    # typically the same as data max response length
+    response_length: ${data.max_response_length}
+
+    # for vllm rollout
+    # Rollout model parameters type. Align with actor model's FSDP/Megatron type.
+    dtype: bfloat16
+
+    # Fraction of GPU memory used by vLLM/SGLang for KV cache.
+    gpu_memory_utilization: 0.5
+
+    # Whether to ignore EOS and continue generating after EOS is hit.
+    ignore_eos: False
+
+    # Whether to disable CUDA graph. Default True to allow cache freeing.
+    enforce_eager: True
+
+    # Whether to free engine KVCache after generation. Set enforce_eager=True when enabled.
+    free_cache_engine: True
+
+    # Which loader to use for rollout model weights: dummy_dtensor, hf, megatron, etc.
+    # safetensors (for huge model, and set use_shm=True); dummy_dtensor: randomly init model weight
+    load_format: dummy_dtensor
+
+    # for huge model, layered summon can save memory (prevent OOM) but make it slower
+    layered_summon: False
+
+    # TP size for rollout. Only effective for vLLM.
+    tensor_model_parallel_size: 4
+
+    # max number of tokens in a batch
+    max_num_batched_tokens: 8192
+
+    # max length for rollout
+    max_model_len: 1024
+
+    # max length of sequences
+    max_num_seqs: 1024
+
+    # [Will be deprecated, use log_prob_micro_batch_size_per_gpu] The batch size for one forward pass in the computation of log_prob. Global batch size.
+    log_prob_micro_batch_size: null
+
+    # The batch size for one forward pass in the computation of log_prob. Local batch size per GPU.
+    log_prob_micro_batch_size_per_gpu: null
+
+    # enable dynamic batch size (sequence packing) for log_prob computation
+    log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+
+    # max token length for log_prob computation
+    log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+
+    # disable logging statistics
+    disable_log_stats: True
+
+    # may get higher throughput when set to True. When activated, Please increase max_num_batched_tokens or decrease max_model_len.
+    enable_chunked_prefill: True
+
+    # for hf rollout
+    # Whether to sample during training rollout. False uses greedy sampling.
+    do_sample: True
+
+    # number of responses (i.e. num sample times). > 1 for grpo
+    n: 1
+
+use_rm: True
