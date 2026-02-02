@@ -262,17 +262,9 @@ class RLHFDataset(Dataset):
         if self.config.type=="diffusion":
             # 加载numpy文件并转换为tensor
             context_numpy = np.load(row_dict['context_path'])
-            null_context_numpy = None
-            if 'context_null_path' in row_dict and row_dict['context_null_path']:
-                try:
-                    null_context_numpy = np.load(row_dict['context_null_path'])
-                except FileNotFoundError:
-                    logger.warning("context_null_path not found: %s, fallback to zeros", row_dict['context_null_path'])
+            null_context_numpy = np.load(row_dict['context_null_path'])
             context = torch.from_numpy(context_numpy)  # shape: (L, C)
-            if null_context_numpy is None:
-                null_context = torch.zeros_like(context)
-            else:
-                null_context = torch.from_numpy(null_context_numpy)  # shape: (L, C)
+            null_context = torch.from_numpy(null_context_numpy)  # shape: (L, C)
             row_dict['context']=context
             row_dict['null_context']=null_context
         else:

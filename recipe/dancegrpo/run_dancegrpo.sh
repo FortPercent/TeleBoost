@@ -38,7 +38,7 @@ RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
 TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"//nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 export TENSORBOARD_DIR=/gfs/platform/public/infra/qrl760/Dance_GRPO/Dancegrpo/tensorboard_log/${exp_name}
