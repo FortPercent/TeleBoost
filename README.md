@@ -9,3 +9,5 @@
 <div align="center">
 <img src=../assets/rewards/opensource_flux_more_steps.png width="49%">
 <div>
+
+# 星期三中午之前完成
