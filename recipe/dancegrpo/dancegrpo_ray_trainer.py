@@ -186,6 +186,17 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 t = threading.Thread(target=thread_loop, args=(name, worker), daemon=True)
                 t.start()
                 threads.append(t)       
+        
+        def _debug_proto_batch(name, proto):
+            if proto is None:
+                print(f"[debug] {name} is None")
+                return
+            batch = getattr(proto, "batch", None)
+            if batch is None:
+                non_tensor = getattr(proto, "non_tensor_batch", None) or {}
+                print(f"[debug] {name}.batch is None; non_tensor_keys={list(non_tensor.keys())}")
+                return
+            print(f"[debug] {name}.batch_size={batch.batch_size}")
             
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
@@ -198,19 +209,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 # trainer的类型是diffusion
                 if self.config.trainer.type=="diffusion":
                     # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
-                    # For diffusion, context tensors live in batch, while paths/captions are non-tensors.
-                    batch_keys = ["context", "context_orig_lengths"]
-                    if "null_context" in new_batch.batch.keys():
-                        batch_keys.append("null_context")
-
-                    non_tensor_batch_keys = ["caption"]
-                    for k in ("context_path", "context_null_path"):
-                        if k in new_batch.non_tensor_batch.keys():
-                            non_tensor_batch_keys.append(k)
-
                     gen_batch = new_batch.pop(
-                        batch_keys=batch_keys,
-                        non_tensor_batch_keys=non_tensor_batch_keys,
+                        batch_keys=["context","context_orig_lengths","null_context"],
+                        non_tensor_batch_keys=["caption"],
                     )
                     
                     # 形状与配置
@@ -385,6 +386,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                     gen_batch_output.pop(
                                         non_tensor_batch_keys=["caption", "video_ids"]
                                     )
+                                    # 清理原 batch（移除大 tensor 如 video_frames）
+                                    
+                                    _debug_proto_batch("gen_batch_output", gen_batch_output)
+                                    _debug_proto_batch("reward_tensor", reward_tensor)
                                     gen_batch_output = gen_batch_output.union(reward_tensor)
                                     # gen_batch_output = gen_batch_output.pop(
                                     #     non_tensor_batch_keys=["caption", "video_ids"]
