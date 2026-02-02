@@ -134,3 +134,6 @@ events.*
 *.pickle
 
 *.mp4
+
+# 生成的数据文件
+*.npy
