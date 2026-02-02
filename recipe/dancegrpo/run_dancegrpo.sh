@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-project_name='Dancegrpo'
+project_name='Dance-grpo'
 # export PYTHONPATH=${PYTHONPATH:+$PYTHONPATH:}/gfs/space/chatrl/users/wxe/Wan-AI
 
 export TIMESTAMP=$(date +"%m-%d_%H-%M-%S")
@@ -34,14 +34,14 @@ WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 # Paths
-RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
+RAY_DATA_HOME="/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO"
 # MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/Qwen2.5-32B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
 TRAIN_FILE=${TRAIN_FILE:-"/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"//nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-export TENSORBOARD_DIR=/gfs/platform/public/infra/qrl760/Dance_GRPO/Dancegrpo/tensorboard_log/${exp_name}
+export TENSORBOARD_DIR=/nvfile-heatstorage/ai_infra/code/wuxn5/qrl760/DanceGRPO/Dance-grpo/tensorboard_log/${exp_name}
 
 # Algorithm
 temperature=1.0
@@ -137,7 +137,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.total_training_steps=1000 \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=8 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=100 \
