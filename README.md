@@ -1,4 +1,4 @@
-# Dancegrpo
+# DanceGRPO
 
 ## 📖 Guide
 
@@ -13,19 +13,19 @@
 ## 🛠 Setup
 
 ```bash
-# clone repository
-git clone https://github.com/hiahei/Dance_GRPO.git
-cd Dance_GRPO
+    # clone repository
+    git clone https://qiruoling@code.srdcloud.cn/P24HQASYF0004/AI-Infra/Dance-grpo
+    cd Dance-grpo
 
-# install dependency
-pip install -r requirements.txt
+    # install dependency
+    pip install -r requirements.txt
 
 ```
 
 ## 📊 Data Preprocess
 
 ```bash
-    bash Dance-grpo\data_preprocess\preprocess_wan_rl_embeddings.sh
+    bash data_preprocess\preprocess_wan_rl_embeddings.sh
 ```
 
 ---
@@ -34,24 +34,55 @@ pip install -r requirements.txt
 
 ### 1. main script
 
+```
+    recipe/dancegrpo/
+    ├── main_dancegrpo.py         # main file
+    ├── dancegrpo_fsdp_worker.py  # FSDP works
+    ├── dancegrpo_ray_trainer.py  # Ray trainer
+    ├── dp_actor.py               # dp Actor
+    └── run_dancegrpo.sh          # entry
+```
+
 ```bash 
-    bash Dance-grpo\recipe\dancegrpo\run_dancegrpo.sh
+    bash recipe\dancegrpo\run_dancegrpo.sh
 ```
 
 ### 2. Reward Model Type
 
 ```
-conifg file: 'Dance-grpo\recipe\dancegrpo\config\dancegrpo_trainer.yaml'
+conifg files：
+├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
+├── recipe/dancegrpo/config/dancegrpo_trainer.yaml  # implementation
+└── recipe/dancegrpo/run_dancegrpo.sh       # running
+
+'dancegrpo_trainer.yaml'
     reward_model.enable: True
     reward_model.strategy: diffusion
     reward_model.type: qwen/single/joint
 ```
-```    
-    a.qwen
+```
+1.Reward Model Type
+# 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py'
+    current reward model types:
+        **a.qwen**
+            class QwenRewardModelWorker(RewardModelWorker)
 
-    b.single
+        **b.single**
+            class DiffusionRewardModelWorker(RewardModelWorker)
 
-    c.joint
+        **c.joint**
+            class AestheticRewardModelWorker(RewardModelWorker),
+                RAFTRewardModelWorker(RewardModelWorker),
+                VideoclipRewardModelWorker(RewardModelWorker),
+                VideophyRewardModelWorker(RewardModelWorker)
+            or
+            class MultiRewardModelWorker(RewardModelWorker) # union four joint RewardModelWorkers
+
+    If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
+
+2.Reward Manager
+# 'verl\workers\reward_manager' @register('')
+    ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
 ```
 ---
 
