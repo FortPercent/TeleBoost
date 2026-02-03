@@ -63,20 +63,50 @@ conifg files：
     - reward_manager: dancegrpo -> 2
 ```
 ---
-```
-role_worker_mapping = {
-    Role.ActorRollout: 'ActorRolloutRefWorker', # rollout and action <- DiffusionActorRolloutRefWorker
-    Role.RewardModel: 'RewardModelWorker' # compute reward
-}
-```
+
 #### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:  
 **a.qwen**  
-    class QwenRewardModelWorker(RewardModelWorker)
+    class QwenRewardModelWorker(RewardModelWorker)  
+```
+    # ---- running ----
+    data.train_batch_size
+    data.max_prompt_length
+    data.max_response_length
+    actor_rollout_ref.rollout.n # number of samples one prompt
+    algorithm.adv_estimator=${adv_estimator} # 'grpo'
+    reward_model.rollout.load_format=safetensors, # !!! safetensors 
+    actor_rollout_ref.rollout.temperature, 
+    actor_rollout_ref.rollout.top_p,  
+    actor_rollout_ref.rollout.top_k,  
+    actor_rollout_ref.rollout.val_kwargs.temperature,  
+    actor_rollout_ref.rollout.val_kwargs.top_p,
+    actor_rollout_ref.rollout.val_kwargs.top_k,
+    actor_rollout_ref.ref.ulysses_sequence_parallel_size，# sp
+    actor_rollout_ref.rollout.tensor_model_parallel_size, # tp
+    actor_rollout_ref.actor.ppo_mini_batch_size,
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu,
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu,
+    reward_model.micro_batch_size_per_gpu,
+    trainer.n_gpus_per_node,
+    trainer.type, # diffusion
+    # ---- implementation ----
+    rollout.name # 'vllm'
+    rollout.mode # 'sync'
+    rollout.layered_summon # 'False'
+    use_rm # 'True'
+    # ---- others ----
+    vllm_mode # 'spmd'
+    world_size # Number of GPUs
+    use_shm # 'True'
+```
 
 **b.single**  
-    class DiffusionRewardModelWorker(RewardModelWorker)
+    class DiffusionRewardModelWorker(RewardModelWorker)  
+```
+
+```
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
@@ -85,6 +115,9 @@ current reward model types:
     class VideophyRewardModelWorker(RewardModelWorker)  
     or  
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
+```
+
+```
 
 - If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 - Then,  
