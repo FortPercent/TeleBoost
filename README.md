@@ -62,6 +62,12 @@ conifg files：
     - reward_manager: dancegrpo -> 2
 ```
 ---
+```
+role_worker_mapping = {
+    Role.ActorRollout: '', 
+    Role.RewardModel: ''
+}
+```
 #### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:  
@@ -80,6 +86,11 @@ current reward model types:
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
 
 - If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
+- Then,  
+``` 
+    from .dancegrpo_fsdp_worker import NewRewardModelWorker as RewardModelWorker  
+    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+```
 
 #### 2.reward_manager
 ` 'verl\workers\reward_manager' @register('') `  
