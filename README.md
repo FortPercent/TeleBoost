@@ -79,14 +79,15 @@ current reward model types:
     or  
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
 
-If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
+- If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 
 #### 2.reward_manager
 ` 'verl\workers\reward_manager' @register('') `  
 ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
 ` class AIGCRewardManager -> @register('dancegrpo') `
 
-If add a new reward manager, create a new py file here and register it.
+- If add a new reward manager, create a new py file here and register it.
+
 ---
 
 ## 📝 TODO
