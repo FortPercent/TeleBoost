@@ -64,8 +64,8 @@ conifg files：
 ---
 ```
 role_worker_mapping = {
-    Role.ActorRollout: '', 
-    Role.RewardModel: ''
+    Role.ActorRollout: 'ActorRolloutRefWorker', # rollout and action <- DiffusionActorRolloutRefWorker
+    Role.RewardModel: 'RewardModelWorker' # compute reward
 }
 ```
 #### 1.reward_model.type
