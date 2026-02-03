@@ -33,60 +33,55 @@
 ## 🏃 Usage
 
 ### 1. main script
-
-```
-    recipe/dancegrpo/
-    ├── main_dancegrpo.py         # main file
-    ├── dancegrpo_fsdp_worker.py         # FSDP works
-    ├── dancegrpo_ray_trainer.py         # Ray trainer
-    ├── dp_actor.py         # dp Actor
-    └── run_dancegrpo.sh         # entry
-```
-
-```bash 
-    bash recipe\dancegrpo\run_dancegrpo.sh
-```
-
-### 2. Reward Model Type
-
-```
+recipe/dancegrpo/
+├── main_dancegrpo.py         # main file
+├── dancegrpo_fsdp_worker.py         # FSDP works
+├── dancegrpo_ray_trainer.py         # Ray trainer
+├── dp_actor.py         # dp Actor
+└── run_dancegrpo.sh         # entry
+---
 conifg files：
 ├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
 ├── recipe/dancegrpo/config/dancegrpo_trainer.yaml  # implementation
 └── recipe/dancegrpo/run_dancegrpo.sh       # running
 
+```bash 
+    bash recipe\dancegrpo\run_dancegrpo.sh
+```
+
+### 2. Reward Model
+
+```
 'dancegrpo_trainer.yaml'
     reward_model.enable: True
     reward_model.strategy: diffusion
     *reward_model.type: qwen/single/joint*
     *reward_manager: dancegrpo*
 ```
-```
+---
 1.Reward Model Type
 # 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py'
-    current reward model types:
-        **a.qwen**
-            class QwenRewardModelWorker(RewardModelWorker)
+current reward model types:
+    a.qwen
+        class QwenRewardModelWorker(RewardModelWorker)
+    b.single
+        class DiffusionRewardModelWorker(RewardModelWorker)
+    c.joint
+        class AestheticRewardModelWorker(RewardModelWorker),
+            RAFTRewardModelWorker(RewardModelWorker),
+            VideoclipRewardModelWorker(RewardModelWorker),
+            VideophyRewardModelWorker(RewardModelWorker)
+        or
+        class MultiRewardModelWorker(RewardModelWorker) # union four joint RewardModelWorkers
 
-        **b.single**
-            class DiffusionRewardModelWorker(RewardModelWorker)
+If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 
-        **c.joint**
-            class AestheticRewardModelWorker(RewardModelWorker),
-                RAFTRewardModelWorker(RewardModelWorker),
-                VideoclipRewardModelWorker(RewardModelWorker),
-                VideophyRewardModelWorker(RewardModelWorker)
-            or
-            class MultiRewardModelWorker(RewardModelWorker) # union four joint RewardModelWorkers
-
-    If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
-
+---
 2.Reward Manager
 # 'verl\workers\reward_manager' @register('')
-    ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
-    # class AIGCRewardManager -> @register('dancegrpo')
+["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
+# class AIGCRewardManager -> @register('dancegrpo')
 
-```
 ---
 
 ## 📝 TODO
