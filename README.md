@@ -58,28 +58,28 @@ conifg files：
 'dancegrpo_trainer.yaml'
     - reward_model.enable: True
     - reward_model.strategy: diffusion
-    - *reward_model.type: qwen/single/joint*
-    - *reward_manager: dancegrpo*
+    - reward_model.type: qwen/single/joint
+    - reward_manager: dancegrpo
 ```
 ---
-#### 1.Reward Model Type
+#### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:
-    a.qwen
-        class QwenRewardModelWorker(RewardModelWorker)
-    b.single
-        class DiffusionRewardModelWorker(RewardModelWorker)
-    c.joint
-        class AestheticRewardModelWorker(RewardModelWorker),
-            RAFTRewardModelWorker(RewardModelWorker),
-            VideoclipRewardModelWorker(RewardModelWorker),
-            VideophyRewardModelWorker(RewardModelWorker)
-        or
+    **a.qwen**  
+        class QwenRewardModelWorker(RewardModelWorker)  
+    **b.single**  
+        class DiffusionRewardModelWorker(RewardModelWorker)  
+    **c.joint**  
+        class AestheticRewardModelWorker(RewardModelWorker),  
+            RAFTRewardModelWorker(RewardModelWorker),  
+            VideoclipRewardModelWorker(RewardModelWorker),  
+            VideophyRewardModelWorker(RewardModelWorker)  
+        or  
         class MultiRewardModelWorker(RewardModelWorker) # union four joint RewardModelWorkers
 
 If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 
-#### 2.Reward Manager
+#### 2.reward_manager
 ` 'verl\workers\reward_manager' @register('') `  
 ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
 ` class AIGCRewardManager -> @register('dancegrpo') `
