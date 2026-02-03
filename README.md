@@ -117,7 +117,7 @@ current reward model types:
 
 #### reward_model.enable: False
 ```
-    1) To integrate a custom reward function, simply define the script path in verl/trainer/config/ppo_trainer.yaml. The system will automatically register this function and use it as compute_score.
+    1) To integrate a custom reward function, simply define the script path in 'verl/trainer/config/ppo_trainer.yaml'. The system will automatically register this function and use it as 'compute_score'.
         custom_reward_function:
             path: path/to/your_script.py   # Path to your .py file
             name: your_function_name       # Function name to use as compute_score
