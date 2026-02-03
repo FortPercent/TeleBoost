@@ -95,9 +95,6 @@ current reward model types:
 
 **b.single**  
     class DiffusionRewardModelWorker(RewardModelWorker)  
-```
-
-```
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
@@ -106,9 +103,6 @@ current reward model types:
     class VideophyRewardModelWorker(RewardModelWorker)  
     or  
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
-```
-
-```
 
 - If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 - Then,  
