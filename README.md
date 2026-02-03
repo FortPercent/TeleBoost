@@ -44,8 +44,8 @@ recipe/dancegrpo/
 ```
 conifg files：
 ├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
-├── recipe/dancegrpo/config/dancegrpo_trainer.yaml  # implementation
-└── recipe/dancegrpo/run_dancegrpo.sh       # running
+├── recipe/dancegrpo/config/dancegrpo_trainer.yaml     # implementation
+└── recipe/dancegrpo/run_dancegrpo.sh     # running
 ```
 ---
 ```bash 
@@ -73,9 +73,9 @@ current reward model types:
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
-        RAFTRewardModelWorker(RewardModelWorker),  
-        VideoclipRewardModelWorker(RewardModelWorker),  
-        VideophyRewardModelWorker(RewardModelWorker)  
+    class RAFTRewardModelWorker(RewardModelWorker),  
+    class VideoclipRewardModelWorker(RewardModelWorker),  
+    class VideophyRewardModelWorker(RewardModelWorker)  
     or  
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
 
