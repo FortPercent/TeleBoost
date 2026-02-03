@@ -239,17 +239,17 @@ class QwenRewardModelWorker(RewardModelWorker):
         # self.image_processor = VaeImageProcessor(16)
         return
 
-    def _build_reward_rollout(self,trust_remote_code=False):
+    def _build_reward_rollout(self, trust_remote_code=False):
         device_name = get_device_name()
 
         from torch.distributed.device_mesh import init_device_mesh
 
         # TODO(sgm): support FSDP hybrid shard for larger model
         infer_tp = self.config.rollout.tensor_model_parallel_size
-        dp = self.world_size // infer_tp
+        dp = self.world_size // infer_tp # world_size 是总的环境卡数
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
-        rollout_name = self.config.rollout.name # rollout使用的架构
+        rollout_name = self.config.rollout.name # rollout使用的架构 vllm
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
         from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager

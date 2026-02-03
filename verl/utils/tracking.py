@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Union
 
 
-class Tracking:
+class qTracking:
     """A unified tracking interface for logging experiment data to multiple backends.
 
     This class provides a centralized way to log experiment metrics, parameters, and artifacts
