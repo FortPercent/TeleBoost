@@ -32,6 +32,10 @@
 
 ## 🏃 Usage
 
+```bash 
+    bash recipe\dancegrpo\run_dancegrpo.sh
+```
+
 ### 1. main script
 ```
 recipe/dancegrpo/
@@ -48,9 +52,6 @@ conifg files：
 └── recipe/dancegrpo/run_dancegrpo.sh     # running
 ```
 ---
-```bash 
-    bash recipe\dancegrpo\run_dancegrpo.sh
-```
 
 ### 2. Reward Model
 
