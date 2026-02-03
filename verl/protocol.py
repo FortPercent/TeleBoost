@@ -366,9 +366,9 @@ class DataProto:
         # get and check batch size
         batch_size = None
         pivot_key = None
-        for key, tensor in tensors.items():
+        for key, tensor in tensors.items(): # .items()返回的是(key, value)对
             if batch_size is None:
-                batch_size = tensor.shape[:num_batch_dims]
+                batch_size = tensor.shape[:num_batch_dims] # 左闭右开 获取前num_batch_dims个维度作为batch size 不包含num_batch_dims维度（右开）
                 pivot_key = key
             else:
                 current_batch = tensor.shape[:num_batch_dims]
@@ -376,7 +376,7 @@ class DataProto:
 
         for key, val in non_tensors.items():
             if not isinstance(val, np.ndarray):
-                non_tensors[key] = np.array(val, dtype=object)
+                non_tensors[key] = np.array(val, dtype=object) # 如果不是numpy数组，则转换为dtype=object的numpy数组
 
         tensor_dict = TensorDict(source=tensors, batch_size=batch_size) if tensors else None
         if auto_padding:
