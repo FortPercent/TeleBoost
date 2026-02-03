@@ -63,8 +63,8 @@ conifg files：
     - reward_manager: dancegrpo -> 2
 ```
 ---
-
-#### 1.reward_model.type
+#### reward_model.enable: True
+##### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:  
 **a.qwen**  
@@ -73,13 +73,10 @@ current reward model types:
     # ---- running ----
     actor_rollout_ref.rollout.n # number of samples one prompt
     algorithm.adv_estimator=${adv_estimator} # 'grpo'
-    reward_model.rollout.load_format=safetensors, # !!! safetensors 
+    reward_model.rollout.load_format=safetensors, 
+        # !!! for qwen 'load_format' must be 'safetensors' 
     actor_rollout_ref.rollout.temperature, 
     actor_rollout_ref.rollout.top_p,  
-    actor_rollout_ref.rollout.top_k,  
-    actor_rollout_ref.rollout.val_kwargs.temperature,  
-    actor_rollout_ref.rollout.val_kwargs.top_p,
-    actor_rollout_ref.rollout.val_kwargs.top_k,
     actor_rollout_ref.rollout.tensor_model_parallel_size, # tp for rollout
     trainer.type, # diffusion
     # ---- implementation ----
@@ -111,9 +108,20 @@ current reward model types:
     role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
 ```
 
-#### 2.reward_manager
+##### 2.reward_manager
 ` 'verl\workers\reward_manager' @register('') `  
 ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
 ` class AIGCRewardManager -> @register('dancegrpo') `
 
 - If add a new reward manager, create a new py file here and register it.
+
+#### reward_model.enable: False
+```
+    1) To integrate a custom reward function, simply define the script path in verl/trainer/config/ppo_trainer.yaml. The system will automatically register this function and use it as compute_score.
+        custom_reward_function:
+            path: path/to/your_script.py   # Path to your .py file
+            name: your_function_name       # Function name to use as compute_score
+```
+```
+    2) If not define, directly use 'default_compute_score' in 'verl\trainer\ppo\reward.py' for various datasets.
+```
