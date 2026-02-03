@@ -134,3 +134,4 @@ events.*
 *.pickle
 
 *.mp4
+*.log
