@@ -30,9 +30,7 @@ class TaskRunner:
     def run(self, config):
         # print initial config
         from pprint import pprint
-
         from omegaconf import OmegaConf
-
         from verl.utils.fs import copy_to_local
 
         pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
@@ -42,10 +40,8 @@ class TaskRunner:
         local_path = copy_to_local(config.actor_rollout_ref.model.path)
 
         # instantiate tokenizer
-        # TODO 是否需要tokenizer和preprocessor
-        # 需要的
+        # 需要tokenizer和preprocessor
         import os
-
         from verl.utils import hf_processor, hf_tokenizer
 
         # processor =None
@@ -54,7 +50,7 @@ class TaskRunner:
         tokenizer = hf_tokenizer(tokenizer_path)
         processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
         # define worker classes
-        if config.actor_rollout_ref.actor.strategy == "fsdp":
+        if config.actor_rollout_ref.actor.strategy == "fsdp": # actor的策略
             assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
             from verl.single_controller.ray import RayWorkerGroup
 
@@ -74,24 +70,33 @@ class TaskRunner:
 
         from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
 
+        # Dict[Role, RayClass]
         role_worker_mapping = {
-            Role.ActorRollout: ray.remote(DiffusionActorRolloutRefWorker),
+            # 调用ActorRollout，需要通过ray.remote的方式实例化DiffusionActorRolloutRefWorker
+            Role.ActorRollout: ray.remote(DiffusionActorRolloutRefWorker),# ray.remote(Worker).remote() 这才是启动一个远程worker
         }
 
         global_pool_id = "global_pool"
+        # Dict[str, List[int]]
         resource_pool_spec = {
             global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
         }
+
+        # Dict[Role, str]
         mapping = {
             Role.ActorRollout: global_pool_id,
         }
+
         # we should adopt a multi-source reward function here
         # - for rule-based rm, we directly call a reward score
         # - for model-based rm, we call a model
         # - for code related prompt, we send to a sandbox if there are test cases
         # - finally, we combine all the rewards together
         # - The reward type depends on the tag of the data
-        if config.reward_model.enable:
+
+        if config.reward_model.enable: # reward model的策略
+
+            # 以何种分布式并行方式加载这个奖励模型 LLM（大语言模型）
             if config.reward_model.strategy == "fsdp":
                 from .fsdp_worker import RewardModelWorker
                 role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
@@ -104,8 +109,10 @@ class TaskRunner:
                 mapping[Role.RewardModel] = global_pool_id
                 print(f"Mapping type {Role.RewardModel} to be the reward model")
 
-            elif config.reward_model.strategy == "diffusion":
-                if config.reward_model.type == "qwen":
+            # reward model 使用 diffusion 模型
+            elif config.reward_model.strategy == "diffusion": # reward使用的是diffusion
+
+                if config.reward_model.type == "qwen": # reward model的类型
                     from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
                     role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
                     mapping[Role.RewardModel] = global_pool_id
@@ -138,7 +145,7 @@ class TaskRunner:
                     role_worker_mapping[Role.VideophyRewardModel] = ray.remote(VideophyRewardModelWorker)
                     mapping[Role.VideophyRewardModel] = global_pool_id
                     
-                    print("Mapping multiple reward models for 'joint' type",role_worker_mapping)
+                    print("Mapping multiple reward models for 'joint' type", role_worker_mapping)
 
                 else:
                     raise NotImplementedError(f"Unknown diffusion reward model type: {config.reward_model.type}")

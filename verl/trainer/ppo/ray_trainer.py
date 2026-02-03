@@ -326,7 +326,7 @@ class RayPPOTrainer:
         self.val_reward_fn = val_reward_fn
 
         self.hybrid_engine = config.actor_rollout_ref.hybrid_engine
-        assert self.hybrid_engine, "Currently, only support hybrid engine"
+        assert self.hybrid_engine, "Currently, only support hybrid engine" # 这是一个判断句，如果self.hybrid_engine为假，就会抛出一个断言错误，提示"Currently, only support hybrid engine"
 
         if self.hybrid_engine:
             assert Role.ActorRollout in role_worker_mapping, f"{role_worker_mapping.keys()=}"
@@ -850,7 +850,8 @@ class RayPPOTrainer:
             #         wg_dict = self.ray_worker_group_cls(resource_pool=resource_pool, ray_cls_with_init=worker_dict_cls, device_name=self.device_name, **wg_kwargs)
             #         spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
             #         all_wg.update(spawn_wg)
-            # --- Step 1: 构建 resource_pool_to_cls 映射 ---
+        
+        # --- Step 1: 构建 resource_pool_to_cls 映射 ---
         if self.use_rm:
             if self.config.reward_model.type == "joint":
                 resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
@@ -875,7 +876,7 @@ class RayPPOTrainer:
                 self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
 
         # --- Step 2: 统一初始化 all_wg 和 wg_kwargs ---
-        all_wg = {}
+        all_wg = {} # all worker groups
         wg_kwargs = {}
         if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
             wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
@@ -1070,10 +1071,10 @@ class RayPPOTrainer:
 
     def fit(self):
         """
-        The training loop of PPO.
-        The driver process only need to call the compute functions of the worker group through RPC
-        to construct the PPO dataflow.
-        The light-weight advantage computation is done on the driver process.
+            The training loop of PPO.
+            The driver process only need to call the compute functions of the worker group through RPC
+            to construct the PPO dataflow.
+            The light-weight advantage computation is done on the driver process.
         """
         from omegaconf import OmegaConf
 
@@ -1122,7 +1123,7 @@ class RayPPOTrainer:
 
                 metrics = {}
                 timing_raw = {}
-                batch: DataProto = DataProto.from_single_dict(batch_dict)
+                batch: DataProto = DataProto.from_single_dict(batch_dict) # 这里的冒号是注解
 
                 # pop those keys for generation
                 batch_keys_to_pop = ["input_ids", "attention_mask", "position_ids"]
@@ -1139,6 +1140,8 @@ class RayPPOTrainer:
                     batch_keys=batch_keys_to_pop,
                     non_tensor_batch_keys=non_tensor_batch_keys_to_pop,
                 )
+                # 从原始数据包（batch）中“拿走”指定的字段，并把这些字段组成一个新的数据包（gen_batch）
+                # pop出的key会在原始的batch中删除
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
@@ -1196,6 +1199,7 @@ class RayPPOTrainer:
                         if self.config.reward_model.launch_reward_fn_async:
                             future_reward = compute_reward_async.remote(batch, self.config, self.tokenizer)
                         else:
+                            # 这里计算reward
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
 
                     # recompute old_log_probs
@@ -1249,6 +1253,7 @@ class RayPPOTrainer:
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
+                    # 在这里计算组内相对优势（GAE）
                     with marked_timer("adv", timing_raw, color="brown"):
                         # we combine with rule-based rm
                         reward_extra_infos_dict: dict[str, list]
@@ -1290,11 +1295,12 @@ class RayPPOTrainer:
 
                     # implement critic warmup
                     if self.config.trainer.critic_warmup <= self.global_steps:
-                        # update actor
+                        # update actor 更新模型参数
                         with marked_timer("update_actor", timing_raw, color="red"):
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
-                            actor_output = self.actor_rollout_wg.update_actor(batch)
-                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                            actor_output = self.actor_rollout_wg.update_actor(batch) # 这里更新模型参数
+
+                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"]) # 这里获取指标
                         metrics.update(actor_output_metrics)
 
                     # Log rollout generations if enabled
@@ -1332,6 +1338,7 @@ class RayPPOTrainer:
                         "training/epoch": epoch,
                     }
                 )
+                
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
