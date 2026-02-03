@@ -63,20 +63,38 @@ conifg files：
     - reward_manager: dancegrpo -> 2
 ```
 ---
-```
-role_worker_mapping = {
-    Role.ActorRollout: 'ActorRolloutRefWorker', # rollout and action <- DiffusionActorRolloutRefWorker
-    Role.RewardModel: 'RewardModelWorker' # compute reward
-}
-```
+
 #### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:  
 **a.qwen**  
-    class QwenRewardModelWorker(RewardModelWorker)
+    class QwenRewardModelWorker(RewardModelWorker)  
+```
+    # ---- running ----
+    actor_rollout_ref.rollout.n # number of samples one prompt
+    algorithm.adv_estimator=${adv_estimator} # 'grpo'
+    reward_model.rollout.load_format=safetensors, # !!! safetensors 
+    actor_rollout_ref.rollout.temperature, 
+    actor_rollout_ref.rollout.top_p,  
+    actor_rollout_ref.rollout.top_k,  
+    actor_rollout_ref.rollout.val_kwargs.temperature,  
+    actor_rollout_ref.rollout.val_kwargs.top_p,
+    actor_rollout_ref.rollout.val_kwargs.top_k,
+    actor_rollout_ref.rollout.tensor_model_parallel_size, # tp for rollout
+    trainer.type, # diffusion
+    # ---- implementation ----
+    rollout.name # 'vllm'
+    rollout.mode # 'sync'
+    rollout.layered_summon # 'False'
+    use_rm # 'True'
+    # ---- others ----
+    vllm_mode # 'spmd'
+    world_size # Number of GPUs
+    use_shm # 'True'
+```
 
 **b.single**  
-    class DiffusionRewardModelWorker(RewardModelWorker)
+    class DiffusionRewardModelWorker(RewardModelWorker)  
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
