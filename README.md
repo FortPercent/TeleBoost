@@ -63,7 +63,7 @@ conifg files：
 ```
 ---
 #### 1.Reward Model Type
-` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' ` \\
+` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:
     a.qwen
         class QwenRewardModelWorker(RewardModelWorker)
@@ -80,8 +80,8 @@ current reward model types:
 If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 
 #### 2.Reward Manager
-` 'verl\workers\reward_manager' @register('') ` \\
-["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"] \\
+` 'verl\workers\reward_manager' @register('') `  
+["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
 ` class AIGCRewardManager -> @register('dancegrpo') `
 
 ---
