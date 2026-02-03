@@ -33,17 +33,21 @@
 ## 🏃 Usage
 
 ### 1. main script
+```
 recipe/dancegrpo/
 ├── main_dancegrpo.py         # main file
 ├── dancegrpo_fsdp_worker.py         # FSDP works
 ├── dancegrpo_ray_trainer.py         # Ray trainer
 ├── dp_actor.py         # dp Actor
 └── run_dancegrpo.sh         # entry
+```
 ---
+```
 conifg files：
 ├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
 ├── recipe/dancegrpo/config/dancegrpo_trainer.yaml  # implementation
 └── recipe/dancegrpo/run_dancegrpo.sh       # running
+```
 
 ```bash 
     bash recipe\dancegrpo\run_dancegrpo.sh
@@ -60,7 +64,7 @@ conifg files：
 ```
 ---
 1.Reward Model Type
-# 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py'
+` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `
 current reward model types:
     a.qwen
         class QwenRewardModelWorker(RewardModelWorker)
@@ -78,7 +82,7 @@ If add a new reward model type, create a new class here and inherit from the cla
 
 ---
 2.Reward Manager
-# 'verl\workers\reward_manager' @register('')
+` 'verl\workers\reward_manager' @register('') `
 ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
 # class AIGCRewardManager -> @register('dancegrpo')
 
