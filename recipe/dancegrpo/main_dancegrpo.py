@@ -162,6 +162,7 @@ class TaskRunner:
 
         compute_score = get_custom_reward_fn(config)
 
+        # 使用的reward manager 是 dancegrpo -> AIGCRewardManager
         reward_fn = reward_manager_cls(
             tokenizer=tokenizer,
             num_examine=0,
