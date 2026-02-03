@@ -41,14 +41,13 @@ recipe/dancegrpo/
 ├── dp_actor.py         # dp Actor
 └── run_dancegrpo.sh         # entry
 ```
----
 ```
 conifg files：
 ├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
 ├── recipe/dancegrpo/config/dancegrpo_trainer.yaml  # implementation
 └── recipe/dancegrpo/run_dancegrpo.sh       # running
 ```
-
+---
 ```bash 
     bash recipe\dancegrpo\run_dancegrpo.sh
 ```
@@ -57,14 +56,14 @@ conifg files：
 
 ```
 'dancegrpo_trainer.yaml'
-    reward_model.enable: True
-    reward_model.strategy: diffusion
-    *reward_model.type: qwen/single/joint*
-    *reward_manager: dancegrpo*
+    - reward_model.enable: True
+    - reward_model.strategy: diffusion
+    - *reward_model.type: qwen/single/joint*
+    - *reward_manager: dancegrpo*
 ```
 ---
-1.Reward Model Type
-` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `
+#### 1.Reward Model Type
+` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' ` \\
 current reward model types:
     a.qwen
         class QwenRewardModelWorker(RewardModelWorker)
@@ -80,11 +79,10 @@ current reward model types:
 
 If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 
----
-2.Reward Manager
-` 'verl\workers\reward_manager' @register('') `
-["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
-# class AIGCRewardManager -> @register('dancegrpo')
+#### 2.Reward Manager
+` 'verl\workers\reward_manager' @register('') ` \\
+["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"] \\
+` class AIGCRewardManager -> @register('dancegrpo') `
 
 ---
 
