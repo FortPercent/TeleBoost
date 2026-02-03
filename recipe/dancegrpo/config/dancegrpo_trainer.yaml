@@ -59,6 +59,7 @@ reward_model:
     model_path: /gemini/space/wyb/model/arena_model/videocon_physics
 
   reward_manager: dancegrpo
+  
   # Rollout model config.
   rollout:
 
