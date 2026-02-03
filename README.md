@@ -87,12 +87,3 @@ current reward model types:
 ` class AIGCRewardManager -> @register('dancegrpo') `
 
 - If add a new reward manager, create a new py file here and register it.
-
----
-
-## 📝 TODO
-
-* [x] 
-* [√] 
-
-## 📜 Citation
