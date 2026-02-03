@@ -71,9 +71,6 @@ current reward model types:
     class QwenRewardModelWorker(RewardModelWorker)  
 ```
     # ---- running ----
-    data.train_batch_size
-    data.max_prompt_length
-    data.max_response_length
     actor_rollout_ref.rollout.n # number of samples one prompt
     algorithm.adv_estimator=${adv_estimator} # 'grpo'
     reward_model.rollout.load_format=safetensors, # !!! safetensors 
@@ -83,13 +80,7 @@ current reward model types:
     actor_rollout_ref.rollout.val_kwargs.temperature,  
     actor_rollout_ref.rollout.val_kwargs.top_p,
     actor_rollout_ref.rollout.val_kwargs.top_k,
-    actor_rollout_ref.ref.ulysses_sequence_parallel_size，# sp
-    actor_rollout_ref.rollout.tensor_model_parallel_size, # tp
-    actor_rollout_ref.actor.ppo_mini_batch_size,
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu,
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu,
-    reward_model.micro_batch_size_per_gpu,
-    trainer.n_gpus_per_node,
+    actor_rollout_ref.rollout.tensor_model_parallel_size, # tp for rollout
     trainer.type, # diffusion
     # ---- implementation ----
     rollout.name # 'vllm'
