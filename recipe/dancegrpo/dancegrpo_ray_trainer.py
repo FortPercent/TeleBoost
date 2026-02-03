@@ -307,7 +307,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         if self.use_rm:
                             print("begin to compute reward")
                             with torch.amp.autocast('cuda'):
-                                
+
                                 if self.config.reward_model.type == "joint":
                                     # ======================
                                     # Joint Reward Models
@@ -375,7 +375,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                     # Single / Qwen Reward Model
                                     # ======================
                                     if self.config.reward_model.type == "qwen":
-                                        reward_input = gen_batch_output.select(
+                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
                                             batch_keys=['null_context'],
                                             non_tensor_batch_keys=["caption", "video_ids"]
                                         )

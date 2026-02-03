@@ -37,10 +37,10 @@
 ```
     recipe/dancegrpo/
     ├── main_dancegrpo.py         # main file
-    ├── dancegrpo_fsdp_worker.py  # FSDP works
-    ├── dancegrpo_ray_trainer.py  # Ray trainer
-    ├── dp_actor.py               # dp Actor
-    └── run_dancegrpo.sh          # entry
+    ├── dancegrpo_fsdp_worker.py         # FSDP works
+    ├── dancegrpo_ray_trainer.py         # Ray trainer
+    ├── dp_actor.py         # dp Actor
+    └── run_dancegrpo.sh         # entry
 ```
 
 ```bash 
@@ -58,7 +58,8 @@ conifg files：
 'dancegrpo_trainer.yaml'
     reward_model.enable: True
     reward_model.strategy: diffusion
-    reward_model.type: qwen/single/joint
+    *reward_model.type: qwen/single/joint*
+    *reward_manager: dancegrpo*
 ```
 ```
 1.Reward Model Type
@@ -83,6 +84,8 @@ conifg files：
 2.Reward Manager
 # 'verl\workers\reward_manager' @register('')
     ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]
+    # class AIGCRewardManager -> @register('dancegrpo')
+
 ```
 ---
 
