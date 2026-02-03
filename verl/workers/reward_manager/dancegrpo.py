@@ -23,7 +23,7 @@ from verl.utils.reward_score.diffusion import compute_red_intensity_reward
 from verl.workers.reward_manager import register
 
 
-@register("dancegrpo")
+@register("dancegrpo") # 把dancegrpo注册到REWARD_MANAGER_REGISTRY中
 class AIGCRewardManager:
     """The reward manager."""
 
