@@ -219,13 +219,13 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
  
 class QwenRewardModelWorker(RewardModelWorker):
     """
-    Note that we only implement the reward model that is subclass of AutoModelForTokenClassification.
-    Use vllm based Qwen model as the reward model.
+        Note that we only implement the reward model that is subclass of AutoModelForTokenClassification.
+        Use vllm based Qwen model as the reward model.
     """
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
         """
-        initialize the reward model and sampling_params
+            initialize the reward model and sampling_params
         """
         # This is used to import external_lib into the huggingface systems
         # import_external_libs(self.config.model.get("external_lib", None))
@@ -249,12 +249,12 @@ class QwenRewardModelWorker(RewardModelWorker):
         dp = self.world_size // infer_tp
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
-        rollout_name = self.config.rollout.name
+        rollout_name = self.config.rollout.name # rollout使用的架构
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
         from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager
         log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
-        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False))
+        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False)) # use_shm 是否使用shared_memory
        
         # lora_kwargs = {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}} if self._is_lora else {}
         lora_kwargs = {}
@@ -340,7 +340,7 @@ class QwenRewardModelWorker(RewardModelWorker):
                 请严格按照输出格式要求，输出且只输出输出格式的内容。请依照以上标准、逻辑和格式，对视频进行结构化质量评估。
                 """
         
-    def _generate_chat_batch_prompts(self,batch_path, max_pixels = 360*420, fps = 1.0) -> List:
+    def _generate_chat_batch_prompts(self, batch_path, max_pixels = 360*420, fps = 1.0) -> List:
         """
         generate prompts for a batch of paths.
         Args:
@@ -358,7 +358,7 @@ class QwenRewardModelWorker(RewardModelWorker):
         for file_path in batch_path:
             # if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
                 start_time=time.time()
-                video_path = str(file_path).replace("./","/gemini/space/ljm/Dancegrpo/")
+                video_path = str(file_path).replace("./", "/gemini/space/ljm/Dancegrpo/")
                 # print(f"视频地址是file://{video_path}")
                 message = [
                     {
@@ -370,7 +370,10 @@ class QwenRewardModelWorker(RewardModelWorker):
                                 "max_pixels": max_pixels,
                                 "fps": fps,
                             },
-                            {"type": "text", "text": prompt},
+                            {
+                                "type": "text", 
+                                "text": prompt
+                            },
                         ],
                     }
                 ]
@@ -494,10 +497,9 @@ class QwenRewardModelWorker(RewardModelWorker):
                 logger.info(f"Generated text length: {len(output_text)}")
                 logger.info(f"Generated text preview: {output_text[:200]}...")
                 
-            
                 # 解析结果
                 result = self._parse_simple_evaluation(output_text)
-                overall_score = result.get("overall_score","N/A")
+                overall_score = result.get("overall_score", "N/A")
                 # processing_time = result.get("processing_time", 0)
         
                 print(f"🎯 综合质量分数: {overall_score}/100")
@@ -538,9 +540,10 @@ class QwenRewardModelWorker(RewardModelWorker):
             # batch_paths是很多批路径列表构成的列表
             # log_gpu_memory_usage("After entering reward rollout sharding manager", logger=logger)
             for batch_id in batch_ids:
-                batch_message = self._generate_batch_prompts(batch_id)
+                batch_message = self._generate_batch_prompts(batch_id) # 构建输入的prompt和对应的video_path
                 batch_output = []
                 for message in batch_message:
+                    # Qwen根据输入的prompt和视频生成对应的输出
                     output = self.reward_rollout.inference_engine.generate(message,
                                                                            sampling_params = self.sampling_params)
                     # with open('/gemini/space/ljm/Dancegrpo/videos/output.txt', 'a', encoding='utf-8') as f:
@@ -557,7 +560,7 @@ class QwenRewardModelWorker(RewardModelWorker):
                     
                 batch_reward = self._get_batch_reward(batch_output)
                 
-                all_rewards = all_rewards + batch_reward
+                all_rewards += batch_reward
                 # print(type(all_rewards[0]),all_rewards[0])
                 # print("\n")
         

@@ -151,7 +151,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
             )
         
-        print(self.gradient_accumulation)
+        print("gradient_accumulation", self.gradient_accumulation)
         print("="*100)
 
         # data=data.to("cpu")

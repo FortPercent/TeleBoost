@@ -25,7 +25,7 @@ def fprint(*args, **kwargs):
     with open("output.log", "a", encoding="utf-8") as f:
         f.write(text + "\n")
 
-
+# 这里计算优势函数时，直接使用组内标准化的奖励作为优势
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
     datas=data.pop(
         batch_keys=['rewards'],
@@ -60,8 +60,8 @@ def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") 
         return DataProto()
     
     # 1. 收集所有唯一的 key
-    all_batch_keys = set()
-    all_non_tensor_keys = set()
+    all_batch_keys = set() # 初始化空的集合 set会自动去重 但是List不会
+    all_non_tensor_keys = set() # 返回的dataproto包当中的key里面可能会有重复的
     for dp in data_list:
         if dp.batch is not None:
             all_batch_keys.update(dp.batch.keys())
@@ -77,7 +77,7 @@ def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") 
             if dp.batch is not None and key in dp.batch:
                 tensor = dp.batch[key]
                 # 关键改动：检查这一个 tensor 是否包含非零元素
-                if torch.any(tensor != 0):
+                if torch.any(tensor != 0):# any任意一个元素不为0返回true
                     # 如果包含，则将其加入待拼接列表
                     tensors_to_concat.append(tensor)
         
@@ -102,7 +102,7 @@ def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") 
         if arrays_to_concat:
             non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
             
-    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
+    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict) # 转换成标准的DataProto格式
 
 class RayDanceGRPOTrainer(RayPPOTrainer):
     """
@@ -219,10 +219,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     S = self.config.actor_rollout_ref.sampling_steps
                     num_frames = self.config.actor_rollout_ref.num_frames
                     size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
-                    vae_stride = [4, 8, 8]
+                    vae_stride = [4, 8, 8] # VAE 
                     latent_dtype = torch.float32
                     latent_shape = (
-                        16,
+                        16, # 这里的16指的是什么
                         (num_frames - 1) // vae_stride[0] + 1,
                         size[1] // vae_stride[1],
                         size[0] // vae_stride[2],
@@ -247,7 +247,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     gen_batch.batch["input_latents"]  = input_latents
                     gen_batch.batch["sigma_schedule"] = sigma_schedule_B
                     
-                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
+                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n) # 采样的次数 重复n
+
                 elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
                     gen_batch = new_batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
@@ -267,9 +268,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         # gen_batch_output的数据类型是DataProto
                         # 具体见DiffusionActorRolloutWorker.generate_sequences方法
                         # 得到的gen_batch_output是聚合所有gpu的结果
-                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch) # 这里生成视频
 
-                    # 目前用的是gae，TODO:修改reward计算方法
+                    # 目前用的是 GAE(组间相对优势)，TODO:修改reward计算方法
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
@@ -306,6 +307,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         if self.use_rm:
                             print("begin to compute reward")
                             with torch.amp.autocast('cuda'):
+                                
                                 if self.config.reward_model.type == "joint":
                                     # ======================
                                     # Joint Reward Models
