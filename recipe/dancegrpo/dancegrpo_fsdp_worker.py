@@ -775,6 +775,8 @@ def _split_batch(data: DataProto, dp_size: int, dp_rank: int) -> DataProto:
     
     return DataProto(batch=local_batch, non_tensor_batch=local_non_tensor)
 
+
+ # ------------------------------------------------------------------------------------------------
 # WORLD_SIZE = torch.distributed.get_world_size()
 # AestheticRewardModelWorker is a worker that computes aesthetic scores for images.
 class AestheticRewardModelWorker(RewardModelWorker):
