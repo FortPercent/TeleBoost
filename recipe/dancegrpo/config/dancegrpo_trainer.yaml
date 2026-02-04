@@ -147,4 +147,4 @@ reward_model:
     # number of responses (i.e. num sample times). > 1 for grpo
     n: 1
 
-use_rm: True
+use_rm: True # use_reward_model
