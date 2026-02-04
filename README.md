@@ -94,7 +94,7 @@ current reward model types:
 **b.single**  
     class DiffusionRewardModelWorker(RewardModelWorker)  
     # running
-    reward_model.model.path='path/to/HPsV2compressed.pt'
+    reward_model.model.path='path/to/HPSv2/HPS_v2_compressed.pt'
     
 
 **c.joint**  
@@ -134,6 +134,7 @@ current reward model types:
 
 #### reward_model.enable: False
 ```
+use_rm: False
     1) To integrate a custom reward function, simply define the script path in 'verl/trainer/config/ppo_trainer.yaml'. The system will automatically register this function and use it as 'compute_score'.
         custom_reward_function:
             path: path/to/your_script.py   # Path to your .py file
