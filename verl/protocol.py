@@ -539,7 +539,7 @@ class DataProto:
         tensors = {}
         # tensor batch
         for key in batch_keys:
-            assert key in self.batch.keys() # 这里报错
+            assert key in self.batch.keys()
             tensors[key] = self.batch.pop(key)
         non_tensors = {}
         # non tensor batch

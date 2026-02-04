@@ -46,7 +46,7 @@ reward_model:
   
   strategy: diffusion
 
-  type: qwen # qwen/single/joint
+  type: single # qwen/single/joint
 
   aesthetic:
     clip_model_path: /path/to/ViT-L-14.pt
