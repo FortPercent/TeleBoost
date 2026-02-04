@@ -108,8 +108,8 @@ current reward model types:
     reward_model:
         type: joint
         aesthetic:
-            clip_model_path: /path/to/ViT-L-14.ptaes 
-            model path: /path/to/sa_0_4_vit_l_14_linear.pth
+            clip_model_path: /path/to/ViT-L-14.pt
+            aes_model path: /path/to/sa_0_4_vit_l_14_linear.pth
         raft:
             model_path: /path/to/raft-things.pth
         videoclip:

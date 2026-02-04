@@ -49,14 +49,14 @@ reward_model:
   type: joint # qwen/single/joint
 
   aesthetic:
-    clip_model_path: /path/to/ViT-L-14.pt
-    aes_model_path: /path/to/sa_0_4_vit_l_14_linear.pth
+    clip_model_path: /root/models/aesthetic/ViT-L-14.pt
+    aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
   raft:
-    model_path: /path/to/raft-things.pth
+    model_path: /root/models/raft/raft-things.pth
   videoclip:
-    model_path: /path/to/VideoCLIP-XL.bin
+    model_path: /root/models/videoclip/VideoCLIP-XL.bin
   videophy:
-    model_path: /gemini/space/wyb/model/arena_model/videocon_physics
+    model_path: /root/models/videocon_physics
 
   reward_manager: dancegrpo
   
