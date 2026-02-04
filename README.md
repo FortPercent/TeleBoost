@@ -91,7 +91,9 @@ reward_manager: dancegrpo         # Reward manager type
 
 The system supports three types of reward models, configured in `recipe/dancegrpo/dancegrpo_fsdp_worker.py`:
 
-##### **A. qwen**
+---
+
+##### 🔹 qwen
 
 **Class:** `QwenRewardModelWorker(RewardModelWorker)`
 
@@ -131,7 +133,9 @@ world_size: 8                                 # Number of GPUs
 use_shm: true
 ```
 
-##### **B. single**
+---
+
+##### 🔹 single
 
 **Class:** `DiffusionRewardModelWorker(RewardModelWorker)`
 
@@ -143,7 +147,9 @@ reward_model:
     path: 'path/to/HPSv2/HPS_v2_compressed.pt'
 ```
 
-##### **C. joint**
+---
+
+##### 🔹 joint
 
 **Classes:**
 - `AestheticRewardModelWorker(RewardModelWorker)`
