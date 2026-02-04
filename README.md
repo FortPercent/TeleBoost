@@ -93,9 +93,10 @@ current reward model types:
 
 **b.single**  
     class DiffusionRewardModelWorker(RewardModelWorker)  
+```
     # running
     reward_model.model.path='path/to/HPSv2/HPS_v2_compressed.pt'
-    
+```    
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
