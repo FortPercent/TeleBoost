@@ -64,7 +64,8 @@ conifg files：
 ```
 ---
 #### reward_model.enable: True
-##### 1.reward_model.type
+
+#### 1.reward_model.type
 ` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
 current reward model types:  
 **a.qwen**  
@@ -124,15 +125,17 @@ current reward model types:
 - Then,  
 ``` 
     from .dancegrpo_fsdp_worker import NewRewardModelWorker as RewardModelWorker  
-    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)okm 
 ```
 
-##### 2.reward_manager
+#### 2.reward_manager
 ` 'verl\workers\reward_manager' @register('') `  
 ["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
 ` class AIGCRewardManager -> @register('dancegrpo') `
 
 - If add a new reward manager, create a new py file here and register it.
+
+---
 
 #### reward_model.enable: False
 ```
