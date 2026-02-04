@@ -698,8 +698,9 @@ class DiffusionRewardModelWorker(RewardModelWorker):
             batch_size=len(batch_caption)
         )
         self.reward_module.to(torch.device('cpu'))
+        batch_reward= DataProto(batch=batch)
         
-        return DataProto(batch=batch)
+        return batch_reward
 
 
 # ================================= Async related workers =================================
