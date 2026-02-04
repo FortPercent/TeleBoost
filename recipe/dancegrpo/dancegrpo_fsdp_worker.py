@@ -1092,6 +1092,8 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         if self.rank < self.videoclip_dp:
             self.is_active = True
             videoclip_cfg = self.config.get("videoclip", {}) or {}
+            # get() 方法用于从字典中获取指定键的值，如果键不存在则返回默认值
+            # .get(key, default_value)
             self.videoclip_model_path = videoclip_cfg.get(
                 "model_path",
                 "/gemini/space/wyb/model/arena_model/VideoCLIP-XL/VideoCLIP-XL.bin",
