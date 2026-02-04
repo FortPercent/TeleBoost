@@ -374,11 +374,11 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                     # ======================
                                     # Single / Qwen Reward Model
                                     # ======================
+                                    reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
+                                        batch_keys=['null_context'],
+                                        non_tensor_batch_keys=["caption", "video_ids"]
+                                    )
                                     if self.config.reward_model.type == "qwen":
-                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
-                                            batch_keys=['null_context'],
-                                            non_tensor_batch_keys=["caption", "video_ids"]
-                                        )
                                      # 调用统一的 rm_wg（仅 single/qwen 有）
                                         reward_tensor = self.rm_wg.compute_rm_score(reward_input)
                                         reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
