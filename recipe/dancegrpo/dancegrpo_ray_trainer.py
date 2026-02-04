@@ -374,12 +374,12 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                     # ======================
                                     # Single / Qwen Reward Model
                                     # ======================
-                                    reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
-                                        batch_keys=['null_context'],
-                                        non_tensor_batch_keys=["caption", "video_ids"]
-                                    )
+                                    # 调用统一的 rm_wg（仅 single/qwen 有）
                                     if self.config.reward_model.type == "qwen":
-                                     # 调用统一的 rm_wg（仅 single/qwen 有）
+                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
+                                            batch_keys=['null_context'],
+                                            non_tensor_batch_keys=["caption", "video_ids"]
+                                        )
                                         reward_tensor = self.rm_wg.compute_rm_score(reward_input)
                                         reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
                                         gen_batch_output.pop(
@@ -387,6 +387,10 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                         )
                                         # 清理原 batch（移除大 tensor 如 video_frames）
                                     else:  # "single"
+                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
+                                            batch_keys=['video_frames'],
+                                            non_tensor_batch_keys=["caption"]
+                                        )
                                         reward_tensor = self.rm_wg.compute_rm_score(reward_input)
                                         reward_input = gen_batch_output
                                     
