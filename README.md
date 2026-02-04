@@ -72,7 +72,7 @@ recipe/dancegrpo/
 
 In `dancegrpo_trainer.yaml`:
 
-```yaml
+```
 reward_model:
   enable: true                    # Enable/disable reward model
   strategy: diffusion             # Reward strategy
@@ -93,13 +93,13 @@ The system supports three types of reward models, configured in `recipe/dancegrp
 
 ---
 
-##### 🔹 qwen
+##### 🎯 **Type 1: Qwen**
 
 **Class:** `QwenRewardModelWorker(RewardModelWorker)`
 
 **Configuration Parameters:**
 
-```yaml
+```
 # Model Configuration
 reward_model:
   model:
@@ -135,13 +135,13 @@ use_shm: true
 
 ---
 
-##### 🔹 single
+##### 🎯 **Type 2: Single**
 
 **Class:** `DiffusionRewardModelWorker(RewardModelWorker)`
 
 **Configuration:**
 
-```yaml
+```
 reward_model:
   model:
     path: 'path/to/HPSv2/HPS_v2_compressed.pt'
@@ -149,7 +149,7 @@ reward_model:
 
 ---
 
-##### 🔹 joint
+##### 🎯 **Type 3: Joint**
 
 **Classes:**
 - `AestheticRewardModelWorker(RewardModelWorker)`
@@ -160,7 +160,7 @@ reward_model:
 
 **Configuration:**
 
-```yaml
+```
 reward_model:
   type: joint
   aesthetic:
@@ -207,7 +207,7 @@ When `use_rm: false`, you can use custom reward functions:
 
 Define a custom reward function in `verl/trainer/config/ppo_trainer.yaml`:
 
-```yaml
+```
 custom_reward_function:
   path: path/to/your_script.py      # Path to your Python script
   name: compute_score
