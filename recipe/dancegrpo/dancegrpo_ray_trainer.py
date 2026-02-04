@@ -154,7 +154,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         num_prompt_in_batch = 0
         num_gen_batches = 0
         
-        if self.config.reward_model.type=="joint":
+        if self.use_rm and self.config.reward_model.type=="joint":
             import threading
             reward_results = {}
             thread_inputs = {}
