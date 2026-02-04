@@ -870,7 +870,7 @@ class RayPPOTrainer:
                     self.role_worker_mapping[Role.VideophyRewardModel], config=self.config.reward_model
                 )
             else:
-                # 单一 RM
+                # 单一 RM for qwen/single
                 resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
                 rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
                 self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
