@@ -1,150 +1,214 @@
 # DanceGRPO
 
-## 📖 Guide
+A reinforcement learning framework for diffusion models using Group Relative Policy Optimization (GRPO).
 
-1. [Setup](#-setup)
-2. [Data Prepare](#-data-preprocess)
-3. [Usage](#-usage)
-4. [TODO](#-todo)
-5. [Cite](#-citation)
+## 📖 Table of Contents
+
+- [Setup](#-setup)
+- [Data Preprocessing](#-data-preprocessing)
+- [Usage](#-usage)
+- [Configuration](#-configuration)
+- [Reward Models](#-reward-models)
 
 ---
 
 ## 🛠 Setup
 
 ```bash
-    # clone repository
-    git clone https://qiruoling@code.srdcloud.cn/P24HQASYF0004/AI-Infra/Dance-grpo
-    cd Dance-grpo
+# Clone repository
+git clone https://qiruoling@code.srdcloud.cn/P24HQASYF0004/AI-Infra/Dance-grpo
+cd Dance-grpo
 
-    # install dependency
-    pip install -r requirements.txt
-
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-## 📊 Data Preprocess
+---
+
+## 📊 Data Preprocessing
+
+Preprocess your data before training:
 
 ```bash
-    bash data_preprocess\preprocess_wan_rl_embeddings.sh
+bash data_preprocess/preprocess_wan_rl_embeddings.sh
 ```
 
 ---
 
 ## 🏃 Usage
 
-```bash 
-    bash recipe\dancegrpo\run_dancegrpo.sh
+### Quick Start
+
+```bash
+bash recipe/dancegrpo/run_dancegrpo.sh
 ```
 
-### 1. main script
+### Main Scripts
+
+The main training scripts are organized as follows:
+
 ```
 recipe/dancegrpo/
-├── main_dancegrpo.py         # main file
-├── dancegrpo_fsdp_worker.py         # FSDP works
-├── dancegrpo_ray_trainer.py         # Ray trainer
-├── dp_actor.py         # dp Actor
-└── run_dancegrpo.sh         # entry
+├── main_dancegrpo.py              # Main entry point
+├── dancegrpo_fsdp_worker.py       # FSDP worker implementation
+├── dancegrpo_ray_trainer.py       # Ray trainer implementation
+├── dp_actor.py                    # Data parallel actor
+└── run_dancegrpo.sh               # Execution script
 ```
-```
-conifg files：
-├── verl/trainer/config/ppo_trainer.yaml     # basic PPO
-├── recipe/dancegrpo/config/dancegrpo_trainer.yaml     # implementation
-└── recipe/dancegrpo/run_dancegrpo.sh     # running
-```
----
-
-### 2. Reward Model
-
-```
-'dancegrpo_trainer.yaml'
-    - reward_model.enable: True
-    - reward_model.strategy: diffusion
-    - reward_model.type: qwen/single/joint -> 1
-    - reward_manager: dancegrpo -> 2
-```
----
-#### reward_model.enable: True
-
-#### 1.reward_model.type
-` 'Dance-grpo\recipe\dancegrpo\dancegrpo_fsdp_worker.py' `  
-current reward model types:  
-**a.qwen**  
-    class QwenRewardModelWorker(RewardModelWorker)  
-```
-    # ---- running ----
-    rewardmodel.model.path='path/to/Qwen2.5-VL-7B-Instruct'
-    actor_rollout_ref.rollout.n # number of samples one prompt
-    algorithm.adv_estimator=${adv_estimator} # 'grpo'
-    reward_model.rollout.load_format=safetensors, 
-        # !!! for qwen 'load_format' must be 'safetensors' 
-    actor_rollout_ref.rollout.temperature, 
-    actor_rollout_ref.rollout.top_p,  
-    actor_rollout_ref.rollout.tensor_model_parallel_size, # tp for rollout
-    trainer.type, # diffusion
-    # ---- implementation ----
-    rollout.name # 'vllm'
-    rollout.mode # 'sync'
-    rollout.layered_summon # 'False'
-    use_rm # 'True'
-    # ---- others ----
-    vllm_mode # 'spmd'
-    world_size # Number of GPUs
-    use_shm # 'True'
-```
-
-**b.single**  
-    class DiffusionRewardModelWorker(RewardModelWorker)  
-```
-    # running
-    reward_model.model.path='path/to/HPSv2/HPS_v2_compressed.pt'
-```    
-
-**c.joint**  
-    class AestheticRewardModelWorker(RewardModelWorker),  
-    class RAFTRewardModelWorker(RewardModelWorker),  
-    class VideoclipRewardModelWorker(RewardModelWorker),  
-    class VideophyRewardModelWorker(RewardModelWorker)  
-    or  
-    class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
-```
-    # implementation
-    reward_model:  
-        type: joint  
-        aesthetic:  
-            clip_model_path: /path/to/ViT-L-14.pt  
-            aes_model path: /path/to/sa_0_4_vit_l_14_linear.pth  
-        raft:  
-            model_path: /path/to/raft-things.pth  
-        videoclip:  
-            model path: /path/to/VideoCLIP-XL.bin  
-        videophy:  
-            model_path: /gemini/space/wyb/model/arena_model/videocon_physics  
-```
-
-- If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
-- Then,  
-``` 
-    from .dancegrpo_fsdp_worker import NewRewardModelWorker as RewardModelWorker  
-    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)okm 
-```
-
-#### 2.reward_manager
-` 'verl\workers\reward_manager' @register('') `  
-["BatchRewardManager", "DAPORewardManager", "NaiveRewardManager", "PrimeRewardManager", "AIGCRewardManager"]  
-` class AIGCRewardManager -> @register('dancegrpo') `
-
-- If add a new reward manager, create a new py file here and register it.
 
 ---
 
-#### reward_model.enable: False
+## ⚙️ Configuration
+
+### Configuration Files
+
 ```
-use_rm: False
-    1) To integrate a custom reward function, simply define the script path in 'verl/trainer/config/ppo_trainer.yaml'. The system will automatically register this function and use it as 'compute_score'.
-        custom_reward_function:
-            path: path/to/your_script.py   # Path to your .py file
-            name: your_function_name       # Function name to use as compute_score
+├── verl/trainer/config/ppo_trainer.yaml                  # Base PPO configuration
+├── recipe/dancegrpo/config/dancegrpo_trainer.yaml        # DanceGRPO configuration
+└── recipe/dancegrpo/run_dancegrpo.sh                     # Runtime parameters
 ```
+
+### Key Configuration Parameters
+
+In `dancegrpo_trainer.yaml`:
+
+```yaml
+reward_model:
+  enable: true                    # Enable/disable reward model
+  strategy: diffusion             # Reward strategy
+  type: qwen/single/joint         # Reward model type
+  
+reward_manager: dancegrpo         # Reward manager type
 ```
-    2) If not define, directly use 'default_compute_score' in 'verl\trainer\ppo\reward.py' for various datasets.
+
+---
+
+## 🎯 Reward Models
+
+### Option 1: Using Reward Models (`reward_model.enable: true`)
+
+#### Reward Model Types
+
+The system supports three types of reward models, configured in `recipe/dancegrpo/dancegrpo_fsdp_worker.py`:
+
+##### **A. qwen**
+
+**Class:** `QwenRewardModelWorker(RewardModelWorker)`
+
+**Configuration Parameters:**
+
+```yaml
+# Model Configuration
+reward_model:
+  model:
+    path: 'path/to/Qwen2.5-VL-7B-Instruct'
+  rollout:
+    load_format: safetensors  # ⚠️ Required for Qwen models
+
+# Training Parameters
+actor_rollout_ref:
+  rollout:
+    n: 4                                      # Number of samples per prompt
+    temperature: 1.0
+    top_p: 0.9
+    tensor_model_parallel_size: 1             # Tensor parallelism for rollout
+
+algorithm:
+  adv_estimator: grpo                         # Advantage estimator
+
+trainer:
+  type: diffusion
+
+# Advanced Settings
+rollout:
+  name: vllm
+  mode: sync
+  layered_summon: false
+
+use_rm: true
+vllm_mode: spmd
+world_size: 8                                 # Number of GPUs
+use_shm: true
 ```
+
+##### **B. single**
+
+**Class:** `DiffusionRewardModelWorker(RewardModelWorker)`
+
+**Configuration:**
+
+```yaml
+reward_model:
+  model:
+    path: 'path/to/HPSv2/HPS_v2_compressed.pt'
+```
+
+##### **C. joint**
+
+**Classes:**
+- `AestheticRewardModelWorker(RewardModelWorker)`
+- `RAFTRewardModelWorker(RewardModelWorker)`
+- `VideoclipRewardModelWorker(RewardModelWorker)`
+- `VideophyRewardModelWorker(RewardModelWorker)`
+- `MultiRewardModelWorker(RewardModelWorker)` - Combines all four models
+
+**Configuration:**
+
+```yaml
+reward_model:
+  type: joint
+  aesthetic:
+    clip_model_path: /path/to/ViT-L-14.pt
+    aes_model_path: /path/to/sa_0_4_vit_l_14_linear.pth
+  raft:
+    model_path: /path/to/raft-things.pth
+  videoclip:
+    model_path: /path/to/VideoCLIP-XL.bin
+  videophy:
+    model_path: /path/to/model/arena_model/videocon_physics
+```
+
+#### Adding Custom Reward Models
+
+1. Create a new class inheriting from `RewardModelWorker` in `dancegrpo_fsdp_worker.py`
+2. Register the worker:
+
+```python
+from .dancegrpo_fsdp_worker import NewRewardModelWorker as RewardModelWorker
+role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+```
+
+#### Reward Managers
+
+**Location:** `verl/workers/reward_manager`
+
+**Available Managers:**
+- `BatchRewardManager`
+- `DAPORewardManager`
+- `NaiveRewardManager`
+- `PrimeRewardManager`
+- `AIGCRewardManager` - Registered as `'dancegrpo'`
+
+To add a custom reward manager, create a new Python file in `verl/workers/reward_manager` and register it using the `@register()` decorator.
+
+---
+
+### Option 2: Custom Reward Functions (`reward_model.enable: false`)
+
+When `use_rm: false`, you can use custom reward functions:
+
+#### Method 1: Custom Reward Function
+
+Define a custom reward function in `verl/trainer/config/ppo_trainer.yaml`:
+
+```yaml
+custom_reward_function:
+  path: path/to/your_script.py      # Path to your Python script
+  name: compute_score
+```
+
+The system will automatically register this function and use it as `compute_score`.
+
+#### Method 2: Default Reward Function
+
+If no custom function is defined, the system uses `default_compute_score` from `verl/trainer/ppo/reward.py`.
