@@ -54,7 +54,7 @@ reward_model:
   raft:
     model_path: /root/models/raft/raft-things.pth
   videoclip:
-    model_path: /root/models/videoclip/VideoCLIP-XL.bin
+    model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
   videophy:
     model_path: /root/models/videocon_physics
 
