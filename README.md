@@ -71,6 +71,7 @@ current reward model types:
     class QwenRewardModelWorker(RewardModelWorker)  
 ```
     # ---- running ----
+    rewardmodel.model.path='path/to/Qwen2.5-VL-7B-Instruct'
     actor_rollout_ref.rollout.n # number of samples one prompt
     algorithm.adv_estimator=${adv_estimator} # 'grpo'
     reward_model.rollout.load_format=safetensors, 
@@ -92,6 +93,9 @@ current reward model types:
 
 **b.single**  
     class DiffusionRewardModelWorker(RewardModelWorker)  
+    # running
+    reward_model.model.path='path/to/HPsV2compressed.pt'
+    
 
 **c.joint**  
     class AestheticRewardModelWorker(RewardModelWorker),  
@@ -100,6 +104,19 @@ current reward model types:
     class VideophyRewardModelWorker(RewardModelWorker)  
     or  
     class MultiRewardModelWorker(RewardModelWorker) <- union four joint RewardModelWorkers
+    # implementation
+    reward_model:
+        type: joint
+        aesthetic:
+            clip_model_path: /path/to/ViT-L-14.ptaes 
+            model path: /path/to/sa_0_4_vit_l_14_linear.pth
+        raft:
+            model_path: /path/to/raft-things.pth
+        videoclip:
+            model path: /path/to/VideoCLIP-XL.bin
+        videophy:
+            model_path: /gemini/space/wyb/model/arena_model/videocon_physics
+
 
 - If add a new reward model type, create a new class here and inherit from the class `RewardModelWorker`.
 - Then,  
