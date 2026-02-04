@@ -386,6 +386,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                                             non_tensor_batch_keys=["caption", "video_ids"]
                                         )
                                         # 清理原 batch（移除大 tensor 如 video_frames）
+                                    
                                     else:  # "single"
                                         reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
                                             batch_keys=['video_frames'],
