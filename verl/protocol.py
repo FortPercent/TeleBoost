@@ -333,6 +333,7 @@ class DataProto:
                 assert val.shape[0] == batch_size, f"key {key} length {len(val)} is not equal to batch size {batch_size}"
 
     @classmethod
+    # 将一个混合了 torch.Tensor 和 np.ndarray 的字典（如从 DataLoader 加载的一条样本），转化为一个结构化、可统一处理的 DataProto 对象
     def from_single_dict(cls, data: Dict[str, Union[torch.Tensor, np.ndarray]], meta_info=None, auto_padding=False):
         """Create a DataProto from a dict of tensors and non_tensors"""
         tensors = {}
