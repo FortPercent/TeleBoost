@@ -616,7 +616,7 @@ class RayPPOTrainer:
         sample_scores = []
 
         for test_data in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(test_data)
+            test_batch = DataProto.from_single_dict(test_data) # 处理为 DataProto 格式
 
             # repeat test batch
             test_batch = test_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n, interleave=True)
@@ -658,7 +658,7 @@ class RayPPOTrainer:
             # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             if not self.async_rollout_mode:
-                test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
+                test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded) # 调用生成接口，得到生成结果
             else:
                 self.async_rollout_manager.wake_up()
                 test_output_gen_batch_padded = self.async_rollout_manager.generate_sequences(test_gen_batch_padded)

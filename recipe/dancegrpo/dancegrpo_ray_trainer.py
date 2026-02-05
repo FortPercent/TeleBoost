@@ -199,6 +199,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             print(f"[debug] {name}.batch_size={batch.batch_size}")
             
         for epoch in range(self.config.trainer.total_epochs):
+            # ======== 1. 数据 ========
             for batch_dict in self.train_dataloader: # self.train_dataloader处理数据
 
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
@@ -215,7 +216,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                     
                     # 形状与配置
                     B = new_batch.batch.batch_size[0]
-                    S = self.config.actor_rollout_ref.sampling_steps
+                    S = self.config.actor_rollout_ref.sampling_steps # sample_steps在这里
                     num_frames = self.config.actor_rollout_ref.num_frames
                     size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
                     vae_stride = [4, 8, 8] # VAE 
