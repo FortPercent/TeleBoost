@@ -28,7 +28,7 @@ def register(name):
     def decorator(cls):
         if name in REWARD_MANAGER_REGISTRY and REWARD_MANAGER_REGISTRY[name] != cls:
             raise ValueError(f"Reward manager {name} has already been registered: {REWARD_MANAGER_REGISTRY[name]} vs {cls}")
-        REWARD_MANAGER_REGISTRY[name] = cls
+        REWARD_MANAGER_REGISTRY[name] = cls # 把这个被装饰的cls注册到REWARD_MANAGER_REGISTRY中，key是name，value是cls
         return cls
 
     return decorator
@@ -46,4 +46,4 @@ def get_reward_manager_cls(name):
     """
     if name not in REWARD_MANAGER_REGISTRY:
         raise ValueError(f"Unknown reward manager: {name}")
-    return REWARD_MANAGER_REGISTRY[name]
+    return REWARD_MANAGER_REGISTRY[name] # 返回的是注册的名字 name是原始的名字，REWARD_MANAGER_REGISTRY[name] 是注册的类

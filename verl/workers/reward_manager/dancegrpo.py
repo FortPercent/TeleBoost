@@ -23,7 +23,7 @@ from verl.utils.reward_score.diffusion import compute_red_intensity_reward
 from verl.workers.reward_manager import register
 
 
-@register("dancegrpo") # 把dancegrpo注册到REWARD_MANAGER_REGISTRY中
+@register("dancegrpo") # 把dancegrpo注册到REWARD_MANAGER_REGISTRY中，value是AIGCRewardManager这个类
 class AIGCRewardManager:
     """The reward manager."""
 
@@ -39,10 +39,10 @@ class AIGCRewardManager:
         """
         self.tokenizer = tokenizer  # Store the tokenizer for decoding token IDs
         self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
-        self.compute_score = compute_score or default_compute_score
+        self.compute_score = compute_score or default_compute_score # 如果没有传入compute_score函数，就使用默认的default_compute_score函数
         self.reward_fn_key = reward_fn_key  # Store the key for accessing the data sources
 
-    def __call__(self, data: DataProto, return_dict=False):
+    def __call__(self, data: DataProto, return_dict=False): # __call__ 让一个类的实例可以像函数一样被直接调用
         """We will expand this function gradually based on the available datasets"""
 
         # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
@@ -61,7 +61,7 @@ class AIGCRewardManager:
 
         for i in range(len(data)):
             data_item = data[i]  # DataProtoItem
-            reward = compute_red_intensity_reward(data_item.batch["video_frames"])
+            reward = compute_red_intensity_reward(data_item.batch["video_frames"]) # 真正的计算reward的函数
             all_rewards.append(reward)
             # print(all_rewards)
 
@@ -80,11 +80,14 @@ class AIGCRewardManager:
             # else:
             #     reward = score
             
-        all_rewards = torch.cat(all_rewards, dim=0)
+        all_rewards = torch.cat(all_rewards, dim=0) 
+        # dim=0 有两种情况，
+        # 1是每个reward是一个标量，shape是(1,)，那么cat之后shape是(batch_size,)，
+        # 2是每个reward是一个向量，shape是(num_rewards,)，那么cat之后shape是(batch_size, num_rewards)
         all_rewards=all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
             {
-                "rewards": all_rewards,
+                "rewards": all_rewards, # rewards是一个tensor，shape是(batch_size,)，每个元素是一个reward score
             },
             batch_size=len(data)
         )

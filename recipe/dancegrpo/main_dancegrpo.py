@@ -64,7 +64,6 @@ class TaskRunner:
             from verl.workers.megatron_workers import ActorRolloutRefWorker, CriticWorker
 
             ray_worker_group_cls = NVMegatronRayWorkerGroup
-
         else:
             raise NotImplementedError
 
@@ -83,6 +82,7 @@ class TaskRunner:
         }
 
         # Dict[Role, str]
+        # global_pool_id 本身也是一个Dict[str, List[int]]
         mapping = {
             Role.ActorRollout: global_pool_id,
         }
@@ -158,15 +158,15 @@ class TaskRunner:
         # Note(haibin.lin): please make sure custom reward managers are imported and
         # registered via `verl.workers.reward_manager.register`
         reward_manager_name = config.reward_model.get("reward_manager", "naive")
-        reward_manager_cls = get_reward_manager_cls(reward_manager_name)
+        reward_manager_cls = get_reward_manager_cls(reward_manager_name) # 这里看注册的reward manager是什么
+        compute_score = get_custom_reward_fn(config) # 这里返回None，表示没有自定义的reward function
 
-        compute_score = get_custom_reward_fn(config)
-
-        # 使用的reward manager 是 dancegrpo -> AIGCRewardManager
+        # 初始化reward function，这个函数会被传入每一个worker中，作为计算reward的接口
+        # 使用的reward manager 是 dancegrpo(从config中读取的) -> AIGCRewardManager
         reward_fn = reward_manager_cls(
             tokenizer=tokenizer,
             num_examine=0,
-            compute_score=compute_score
+            compute_score=compute_score # 没有定义的话这里会自动转为默认的default_compute_score函数
         )
         # reward_fn_key=config.data.reward_fn_key,
         # max_resp_len=config.data.max_response_length,
@@ -183,7 +183,7 @@ class TaskRunner:
 
         from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
 
-        trainer = RayDanceGRPOTrainer(
+        trainer = RayDanceGRPOTrainer( # 初始化训练类
             config=config,
             tokenizer=tokenizer,
             processor=processor,
@@ -194,8 +194,8 @@ class TaskRunner:
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
         )
-        trainer.init_workers()
-        trainer.fit()
+        trainer.init_workers() # 初始化所有的worker
+        trainer.fit() # 开始训练
 
 
 if __name__ == "__main__":
