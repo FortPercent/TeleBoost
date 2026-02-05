@@ -121,7 +121,7 @@ class RLHFDataset(Dataset):
         processor: Optional[ProcessorMixin] = None,
     ):
         if not isinstance(data_files, (List, ListConfig)):
-            data_files = [data_files]
+            data_files = [data_files] # 把文件路径变成一个list，但是这里只包含file_path一个元素
 
         self.data_files = copy.deepcopy(data_files)
         self.original_data_files = copy.deepcopy(data_files)  # use for resume
@@ -129,7 +129,7 @@ class RLHFDataset(Dataset):
         self.processor = processor
         self.config = config
 
-        self.cache_dir = os.path.expanduser(config.get("cache_dir", "~/.cache/verl/rlhf"))
+        self.cache_dir = os.path.expanduser(config.get("cache_dir", "~/.cache/verl/rlhf")) # expanduser把~转换成用户目录
         self.prompt_key = config.get("prompt_key", "prompt")
         self.image_key = config.get("image_key", "images")
         self.video_key = config.get("video_key", "videos")
@@ -147,8 +147,9 @@ class RLHFDataset(Dataset):
         self.filter_prompts = config.get("filter_prompts", True)
         self.serialize_dataset = False
 
+        # 这里从传入的config中读取数据的type为diffsuion
         if self.config.type=="diffusion":
-            self.json_path = data_files[0]
+            self.json_path = data_files[0] # 把刚刚的file_path赋值给json_path，这里是列表格式
             # self.cfg_rate = cfg_rate
             self.datase_dir_path = os.path.dirname(data_files[0])
             self._read_latent()

@@ -199,8 +199,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             print(f"[debug] {name}.batch_size={batch.batch_size}")
             
         for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
-                metrics = {}
+            for batch_dict in self.train_dataloader: # self.train_dataloader处理数据
 
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
                 num_gen_batches += 1

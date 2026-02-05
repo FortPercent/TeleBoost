@@ -221,8 +221,8 @@ def create_rl_dataset(data_paths, data_config, tokenizer, processor):
         dataset_cls = RLHFDataset
     print(f"Using dataset class: {dataset_cls.__name__}")
 
-    # Instantiate the dataset using the determined dataset class
-    dataset = dataset_cls(
+    # Instantiate the dataset using the determined dataset class RLHFDataset
+    dataset = dataset_cls( 
         data_files=data_paths,
         tokenizer=tokenizer,
         processor=processor,

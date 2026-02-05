@@ -539,7 +539,8 @@ class RayPPOTrainer:
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
-            total_training_steps = self.config.trainer.total_training_steps
+            total_training_steps = min(total_training_steps, self.config.trainer.total_training_steps) 
+            # 如果配置中已经指定了总训练步数，则使用该值，但是数据集可能较小，所以取两者的最小值
 
         self.total_training_steps = total_training_steps
         print(f"Total training steps: {self.total_training_steps}")
