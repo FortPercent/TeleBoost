@@ -42,11 +42,11 @@ actor_rollout_ref:
 
 
 reward_model:
-  enable: False
+  enable: True
   
   strategy: diffusion
 
-  type: joint # qwen/single/joint
+  type: qwen # qwen/single/joint
 
   aesthetic:
     clip_model_path: /root/models/aesthetic/ViT-L-14.pt
