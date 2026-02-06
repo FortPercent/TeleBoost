@@ -226,7 +226,10 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     )
                     
                     sqrt_dt = sqrt_dt.mean()
-                    std_dev_t_step = std_dev_t[..., current_step]
+                    if std_dev_t.ndim == 0:
+                        std_dev_t_step = std_dev_t
+                    else:
+                        std_dev_t_step = std_dev_t[..., current_step]
                     sigma_t = std_dev_t_step / (sqrt_dt + ratio_norm_eps)
                     scale = sqrt_dt * sigma_t
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
