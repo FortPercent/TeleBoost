@@ -208,6 +208,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 )
 
                 old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
+                #  尝试修复
+                gen_len = old_log_probs.shape[1]
+                new_log_probs = new_log_probs[:, -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
 
                 if ratio_norm:
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
@@ -218,7 +221,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
                     scale = sqrt_dt * sigma_t
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
-                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale)
+                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
                 else:
                     ratio = torch.exp(new_log_probs - old_log_probs)
 
