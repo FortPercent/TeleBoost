@@ -232,6 +232,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                         std_dev_t_step = std_dev_t[..., current_step]
                     sigma_t = std_dev_t_step / (sqrt_dt + ratio_norm_eps)
                     scale = sqrt_dt * sigma_t
+                    if scale.ndim > 1:
+                        # Reduce to per-batch scalars to match log-prob shapes.
+                        scale = scale.mean(dim=tuple(range(1, scale.ndim)))
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
                 else:
