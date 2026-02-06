@@ -28,9 +28,9 @@ actor_rollout_ref:
     max_grad_norm: 1.0
     
     grpo_guard:
-      enable: true
-      ratio_norm: true
-      grad_reweight: true
+      enable: false
+      ratio_norm: false
+      grad_reweight: false
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6
       grad_reweight_alpha: 1.0
@@ -53,7 +53,7 @@ actor_rollout_ref:
 
   # if fast flow-grpo
   flow_grpo:
-    enable: false
+    enable: true
     sde_window_size: 2
     sde_window_range: [0, "${actor_rollout_ref.sampling_steps}"]
     shuffle_timesteps: false
