@@ -217,14 +217,16 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
 
                 if ratio_norm:
+                    prev_sample_mean_step = prev_sample_mean[..., current_step]
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
-                    ratio_mean_bias = (prev_sample_mean - prev_sample_mean_old).pow(2).mean(
-                        dim=tuple(range(1, prev_sample_mean.ndim))
+                    ratio_mean_bias = (prev_sample_mean_step - prev_sample_mean_old).pow(2).mean(
+                        dim=tuple(range(1, prev_sample_mean_step.ndim))
                     )
                     sqrt_dt = sqrt_dt.mean()
                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
                     scale = sqrt_dt * sigma_t
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+                    print(f"Step {step_idx}: RatioNorm scale {scale.item()}, mean bias {ratio_mean_bias.item()}")
                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
                 else:
                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
