@@ -28,9 +28,9 @@ actor_rollout_ref:
     max_grad_norm: 1.0
     
     grpo_guard:
-      enable: false
-      ratio_norm: false
-      grad_reweight: false
+      enable: true
+      ratio_norm: true
+      grad_reweight: true
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6
       grad_reweight_alpha: 1.0
