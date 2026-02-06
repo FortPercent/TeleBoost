@@ -208,10 +208,10 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 )
 
                 # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
-                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx]
+                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx].flatten()
 
                 # 2. new_log_probs 本身就是当前时间步的 log_prob (形状: Batch)
-                new_log_probs_step = new_log_probs
+                new_log_probs_step = new_log_probs.flatten()
 
                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
 
@@ -219,10 +219,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     prev_sample_mean_step = prev_sample_mean
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
                     
-                    # 计算 ratio_mean_bias，规约到 [batch_size]
-                    ratio_mean_bias = (prev_sample_mean_step - prev_sample_mean_old).pow(2).mean(
-                        dim=tuple(range(1, prev_sample_mean_step.ndim))
-                    )
+                    # 计算 ratio_mean_bias，先对空间维度规约，得到 [batch_size] 或标量
+                    diff_squared = (prev_sample_mean_step - prev_sample_mean_old).pow(2)
+                    # 对所有非batch维度规约
+                    ratio_mean_bias = diff_squared.flatten(start_dim=1).mean(dim=1) if diff_squared.ndim > 1 else diff_squared.mean()
+                    # 确保 flatten 到一维
+                    ratio_mean_bias = ratio_mean_bias.flatten()
                     
                     # sqrt_dt 和 std_dev_t 都是标量，不需要索引
                     sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
