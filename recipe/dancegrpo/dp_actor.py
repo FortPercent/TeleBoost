@@ -208,11 +208,13 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 )
 
                 # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
-                old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
+                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx]
 
                 # 2. 拿到当前这一步的 new_log_prob (形状: Batch)
                 current_step = -train_timesteps + step_idx
-                new_log_probs = new_log_probs[..., current_step]
+                new_log_probs_step = new_log_probs[..., current_step]
+
+                print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
 
                 if ratio_norm:
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
@@ -223,9 +225,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
                     scale = sqrt_dt * sigma_t
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
-                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
                 else:
-                    ratio = torch.exp(new_log_probs - old_log_probs)
+                    ratio = torch.exp(new_log_probs_step - old_log_probs_step)
 
                 clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
                 clip_count = clipped_mask.sum().detach().item()
