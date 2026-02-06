@@ -210,7 +210,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
                 #  尝试修复
                 gen_len = old_log_probs.shape[1]
-                new_log_probs = new_log_probs[:, -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
+                new_log_probs = new_log_probs[..., -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
 
                 if ratio_norm:
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
