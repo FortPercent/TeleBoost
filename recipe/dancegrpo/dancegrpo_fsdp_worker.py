@@ -73,6 +73,31 @@ except ImportError:
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
+def _zscore_tensor(values: torch.Tensor) -> torch.Tensor:
+    mean = values.mean()
+    std = values.std(unbiased=False)
+    return (values - mean) / (std + 1e-8)
+
+
+def _split_video_frames(data: DataProto, *, permute_to_tchw: bool) -> List[torch.Tensor]:
+    batch_size = data.batch.batch_size[0]
+    decoded = data.batch["video_frames"]
+    frames = [x.squeeze(0) for x in decoded.chunk(batch_size, dim=0)]
+    if permute_to_tchw:
+        frames = [x.permute(1, 0, 2, 3) for x in frames]
+    return frames
+
+
+def _split_captions(caption, batch_size: int) -> List[str]:
+    batch_caption = np.array_split(caption, batch_size)
+    return [str(x.squeeze(0)) for x in batch_caption]
+
+
+def _make_reward_batch(key: str, rewards: torch.Tensor, batch_size: int) -> DataProto:
+    batch = TensorDict({key: rewards}, batch_size=batch_size)
+    return DataProto(batch=batch)
+
+
             
 class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
     """
@@ -150,12 +175,13 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             self.rollout, self.rollout_sharding_manager = self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
 
         # fhd compile vae
-        self.rollout.vae_module.model.decoder = torch.compile(
-            self.rollout.vae_module.model.decoder, 
-            mode="max-autotune-no-cudagraphs", 
-            # fullgraph=True, 
-            # dynamic=True if self.is_hip() else None
-        )
+        if self._is_rollout and hasattr(self.rollout, "vae_module"):
+            self.rollout.vae_module.model.decoder = torch.compile(
+                self.rollout.vae_module.model.decoder, 
+                mode="max-autotune-no-cudagraphs", 
+                # fullgraph=True, 
+                # dynamic=True if self.is_hip() else None
+            )
         
         if self._is_ref:
             local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
@@ -532,8 +558,6 @@ class QwenRewardModelWorker(RewardModelWorker):
             import numpy as np
             # batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
             batch_ids = np.array_split(video_ids, datas.batch.batch_size[0])
-            # batch_paths = [list(x) for x in  batch_paths]
-            video_ids = [list(x) for x in video_ids]
             
             all_rewards = []  
             # 每个batch_path是一批video_paths的列表
@@ -663,9 +687,7 @@ class DiffusionRewardModelWorker(RewardModelWorker):
         decoded_images = decoded_image.chunk(data.batch.batch_size[0], dim=0)
         decoded_images = [x.squeeze(0) for x in decoded_images]
         caption=data.non_tensor_batch['caption']
-        import numpy as np
-        batch_caption = np.array_split(caption, data.batch.batch_size[0])
-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
+        batch_caption = _split_captions(caption, data.batch.batch_size[0])
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         all_rewards = []  
         self.reward_module.to(device=get_device_id())
@@ -839,35 +861,14 @@ class AestheticRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.aes_dp
             print(f"[RANK {self.rank}] AestheticWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            batch = TensorDict(
-                {
-                    "aes_rewards": dummy_rewards,
-                },
-                batch_size = empty_bs
-            )
-            return DataProto(batch=batch)
+            return _make_reward_batch("aes_rewards", dummy_rewards, empty_bs)
         
         datas = _split_batch(datas, self.aes_dp, self.rank % self.aes_dp)
         print(f"[RANK {self.rank}] AestheticWorker processing batch size: {datas.batch.batch_size[0]}")
-        # (B, C, H, W)
-        decoded_image = datas.batch['video_frames']
-        # List of [(1, C, H, W),...,...]
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        # List of [(C, H, W),...,...]
-        decoded_images = [x.squeeze(0) for x in decoded_images]
-        
-        # (B, C, Frame, H, W)
-        decoded_image = datas.batch['video_frames']
-        # List of [(1, C, Frame, H, W),...,...]
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        # List of [(C, Frame, H, W),...,...]
-        decoded_images = [x.squeeze(0) for x in decoded_images]
-        # List of [(Frame, C, H, W),...,...]
-        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
+        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
         caption = datas.non_tensor_batch['caption']       
 
-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
+        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         
         transform = clip_transform(224)
@@ -891,10 +892,7 @@ class AestheticRewardModelWorker(RewardModelWorker):
             
         all_rewards = torch.cat(all_rewards, dim=0)
         
-        # Z-score标准化
-        mean = all_rewards.mean()
-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0        
+        all_rewards = _zscore_tensor(all_rewards)
         
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
@@ -1011,38 +1009,16 @@ class RAFTRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.raft_dp
             print(f"[RANK {self.rank}] RAFTWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            batch = TensorDict(
-                {
-                    "raft_rewards": dummy_rewards,
-                },
-                batch_size = empty_bs
-            )
-            return DataProto(batch=batch)
+            return _make_reward_batch("raft_rewards", dummy_rewards, empty_bs)
         datas = _split_batch(datas, self.raft_dp, self.rank % self.raft_dp)
         print(f"[RANK {self.rank}] RAFTWorker processing batch size: {datas.batch.batch_size[0]}")
-        # (B, C, H, W)
-        decoded_image = datas.batch['video_frames']
-        # List of [(1, C, H, W),...,...]
-        batch_size = len(decoded_image)
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        # List of [(C, H, W),...,...]
-        # decoded_images = [x.squeeze(0) for x in decoded_images]
-
-        # (B, C, Frame, H, W)
-        decoded_image = datas.batch['video_frames']
-        # List of [(1, C, Frame, H, W),...,...]
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        # List of [(C, Frame, H, W),...,...]
-        decoded_images = [x.squeeze(0) for x in decoded_images]
-        # List of [(Frame, C, H, W),...,...]
-        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
+        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
         
         caption = datas.non_tensor_batch['caption']       
-        
-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
+
+        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
-        
+
         self.raft_model.to(get_device_id())
         print(f"raft batch size: {len(batch_caption)}")
         all_rewards = []
@@ -1056,10 +1032,7 @@ class RAFTRewardModelWorker(RewardModelWorker):
             all_rewards.append(torch.tensor(flow_score, device=get_device_id()).unsqueeze(0))
             
         all_rewards = torch.cat(all_rewards, dim=0)
-        # Z-score标准化
-        mean = all_rewards.mean()
-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0   
+        all_rewards = _zscore_tensor(all_rewards)
                 
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
@@ -1160,29 +1133,18 @@ class VideoclipRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.videoclip_dp
             print(f"[RANK {self.rank}] VideoclipWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            batch = TensorDict(
-                {
-                    "videoclip_rewards": dummy_rewards,
-                },
-                batch_size = empty_bs
-            )
-            return DataProto(batch=batch)
+            return _make_reward_batch("videoclip_rewards", dummy_rewards, empty_bs)
         
         datas = _split_batch(datas, self.videoclip_dp, self.rank % self.videoclip_dp)
         print(f"[RANK {self.rank}] VideoclipWorker processing batch size: {datas.batch.batch_size[0]}")
         # (B, C, Frame, H, W)
-        decoded_image = datas.batch['video_frames']
-        # List of [(1, C, Frame, H, W),...,...]
         if datas.batch.batch_size[0]==0:
             print(torch.get.dis)
-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
-        # List of [(C, Frame, H, W),...,...]
-        decoded_images = [x.squeeze(0) for x in decoded_images]
+        decoded_images = _split_video_frames(datas, permute_to_tchw=False)
 
         caption = datas.non_tensor_batch['caption']       
 
-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
+        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
 
         from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
@@ -1207,10 +1169,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         
         all_rewards = torch.cat(all_rewards, dim=0)
         
-        # Z-score标准化
-        mean = all_rewards.mean()
-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0           
+        all_rewards = _zscore_tensor(all_rewards)
         
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
