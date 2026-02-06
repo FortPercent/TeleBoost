@@ -55,7 +55,7 @@ actor_rollout_ref:
   flow_grpo:
     enable: false
     sde_window_size: 2
-    sde_window_range: [0, ${actor_rollout_ref.sampling_steps}]
+    sde_window_range: [0, "${actor_rollout_ref.sampling_steps}"]
     shuffle_timesteps: false
   # if standard flow-grpo
   # flow_grpo:
