@@ -19,12 +19,14 @@ actor_rollout_ref:
   model:
     vae_model_path: data/flux
     data_json_path: data/rl_embeddings/videos2caption.json
+  
   actor:
     timestep_fraction: 0.6
     clip_range: 1e-4
     adv_clip_max: 5.0
     eta: 0.3
     max_grad_norm: 1.0
+    
     grpo_guard:
       enable: false
       ratio_norm: true
@@ -32,8 +34,10 @@ actor_rollout_ref:
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6
       grad_reweight_alpha: 1.0
+  
   rollout:
     ulysses_sequence_parallel_size: 1.0
+  
   video_fps: 25
   guide_scale: 5.0
   cfg: 0.0
@@ -47,12 +51,16 @@ actor_rollout_ref:
   timestep_fraction: 0.6
   init_same_noise: True
 
+  # if fast flow-grpo
   flow_grpo:
     enable: false
-    sde_window_size: 0
+    sde_window_size: 2
     sde_window_range: [0, ${actor_rollout_ref.sampling_steps}]
-    shuffle_timesteps: true
-
+    shuffle_timesteps: false
+  # if standard flow-grpo
+  # flow_grpo:
+  #   enable: true
+  #   sde_window_size: 0
 
 reward_model:
   enable: True
