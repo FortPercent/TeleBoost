@@ -29,7 +29,7 @@ actor_rollout_ref:
     
     grpo_guard:
       enable: false
-      ratio_norm: true
+      ratio_norm: false
       grad_reweight: false
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6
