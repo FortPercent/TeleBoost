@@ -207,10 +207,12 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     adv_clip_max,
                 )
 
+                # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
                 old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
-                #  尝试修复
-                gen_len = old_log_probs.shape[1]
-                new_log_probs = new_log_probs[..., -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
+
+                # 2. 拿到当前这一步的 new_log_prob (形状: Batch)
+                current_step = -train_timesteps + step_idx
+                new_log_probs = new_log_probs[..., current_step]
 
                 if ratio_norm:
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
