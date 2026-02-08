@@ -327,21 +327,26 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         """
         Create a joint reward runner if configured.
         
-        Supports two modes:
-        1. Legacy mode: Uses fixed 4 workers (aes, raft, videoclip, videophy)
-        2. Dynamic mode: Uses DynamicJointRewardRunner with config-driven models
+        Note: In the new unified architecture, JointRewardModelWorker handles
+        all the reward model management internally. This method returns None
+        because the trainer should just call self.rm_wg.compute_rm_score()
+        which will handle everything (including aggregation).
+        
+        For DynamicJointRewardRunner (driver-side computation), we still support
+        it but it's deprecated in favor of letting workers handle it.
         
         Returns:
-            A reward runner instance, or None if not using joint rewards
+            None - joint mode is now handled by JointRewardModelWorker via rm_wg
         """
         if not self.use_rm or self.config.reward_model.type != "joint":
             return None
         
-        # Check if using dynamic joint configuration
+        # Check if using dynamic joint configuration with driver-side runner
         joint_config = self.config.reward_model.get("joint", None)
+        use_driver_side_runner = joint_config.get("driver_side_runner", False) if joint_config else False
         
-        if joint_config and joint_config.get("models"):
-            # Use new dynamic joint reward runner
+        if use_driver_side_runner and joint_config and joint_config.get("models"):
+            # Use new dynamic joint reward runner (driver-side computation)
             from .reward_models.dynamic_joint import (
                 DynamicJointRewardRunner,
                 JointRewardConfig
@@ -361,15 +366,13 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             )
             return runner
         
-        # Legacy mode: use fixed 4 workers
-        logger.info("Using legacy joint reward runner with fixed workers")
-        workers = {
-            "aes": self.aes_rm_wg,
-            "raft": self.raft_rm_wg,
-            "videoclip": self.videoclip_rm_wg,
-            "videophy": self.videophy_rm_wg,
-        }
-        return _JointRewardRunner(workers)
+        # Default: Return None - joint mode is handled by JointRewardModelWorker
+        # which is accessed via self.rm_wg.compute_rm_score()
+        logger.info(
+            "Joint reward mode: using JointRewardModelWorker via rm_wg "
+            "(worker-side aggregation)"
+        )
+        return None
 
     def _build_gen_batch(self, new_batch: DataProto) -> DataProto:
         # trainer的类型是diffusion
@@ -461,16 +464,145 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         if self.use_rm:
             print("begin to compute reward")
             with torch.amp.autocast("cuda"):
+                # If using driver-side joint reward runner (deprecated)
                 if joint_reward_runner is not None:
                     return self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
+                
+                # Joint mode: parallel computation using multiple worker groups
+                if self.config.reward_model.type == "joint":
+                    return self._compute_joint_parallel_reward(gen_batch_output, metrics)
+                
+                # Single/Qwen mode: use single rm_wg
                 if self.config.reward_model.type in ("qwen", "single"):
                     return self._compute_single_rm_reward(gen_batch_output, metrics)
+                    
                 raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
 
         reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
         gen_batch_output = gen_batch_output.union(reward_tensor)
         gen_batch_output.pop(batch_keys=["video_frames"])
         return gen_batch_output
+    
+    def _compute_joint_parallel_reward(self, gen_batch_output: DataProto, metrics: dict) -> DataProto:
+        """
+        Compute joint rewards using multiple worker groups in parallel.
+        
+        Each reward model has its own worker group. We use Python threading
+        to call them in parallel and aggregate the results.
+        """
+        import threading
+        import time
+        from tensordict import TensorDict
+        
+        start_time = time.time()
+        
+        # Get model weights from config
+        joint_cfg = self.config.reward_model.get("joint", {})
+        models_cfg = joint_cfg.get("models", {})
+        if isinstance(models_cfg, (list, tuple)):
+            weights = {m.get("name"): m.get("weight", 1.0) for m in models_cfg if m.get("name")}
+        else:
+            weights = {k: v.get("weight", 1.0) for k, v in models_cfg.items()}
+        
+        # Threading infrastructure
+        reward_results = {}
+        thread_inputs = {}
+        ready_events = {}
+        done_events = {}
+        
+        def thread_loop(name, worker_group):
+            while True:
+                ready_events[name].wait()
+                ready_events[name].clear()
+                try:
+                    reward_results[name] = worker_group.compute_rm_score(thread_inputs[name])
+                except Exception as e:
+                    logger.error(f"Error computing {name} reward: {e}")
+                    reward_results[name] = None
+                done_events[name].set()
+        
+        # Start threads for each reward model worker group
+        threads = []
+        for name, wg in self.reward_model_wgs.items():
+            reward_results[name] = None
+            thread_inputs[name] = None
+            ready_events[name] = threading.Event()
+            done_events[name] = threading.Event()
+            t = threading.Thread(target=thread_loop, args=(name, wg), daemon=True)
+            t.start()
+            threads.append(t)
+        
+        # Prepare input for all workers
+        reward_input = gen_batch_output.select(
+            batch_keys=['video_frames'],
+            non_tensor_batch_keys=['caption'],
+        )
+        
+        # Dispatch to all workers
+        for name in self.reward_model_wgs:
+            thread_inputs[name] = reward_input
+            done_events[name].clear()
+            ready_events[name].set()
+        
+        # Wait for all to complete
+        for name in self.reward_model_wgs:
+            done_events[name].wait()
+        
+        # Collect and merge results
+        batch_with_rewards = gen_batch_output
+        combined_reward = None
+        
+        for name, result in reward_results.items():
+            if result is None:
+                logger.warning(f"No result from {name} reward model")
+                continue
+            
+            # Find the reward tensor using model-specific key
+            reward_key = f"{name}_rewards"
+            rewards = None
+            
+            if reward_key in result.batch.keys():
+                rewards = result.batch[reward_key]
+            else:
+                # Try to find any key containing 'reward'
+                for key in result.batch.keys():
+                    if 'reward' in key.lower():
+                        rewards = result.batch[key]
+                        break
+            
+            if rewards is None:
+                logger.warning(f"No reward key found in {name} result, keys: {list(result.batch.keys())}")
+                continue
+            
+            # Add to batch with model-specific name
+            batch_with_rewards.batch[reward_key] = rewards
+            
+            # Add to combined reward
+            weight = weights.get(name, 1.0)
+            weighted_reward = rewards * weight
+            if combined_reward is None:
+                combined_reward = weighted_reward
+            else:
+                combined_reward = combined_reward + weighted_reward
+            
+            # Log individual metrics
+            metrics[f"train/rewards_{name}"] = rewards.mean().item()
+        
+        if combined_reward is None:
+            raise RuntimeError("No valid rewards computed from any model")
+        
+        # Add aggregated reward directly to batch
+        batch_with_rewards.batch["rewards"] = combined_reward
+        
+        # Log overall metrics
+        metrics["train/rewards"] = combined_reward.mean().item()
+        if "log_probs" in batch_with_rewards.batch.keys():
+            metrics["train/log_probs"] = batch_with_rewards.batch["log_probs"].mean().item()
+        
+        elapsed = time.time() - start_time
+        logger.info(f"Joint parallel reward computation took {elapsed:.2f}s")
+        
+        return batch_with_rewards
 
     def _compute_joint_reward(
         self, 
