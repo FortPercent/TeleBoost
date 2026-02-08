@@ -49,6 +49,8 @@ def preprocess_text_data(args):
         # 如果是tensor，直接转换为numpy
         context_null = context_null.cpu().numpy()
     # 保存为npy文件
+
+    os.makedirs(args.output_dir, exist_ok=True)
     npy_null_filename = f"context_null.npy"
     npy_null_path = os.path.join(args.output_dir, npy_null_filename)
             

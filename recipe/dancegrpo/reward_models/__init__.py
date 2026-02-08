@@ -21,7 +21,6 @@ from . import raft
 from . import videoclip
 from . import videophy
 from . import hps
-from . import qwen
 
 __all__ = [
     "RewardRegistry",
