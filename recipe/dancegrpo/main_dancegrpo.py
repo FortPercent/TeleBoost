@@ -195,11 +195,9 @@ def _register_reward_workers(
     """
     Register reward model workers based on configuration.
     
-    This function handles the registration of different reward model types:
-    - qwen: Single Qwen VL model
-    - single: Single diffusion-based reward
-    - joint: Multiple specialized reward models
-
+    For diffusion strategy, all reward model types (single, joint, etc.) 
+    are handled by the UnifiedRewardModelWorker, which dynamically loads
+    models from the RewardRegistry based on model_name configuration.
     
     Args:
         config: Configuration with reward_model settings
@@ -229,29 +227,26 @@ def _register_reward_workers(
         register_role(Role.RewardModel, RewardModelWorker)
         
     elif strategy == "diffusion":
-        if rm_type == "qwen":
+        # Special case: Qwen needs vLLM-based worker for distributed inference
+        model_name = config.reward_model.get("model_name", rm_type)
+        
+        if model_name == "qwen" or rm_type == "qwen":
             from .dancegrpo_fsdp_worker import QwenRewardModelWorker
             register_role(Role.RewardModel, QwenRewardModelWorker)
-            
-        elif rm_type == "single":
-            from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker
-            register_role(Role.RewardModel, DiffusionRewardModelWorker)
+            logger.info("Using QwenRewardModelWorker for vLLM-based inference")
             
         elif rm_type == "joint":
-            from .dancegrpo_fsdp_worker import (
-                AestheticRewardModelWorker,
-                RAFTRewardModelWorker,
-                VideoclipRewardModelWorker,
-                VideophyRewardModelWorker,
-            )
-            register_role(Role.AestheticRewardModel, AestheticRewardModelWorker)
-            register_role(Role.RAFTRewardModel, RAFTRewardModelWorker)
-            register_role(Role.VideoclipRewardModel, VideoclipRewardModelWorker)
-            register_role(Role.VideophyRewardModel, VideophyRewardModelWorker)
+            # Joint mode: uses ALL_TO_ALL dispatch, models handle their own DP splitting
+            from .unified_reward_worker import JointRewardModelWorker
+            register_role(Role.RewardModel, JointRewardModelWorker)
+            logger.info("Using JointRewardModelWorker for joint mode")
             
-
         else:
-            raise NotImplementedError(f"Unknown reward model type: {rm_type}")
+            # Single mode: uses DP_COMPUTE_PROTO, data pre-split by framework
+            from .unified_reward_worker import UnifiedRewardModelWorker
+            register_role(Role.RewardModel, UnifiedRewardModelWorker)
+            logger.info(f"Using UnifiedRewardModelWorker for single mode (type='{rm_type}')")
+            
     else:
         raise NotImplementedError(f"Unknown reward model strategy: {strategy}")
 

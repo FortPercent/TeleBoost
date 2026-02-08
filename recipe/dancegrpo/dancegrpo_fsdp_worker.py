@@ -245,25 +245,50 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
  
 class QwenRewardModelWorker(RewardModelWorker):
     """
-        Note that we only implement the reward model that is subclass of AutoModelForTokenClassification.
-        Use vllm based Qwen model as the reward model.
+    Qwen VLM-based Reward Model Worker.
+    
+    Uses vLLM for distributed inference with Qwen VL model to evaluate
+    video quality through structured prompts.
+    
+    Configuration options (in reward_model config):
+        - rollout.temperature: Sampling temperature (default: 0.8)
+        - rollout.top_p: Top-p sampling (default: 0.9)
+        - rollout.max_tokens: Maximum output tokens (default: 128)
+        - extra_config.max_pixels: Max pixels for video (default: 360*420)
+        - extra_config.fps: Frames per second (default: 1.0)
+        - extra_config.video_base_path: Base path for video files (optional)
     """
+    
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
-        """
-            initialize the reward model and sampling_params
-        """
-        # This is used to import external_lib into the huggingface systems
-        # import_external_libs(self.config.model.get("external_lib", None))
-        self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
-        from vllm import SamplingParams
-        self.sampling_params = SamplingParams(temperature=0.8, top_p=0.90, max_tokens = 128)
-        print(f"成功初始化Qwen模型...")
-        print("="*40)
-        # exit(0)
-        # TODO
-        # self.image_processor = VaeImageProcessor(16)
-        return
+        """Initialize the Qwen reward model and sampling parameters."""
+        try:
+            self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
+            
+            # Get sampling params from config with defaults
+            from vllm import SamplingParams
+            temperature = self.config.rollout.get("temperature", 0.8)
+            top_p = self.config.rollout.get("top_p", 0.9)
+            max_tokens = self.config.rollout.get("max_tokens", 128)
+            
+            self.sampling_params = SamplingParams(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens
+            )
+            
+            # Get extra config for video processing
+            extra_config = self.config.get("extra_config", {})
+            self.max_pixels = extra_config.get("max_pixels", 360 * 420)
+            self.fps = extra_config.get("fps", 1.0)
+            self.video_base_path = extra_config.get("video_base_path", "")
+            
+            logger.info(f"Qwen reward model initialized successfully")
+            logger.info(f"Sampling params: temp={temperature}, top_p={top_p}, max_tokens={max_tokens}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Qwen reward model: {e}")
+            raise
 
     def _build_reward_rollout(self, trust_remote_code=False):
         device_name = get_device_name()
@@ -366,46 +391,49 @@ class QwenRewardModelWorker(RewardModelWorker):
                 请严格按照输出格式要求，输出且只输出输出格式的内容。请依照以上标准、逻辑和格式，对视频进行结构化质量评估。
                 """
         
-    def _generate_chat_batch_prompts(self, batch_path, max_pixels = 360*420, fps = 1.0) -> List:
+    def _generate_chat_batch_prompts(self, batch_path, max_pixels=None, fps=None) -> List:
         """
-        generate prompts for a batch of paths.
+        Generate prompts for a batch of video paths.
+        
         Args:
-            - batch_path: a List[str] item that consists all the paths of videos in the batch.
-            - max_pixels: default to 360*420, int
-            - fps: default to 1.0, float
+            batch_path: List of video file paths
+            max_pixels: Max pixels for video processing (uses self.max_pixels if None)
+            fps: Frames per second (uses self.fps if None)
+            
         Returns:
-            - A List[List[Dict[str,Any]]] item that each element is a List satisfying the conversation format of llm.chat method.
+            List of message dicts for LLM chat
         """
-        messages=[]
+        max_pixels = max_pixels or getattr(self, 'max_pixels', 360 * 420)
+        fps = fps or getattr(self, 'fps', 1.0)
+        
+        messages = []
         prompt = self._create_simple_prompt()
-        total_time=0
-        logger.info(f"Starting generating batch of prompts ...")
-        VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
+        
         for file_path in batch_path:
-            # if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
-                start_time=time.time()
-                video_path = str(file_path).replace("./", "/gemini/space/ljm/Dancegrpo/")
-                # print(f"视频地址是file://{video_path}")
-                message = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "video_url",
-                                "video_url": {"url":f"file://{video_path}"},
-                                "max_pixels": max_pixels,
-                                "fps": fps,
-                            },
-                            {
-                                "type": "text", 
-                                "text": prompt
-                            },
-                        ],
-                    }
-                ]
-                messages.append(message)
-                processing_time=time.time()-start_time
-                total_time+=processing_time
+            # Use configurable base path instead of hardcoded value
+            video_path = str(file_path)
+            if hasattr(self, 'video_base_path') and self.video_base_path:
+                video_path = video_path.replace("./", self.video_base_path)
+            
+            message = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": f"file://{video_path}"},
+                            "max_pixels": max_pixels,
+                            "fps": fps,
+                        },
+                        {
+                            "type": "text", 
+                            "text": prompt
+                        },
+                    ],
+                }
+            ]
+            messages.append(message)
+        
         return messages
     
     def _generate_batch_prompts(self,batch_id) -> List:
@@ -507,102 +535,77 @@ class QwenRewardModelWorker(RewardModelWorker):
             
         return result 
     
-    def _get_batch_reward(self,batch_output: List) -> List:
+    def _get_batch_reward(self, batch_output: List) -> List:
         """
-        extract rewards from a batch of output. Using self._parse_simple_evaluation method
+        Extract rewards from batch output using _parse_simple_evaluation.
+        
         Args:
-            - batch_output: the batch of output in the form of list and need to be extract rewards.
+            batch_output: List of model outputs to parse
+            
         Returns:
-            - A list that includes all the rewards of the batch_output.
+            List of overall scores
         """
         results = []
         for single_prompt_output in batch_output:
             for response in single_prompt_output:
                 output = response.outputs[0]
                 output_text = output.text
-                logger.info(f"Generated text length: {len(output_text)}")
-                logger.info(f"Generated text preview: {output_text[:200]}...")
+                logger.debug(f"Generated text length: {len(output_text)}")
+                logger.debug(f"Generated text preview: {output_text[:200]}...")
                 
-                # 解析结果
                 result = self._parse_simple_evaluation(output_text)
-                overall_score = result.get("overall_score", "N/A")
-                # processing_time = result.get("processing_time", 0)
-        
-                print(f"🎯 综合质量分数: {overall_score}/100")
-                # print(f"⏱️ 处理时间: {processing_time:.2f} 秒")
-                results.append(overall_score)  #仅保留overallscore
+                overall_score = result.get("overall_score", 50.0)
+                
+                logger.info(f"Quality score: {overall_score}/100")
+                results.append(overall_score)
         return results
 
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, datas: DataProto):
-        # from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
-        # datas = data.pop(
-        #         # batch_keys=['video_frames'],
-        #         non_tensor_batch_keys=["caption","video_ids"],
-        #     )
-            
+        """Compute reward scores using Qwen VLM."""
+        import time
+        start_time = time.time()
+        
         datas = datas.to(get_device_id())
-        #TODO
+        
         with self.reward_rollout_sharding_manager:
-            # Support all hardwares
+            datas = self.reward_rollout_sharding_manager.preprocess_data(datas)
             
-            datas= self.reward_rollout_sharding_manager.preprocess_data(datas)
-            
-            
-            print("开始用llm计算得分：")
-            # video_paths = datas.non_tensor_batch['video_paths']
-            video_ids = datas.non_tensor_batch['video_ids']  # ids_batch
+            logger.info("Starting Qwen reward computation...")
+            video_ids = datas.non_tensor_batch['video_ids']
             
             import numpy as np
-            # batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
             batch_ids = np.array_split(video_ids, datas.batch.batch_size[0])
             
-            all_rewards = []  
-            # 每个batch_path是一批video_paths的列表
-            # batch_paths是很多批路径列表构成的列表
-            # log_gpu_memory_usage("After entering reward rollout sharding manager", logger=logger)
+            all_rewards = []
             for batch_id in batch_ids:
-                batch_message = self._generate_batch_prompts(batch_id) # 构建输入的prompt和对应的video_path
+                batch_message = self._generate_batch_prompts(batch_id)
                 batch_output = []
+                
                 for message in batch_message:
-                    # Qwen根据输入的prompt和视频生成对应的输出
-                    output = self.reward_rollout.inference_engine.generate(message,
-                                                                           sampling_params = self.sampling_params)
-                    # with open('/gemini/space/ljm/Dancegrpo/videos/output.txt', 'a', encoding='utf-8') as f:
-                    #     f.write(f"rank {dist.get_rank()} \n output内容是{output[0].outputs}\n\n")
-               
-            # for batch_path in batch_paths:
-            #     batch_message=self._generate_chat_batch_prompts(batch_path)
-            #     batch_output = []
-            #     for message in batch_message:
-            #         output = self.reward_rollout.inference_engine.chat(message, 
-            #                                                            sampling_params = self.sampling_params)
-                    
+                    output = self.reward_rollout.inference_engine.generate(
+                        message,
+                        sampling_params=self.sampling_params
+                    )
                     batch_output.append(output)
                     
                 batch_reward = self._get_batch_reward(batch_output)
-                
                 all_rewards += batch_reward
-                # print(type(all_rewards[0]),all_rewards[0])
-                # print("\n")
         
             all_rewards = torch.tensor(all_rewards)
             batch = TensorDict(
-                {
-                    "rewards": all_rewards,
-                },
-                batch_size = datas.batch.batch_size[0]
+                {"rewards": all_rewards},
+                batch_size=datas.batch.batch_size[0]
             )
             
-            non_tensor_batch = datas.non_tensor_batch
-            batch_reward = DataProto(batch=batch, non_tensor_batch = non_tensor_batch)
+            batch_reward = DataProto(batch=batch, non_tensor_batch=datas.non_tensor_batch)
             batch_reward = self.reward_rollout_sharding_manager.postprocess_data(batch_reward)
-            
-            # with open('/gemini/space/ljm/Dancegrpo/videos/my_file.txt', 'a', encoding='utf-8') as f:
-            #     f.write(f"rank {dist.get_rank()} \n batch['rewards'],内容是{batch_reward.batch['rewards']}\n\n")
-                
+        
+        elapsed = time.time() - start_time
+        logger.info(f"Qwen reward computation completed in {elapsed:.2f}s")
+        
         return batch_reward
         
     
