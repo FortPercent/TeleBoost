@@ -405,13 +405,16 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             )
             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
             reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
-            gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids"])
+        
         else:  # "single"
             reward_input = gen_batch_output.select(
                 batch_keys=["video_frames"],
                 non_tensor_batch_keys=["caption"],
             )
             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+
+        gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids", "video_frames"])  # reward计算完就可以丢掉大tensor了
+        # 清理原 batch（移除大 tensor）
 
         self._debug_proto_batch("gen_batch_output", gen_batch_output)
         self._debug_proto_batch("reward_tensor", reward_tensor)
