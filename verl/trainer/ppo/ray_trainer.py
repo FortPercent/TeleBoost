@@ -853,27 +853,51 @@ class RayPPOTrainer:
             #         all_wg.update(spawn_wg)
         
         # --- Step 1: 构建 resource_pool_to_cls 映射 ---
+        # Note: For joint mode, reward model workers are created separately (not colocated)
+        # because they use different base classes than FSDP workers
+        joint_rm_configs = {}  # Store configs for joint mode reward models
+        
         if self.use_rm:
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
+            
             if self.config.reward_model.type == "joint":
-                resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
-                # 注册多个 reward model 子类
-                print(self.role_worker_mapping[Role.AestheticRewardModel])
-                self.resource_pool_to_cls[resource_pool]["aes_rm"] = RayClassWithInitArgs(
-                    self.role_worker_mapping[Role.AestheticRewardModel], config=self.config.reward_model
-                )
-                self.resource_pool_to_cls[resource_pool]["raft_rm"] = RayClassWithInitArgs(
-                    self.role_worker_mapping[Role.RAFTRewardModel], config=self.config.reward_model
-                )
-                self.resource_pool_to_cls[resource_pool]["videoclip_rm"] = RayClassWithInitArgs(
-                    self.role_worker_mapping[Role.VideoclipRewardModel], config=self.config.reward_model
-                )
-                self.resource_pool_to_cls[resource_pool]["videophy_rm"] = RayClassWithInitArgs(
-                    self.role_worker_mapping[Role.VideophyRewardModel], config=self.config.reward_model
-                )
+                # Joint mode: Store configs for later, create workers separately
+                from recipe.dancegrpo.unified_reward_worker import UnifiedRewardModelWorker
+                
+                joint_cfg = self.config.reward_model.get("joint", {})
+                models_cfg = joint_cfg.get("models", {})
+                
+                if isinstance(models_cfg, (list, tuple)):
+                    model_items = [(m.get("name"), m) for m in models_cfg if m.get("name")]
+                else:
+                    model_items = list(OmegaConf.to_container(models_cfg, resolve=True).items())
+                
+                for model_name, model_cfg in model_items:
+                    if not model_cfg.get("enabled", True):
+                        continue
+                    
+                    # Create a config for this specific model (single mode)
+                    model_config = OmegaConf.create({
+                        "type": "single",
+                        "model_name": model_name,
+                        "model_path": model_cfg.get("model_path", ""),
+                        "normalize": model_cfg.get("normalize", True),
+                        "extra_config": model_cfg.get("extra_config", {}),
+                    })
+                    
+                    joint_rm_configs[model_name] = {
+                        "config": model_config,
+                        "mps_percentage": model_cfg.get("mps_percentage", 0),
+                        "worker_cls": UnifiedRewardModelWorker,
+                        "resource_pool": resource_pool,
+                    }
+                    print(f"[JointRM] Prepared config for {model_name}_rm with MPS={model_cfg.get('mps_percentage', 0)}%")
             else:
-                # 单一 RM for qwen/single
-                resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
-                rm_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RewardModel], config=self.config.reward_model)
+                # Single mode: use unified rm_wg (colocated)
+                rm_cls = RayClassWithInitArgs(
+                    self.role_worker_mapping[Role.RewardModel], 
+                    config=self.config.reward_model
+                )
                 self.resource_pool_to_cls[resource_pool]["rm"] = rm_cls
 
         # --- Step 2: 统一初始化 all_wg 和 wg_kwargs ---
@@ -887,48 +911,19 @@ class RayPPOTrainer:
                 "worker_nsight_options must be set when profile_steps is set"
             wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(self.config.trainer.worker_nsight_options)
 
-        # --- Step 3: 根据模式决定如何创建 WorkerGroup ---
-        if self.use_rm and self.config.reward_model.type == "joint":
-            # ✅ Joint 模式：每个 RM 独立 WorkerGroup，支持不同 resource allocation 和 env vars
-            worker_percentages = {
-                "aes_rm": "50",
-                "raft_rm": "50",
-                "videoclip_rm": "75",
-                "videophy_rm": "25",
-            }
-
-            for resource_pool, class_dict in self.resource_pool_to_cls.items():
-                for worker_name, worker_cls in class_dict.items():
-                    # 设置 MPS 百分比（仅 joint RM）
-                    percentage = worker_percentages.get(worker_name, "100")
-                    worker_cls.update_runtime_env_vars({
-                        "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE": percentage
-                    })
-                    
-                    wg = self.ray_worker_group_cls(
-                        resource_pool=resource_pool,
-                        ray_cls_with_init=worker_cls,
-                        device_name=self.device_name,
-                        **wg_kwargs
-                    )
-                    
-                    spawn_wg = wg.spawn(prefix_set={worker_name})
-                    all_wg.update(spawn_wg)
-
-        else:
-            # ✅ 非 joint 模式（包括 use_rm=False）：使用 colocated 合并所有角色
-            for resource_pool, class_dict in self.resource_pool_to_cls.items():
-                if not class_dict:
-                    continue
-                worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
-                wg_dict = self.ray_worker_group_cls(
-                    resource_pool=resource_pool,
-                    ray_cls_with_init=worker_dict_cls,
-                    device_name=self.device_name,
-                    **wg_kwargs
-                )
-                spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
-                all_wg.update(spawn_wg)
+        # --- Step 3: 统一创建 WorkerGroup (colocated 模式) ---
+        for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            if not class_dict:
+                continue
+            worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
+            wg_dict = self.ray_worker_group_cls(
+                resource_pool=resource_pool,
+                ray_cls_with_init=worker_dict_cls,
+                device_name=self.device_name,
+                **wg_kwargs
+            )
+            spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
+            all_wg.update(spawn_wg)
 
         if self.use_critic:
             self.critic_wg = all_wg["critic"]
@@ -939,22 +934,41 @@ class RayPPOTrainer:
             self.ref_policy_wg.init_model()
         
         if self.use_rm:
-            if self.config.reward_model.type=="joint":
-                self.aes_rm_wg = all_wg.get("aes_rm")
-                self.raft_rm_wg = all_wg.get("raft_rm")
-                self.videoclip_rm_wg = all_wg.get("videoclip_rm")
-                self.videophy_rm_wg = all_wg.get("videophy_rm")
-                # self.multi_rm_wg = all_wg.get("multi_rm")
-                self.aes_rm_wg.init_model() 
-                self.raft_rm_wg.init_model()
-                self.videoclip_rm_wg.init_model()
-                self.videophy_rm_wg.init_model()
+            if self.config.reward_model.type == "joint":
+                # Joint mode: Create separate worker groups for each reward model
+                # These are NOT colocated because they use a different base class
+                self.reward_model_wgs = {}
+                
+                for model_name, rm_info in joint_rm_configs.items():
+                    # Wrap with ray.remote
+                    rm_worker_cls = ray.remote(rm_info["worker_cls"])
+                    rm_cls = RayClassWithInitArgs(rm_worker_cls, config=rm_info["config"])
+                    
+                    # Apply MPS percentage if configured
+                    mps_percentage = rm_info["mps_percentage"]
+                    if mps_percentage > 0:
+                        rm_cls.update_runtime_env_vars({
+                            "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE": str(mps_percentage)
+                        })
+                    
+                    # Create worker group for this reward model
+                    wg = self.ray_worker_group_cls(
+                        resource_pool=rm_info["resource_pool"],
+                        ray_cls_with_init=rm_cls,
+                        device_name=self.device_name,
+                        **wg_kwargs
+                    )
+                    
+                    self.reward_model_wgs[model_name] = wg
+                    wg.init_model()
+                    print(f"[JointRM] Initialized reward model worker group: {model_name}")
+                
+                # For backward compatibility, set rm_wg to None in joint mode
+                self.rm_wg = None
             else:
+                # Single mode: use unified rm_wg
                 self.rm_wg = all_wg["rm"]
                 self.rm_wg.init_model()
-                
-            
-                # self.multi_rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg["actor_rollout"]
