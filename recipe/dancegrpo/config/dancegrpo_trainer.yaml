@@ -50,6 +50,15 @@ actor_rollout_ref:
   shift: 8.0
   timestep_fraction: 0.6
   init_same_noise: True
+  
+  # Tokenizer path (relative to model path)
+  tokenizer_path: google/umt5-xxl
+  
+  # VAE configuration
+  # vae_stride: Spatial/temporal compression ratio [temporal, height, width]
+  vae_stride: [4, 8, 8]
+  # latent_channels: Number of channels in VAE latent space
+  latent_channels: 16
 
   # if fast flow-grpo
   flow_grpo:
@@ -64,18 +73,144 @@ actor_rollout_ref:
 
 reward_model:
   enable: True
+  micro_batch_size_per_gpu: 1
   
   strategy: diffusion
 
-  type: qwen # qwen/single/joint
+  # Reward model type options:
+  # - single: Use a single model specified by model_name (recommended)
+  # - joint: Use multiple reward models from 'joint.models' list
+  # - qwen: Legacy alias for single mode with qwen model
+  type: single
+
+  # Model name for single mode (must be registered in RewardRegistry)
+  # Available: aesthetic, hps, raft, videoclip, videophy, qwen
+  model_name: hps
+  
+  # Model configuration
+  model:
+    path: ""  # Path to model weights (can also be in extra_config)
+  
+  # Model-specific extra configuration
+  extra_config:
+    model_type: ViT-H-14  # Example for HPS
+  
+  # Whether to normalize rewards
+  normalize: true
+
+  # ============================================================
+  # DYNAMIC JOINT REWARD CONFIGURATION (used when type: joint)
+  # ============================================================
+  # This section allows you to configure ANY number of reward models
+  # with individual weights, GPU allocation, and MPS settings.
+  joint:
+    # Aggregation method: weighted_sum, mean, max, min
+    aggregation: weighted_sum
+    
+    # Whether to normalize each model's output before aggregation
+    normalize_individual: true
+    
+    # Whether to normalize the final aggregated output
+    normalize_final: false
+    
+    # Whether to compute rewards in parallel (recommended)
+    parallel_compute: true
+    
+    # MPS (CUDA Multi-Process Service) configuration
+    # Allows fine-grained GPU resource allocation per model
+    mps:
+      enabled: true
+      default_percentage: 25  # Default MPS percentage if not specified per model
+      # Per-model MPS percentage overrides
+      model_percentages:
+        aesthetic: 20
+        raft: 30
+        videoclip: 25
+        videophy: 25
+    
+    # Dictionary of reward models to use (keyed by model name)
+    # This allows direct access via Hydra overrides, e.g.:
+    #   reward_model.joint.models.aesthetic.extra_config.clip_model_path=/new/path
+    # Each model MUST have a registered name in the reward_models/ registry
+    # You can add/remove models freely - just ensure they are registered
+    models:
+      aesthetic:
+        enabled: true
+        weight: 1.0
+        dp_fraction: 0.25      # Use 1/4 of GPUs (e.g., 2 out of 8)
+        rank_offset: 0         # Start from rank 0
+        mps_percentage: 20     # 20% of GPU threads (overrides mps.model_percentages)
+        normalize: true
+        model_path: ""
+        extra_config:
+          clip_model_path: /root/models/aesthetic/ViT-L-14.pt
+          aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
+      
+      raft:
+        enabled: true
+        weight: 1.0
+        dp_fraction: 0.25
+        rank_offset: 2         # Start from rank 2
+        mps_percentage: 30
+        normalize: true
+        model_path: /root/models/raft/raft-things.pth
+        extra_config:
+          stride: 1
+          iters: 20
+      
+      videoclip:
+        enabled: true
+        weight: 1.5            # Higher weight = more influence
+        dp_fraction: 0.25
+        rank_offset: 4
+        mps_percentage: 25
+        normalize: true
+        model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
+        extra_config:
+          num_frames: 8
+          target_size: 224
+      
+      videophy:
+        enabled: true
+        weight: 0.8            # Lower weight
+        dp_fraction: 0.25
+        rank_offset: 6
+        mps_percentage: 25
+        normalize: true
+        model_path: /root/models/videocon_physics
+        extra_config:
+          max_length: 256
+      
+      # Example: Adding HPS model (disabled by default)
+      # hps:
+      #   enabled: false
+      #   weight: 1.0
+      #   dp_fraction: 0.125
+      #   rank_offset: 0
+      #   mps_percentage: 15
+      #   model_path: /root/models/hps/hpsv2.pt
+      #   extra_config:
+      #     model_type: ViT-H-14
+
+  # ============================================================
+  # LEGACY CONFIGURATION (for backward compatibility)
+  # ============================================================
+  # These are used when type is NOT 'joint'
+  weights:
+    aes: 1.0
+    raft: 1.0
+    videoclip: 1.0
+    videophy: 1.0
 
   aesthetic:
     clip_model_path: /root/models/aesthetic/ViT-L-14.pt
     aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
   raft:
     model_path: /root/models/raft/raft-things.pth
+    stride: 1
   videoclip:
     model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
+    num_frames: 8
   videophy:
     model_path: /root/models/videocon_physics
 
