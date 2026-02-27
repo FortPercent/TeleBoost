@@ -20,16 +20,11 @@ class ContextParallelMixin:
     @staticmethod
     def cp_grad_reduce(grad):
         with torch.no_grad():
-            # cp_size = mpu.get_context_parallel_world_size()
-            # dim_size = list(grad.size())
-            # dim_size[0] = dim_size[0] * cp_size
-            # grad_list = torch.empty(dim_size, dtype=grad.dtype, device=torch.cuda.current_device())
-            # torch.distributed._all_gather_base(grad_list, grad.contiguous(), group=mpu.get_context_parallel_group())
-            # grad_list = grad_list.view(cp_size, -1, *grad_list.shape[1:])
-            # reduced_grad = grad_list.sum(dim=0)
-            # allreduce
             reduced_grad = grad.contiguous()
+            rank = torch.distributed.get_rank()
+            print(f"[cp_grad_reduce] rank={rank} BEFORE all_reduce, shape={list(reduced_grad.shape)}")
             torch.distributed.all_reduce(reduced_grad, group=mpu.get_context_parallel_group())
+            print(f"[cp_grad_reduce] rank={rank} AFTER all_reduce")
         
         return reduced_grad
 
