@@ -1,4 +1,5 @@
 import torch
+import os
 from megatron.core import mpu, tensor_parallel
 from megatron.core.transformer import TransformerConfig
 from megatron.core.tensor_parallel import param_is_not_tensor_parallel_duplicate
@@ -589,26 +590,22 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
     loss_obj = output_tensor  # 这里拿到的是 loss 或 [loss1, loss2]
 
     if isinstance(loss_obj, (list, tuple)):
-        # 两个 GraphTask：分别 backward（retain_graph=False）
-        # for t in loss_obj:
-        #     zero_optimizer.backward(t, retain_graph=False)
-        #     zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
-        # print("enter dual_backward=============================================================================================")
-        for idx, t in enumerate(loss_obj):
-            torch.cuda.synchronize()
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
+        # Keep split backward for lower memory usage, but do gradient-partition
+        # epilogue once after all losses to reduce communication interleaving.
+        tensor_losses = [t for t in loss_obj if torch.is_tensor(t)]
+        if len(tensor_losses) == 0:
+            raise RuntimeError("loss_obj is list/tuple but contains no tensor loss.")
 
-            start.record()
-            print(f"[DPO backward {idx}] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
+        use_cp_barrier = os.environ.get("TELETRON_DPO_SPLIT_BARRIER", "1") == "1"
+        for idx, t in enumerate(tensor_losses):
+            print(f"[DPO backward split {idx}] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
             zero_optimizer.backward(t, retain_graph=False)
-            print(f"[DPO backward {idx}] rank={torch.distributed.get_rank()} After zero_optimizer.backward")
-            zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
-            end.record()
+            print(f"[DPO backward split {idx}] rank={torch.distributed.get_rank()} After zero_optimizer.backward")
+            if use_cp_barrier and mpu.get_context_parallel_world_size() > 1:
+                torch.cuda.synchronize()
+                torch.distributed.barrier(group=mpu.get_context_parallel_group())
 
-            torch.cuda.synchronize()
-            elapsed_ms = start.elapsed_time(end)
-            print(f"[DPO backward {idx}] time = {elapsed_ms:.3f} ms")
+        zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
     else:
         print(f"[DPO backward single] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
         zero_optimizer.backward(loss_obj, retain_graph=False)
