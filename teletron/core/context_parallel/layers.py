@@ -1,11 +1,13 @@
 import torch 
 import torch.nn as nn
+import itertools
 from megatron.core import mpu 
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
 format='%(asctime)s - %(levelname)s - %(message)s')
+_CP_LAYER_SEQ = itertools.count()
 
 class ContextParallelGateModule(nn.Module):
     def __init__(self):
@@ -28,13 +30,18 @@ class GateWithGradReduce(torch.autograd.Function ):
     @staticmethod
     def backward(ctx, x_grad):
         rank = torch.distributed.get_rank()
-        print(f"[GateWithGradReduce.backward] rank={rank} start, x_grad_shape={list(x_grad.shape)}")
+        seq = next(_CP_LAYER_SEQ)
+        print(
+            f"[GateWithGradReduce.backward] seq={seq} rank={rank} start, "
+            f"x_grad_shape={list(x_grad.shape)}",
+            flush=True,
+        )
         gate, residual = ctx.saved_tensors
         r_grad = x_grad * gate 
         gate_grad = torch.sum((x_grad * residual), dim=1, keepdim=True)
-        print(f"[GateWithGradReduce.backward] rank={rank} before all_reduce gate_grad")
+        print(f"[GateWithGradReduce.backward] seq={seq} rank={rank} before all_reduce gate_grad", flush=True)
         torch.distributed.all_reduce(gate_grad, group=mpu.get_context_parallel_group())
-        print(f"[GateWithGradReduce.backward] rank={rank} after all_reduce gate_grad")
+        print(f"[GateWithGradReduce.backward] seq={seq} rank={rank} after all_reduce gate_grad", flush=True)
         return x_grad, gate_grad, r_grad
 
 
@@ -47,19 +54,20 @@ class ModulateWithCPGradReduce(torch.autograd.Function):
     @staticmethod 
     def backward(ctx, grad_output):
         rank = torch.distributed.get_rank()
-        print(f"[ModulateWithCPGradReduce.backward] rank={rank} start")
+        seq = next(_CP_LAYER_SEQ)
+        print(f"[ModulateWithCPGradReduce.backward] seq={seq} rank={rank} start", flush=True)
         x, scale = ctx.saved_tensors
         x_grad = grad_output * (1 + scale) 
         scale_grad = torch.sum((grad_output * x), dim=1, keepdim=True)
-        print(f"[ModulateWithCPGradReduce.backward] rank={rank} before all_reduce scale_grad")
+        print(f"[ModulateWithCPGradReduce.backward] seq={seq} rank={rank} before all_reduce scale_grad", flush=True)
         torch.distributed.all_reduce(scale_grad, group=mpu.get_context_parallel_group())
-        print(f"[ModulateWithCPGradReduce.backward] rank={rank} before all_reduce shift_grad")
+        print(f"[ModulateWithCPGradReduce.backward] seq={seq} rank={rank} after all_reduce scale_grad", flush=True)
+        print(f"[ModulateWithCPGradReduce.backward] seq={seq} rank={rank} before all_reduce shift_grad", flush=True)
         shift_grad = torch.sum(grad_output, dim=1, keepdim=True)
         torch.distributed.all_reduce(shift_grad, group=mpu.get_context_parallel_group())
-        print(f"[ModulateWithCPGradReduce.backward] rank={rank} after all_reduce shift_grad")
+        print(f"[ModulateWithCPGradReduce.backward] seq={seq} rank={rank} after all_reduce shift_grad", flush=True)
         return x_grad, shift_grad, scale_grad
 
 
 def modulate_with_cp_grad_reduce(x, shift, scale):
     return ModulateWithCPGradReduce.apply(x, shift, scale)
-

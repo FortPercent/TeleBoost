@@ -2,6 +2,7 @@
 
 
 from typing import Optional, List, Any
+import itertools
 
 import torch
 import torch.distributed as dist
@@ -10,6 +11,7 @@ from megatron.core import mpu
 
 
 ALL_TO_ALL_BUFFER = None
+_CP_A2A_SEQ = itertools.count()
 
 def set_global_all_to_all_buffer(buffer_numel):
     global ALL_TO_ALL_BUFFER
@@ -51,10 +53,15 @@ class SeqAllToAll(torch.autograd.Function):
     @staticmethod
     def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
         rank = torch.distributed.get_rank()
+        seq = next(_CP_A2A_SEQ)
         input_t = torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous() if ctx.async_op else grad_output[0]
-        print(f"[SeqAllToAll.backward] rank={rank} BEFORE all_to_all_tensor, shape={list(input_t.shape)}")
+        print(
+            f"[SeqAllToAll.backward] seq={seq} rank={rank} BEFORE all_to_all_tensor, "
+            f"shape={list(input_t.shape)}, scatter_dim={ctx.gather_dim}, gather_dim={ctx.scatter_dim}",
+            flush=True,
+        )
         result = all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.use_buffer, ctx.group, False)
-        print(f"[SeqAllToAll.backward] rank={rank} AFTER all_to_all_tensor")
+        print(f"[SeqAllToAll.backward] seq={seq} rank={rank} AFTER all_to_all_tensor", flush=True)
         return (
             None,
             result,

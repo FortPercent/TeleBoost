@@ -1,13 +1,17 @@
 # Copyright (c) 2025 TeleAI-infra Team and The HuggingFace Team. All rights reserved.
 
 from typing import Optional
+import itertools
 import torch
 import torch.nn as nn
+from megatron.core import mpu
 
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
 from .wan_model import WanModel, DiTBlock, sinusoidal_embedding_1d
 from teletron.utils import set_config
+
+_CP_GRAD_SEQ = itertools.count()
 
 class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
     def __init__(self, *args, **kwargs):
@@ -59,6 +63,40 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         # from ContextParallelMixin
         self.register_cp_grad_reduce_hook()
 
+    @staticmethod
+    def _extract_layer_id(param_name: str) -> int:
+        parts = param_name.split(".")
+        if len(parts) > 1 and parts[0] == "blocks" and parts[1].isdigit():
+            return int(parts[1])
+        return -1
+
+    def _build_cp_grad_hook(self, param_name: str):
+        layer_id = self._extract_layer_id(param_name)
+
+        def _hook(grad: torch.Tensor):
+            with torch.no_grad():
+                reduced_grad = grad.contiguous()
+                rank = (
+                    torch.distributed.get_rank()
+                    if torch.distributed.is_available() and torch.distributed.is_initialized()
+                    else -1
+                )
+                seq = next(_CP_GRAD_SEQ)
+                print(
+                    f"[cp_grad_reduce] seq={seq} rank={rank} layer_id={layer_id} "
+                    f"param={param_name} BEFORE all_reduce, shape={list(reduced_grad.shape)}",
+                    flush=True,
+                )
+                torch.distributed.all_reduce(reduced_grad, group=mpu.get_context_parallel_group())
+                print(
+                    f"[cp_grad_reduce] seq={seq} rank={rank} layer_id={layer_id} "
+                    f"param={param_name} AFTER all_reduce",
+                    flush=True,
+                )
+            return reduced_grad
+
+        return _hook
+
     
     def register_cp_grad_reduce_hook(self):
         
@@ -72,7 +110,7 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
                              "modulation" in name:
                 continue 
 
-            param.register_hook(self.cp_grad_reduce)
+            param.register_hook(self._build_cp_grad_hook(name))
 
     def forward(
         self,
