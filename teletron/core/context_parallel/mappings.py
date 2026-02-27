@@ -50,10 +50,14 @@ class SeqAllToAll(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
+        rank = torch.distributed.get_rank()
         input_t = torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous() if ctx.async_op else grad_output[0]
+        print(f"[SeqAllToAll.backward] rank={rank} BEFORE all_to_all_tensor, shape={list(input_t.shape)}")
+        result = all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.use_buffer, ctx.group, False)
+        print(f"[SeqAllToAll.backward] rank={rank} AFTER all_to_all_tensor")
         return (
             None,
-            all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.use_buffer, ctx.group, False),
+            result,
             None,
             None,
             None,

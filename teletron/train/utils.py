@@ -600,7 +600,9 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
             end = torch.cuda.Event(enable_timing=True)
 
             start.record()
+            print(f"[DPO backward {idx}] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
             zero_optimizer.backward(t, retain_graph=False)
+            print(f"[DPO backward {idx}] rank={torch.distributed.get_rank()} After zero_optimizer.backward")
             zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
             end.record()
 
@@ -608,7 +610,9 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
             elapsed_ms = start.elapsed_time(end)
             print(f"[DPO backward {idx}] time = {elapsed_ms:.3f} ms")
     else:
+        print(f"[DPO backward single] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
         zero_optimizer.backward(loss_obj, retain_graph=False)
+        print(f"[DPO backward single] rank={torch.distributed.get_rank()} After zero_optimizer.backward")
         zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
     # torch.autograd.backward(output_tensor[0], grad_tensors=output_tensor_grad[0])
 
