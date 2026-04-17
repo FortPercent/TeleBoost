@@ -249,3 +249,56 @@ cat /tmp/tier_a.txt | xargs git add
 git commit -m "Merge branch 'dance-grpo/wxe' ..."
 git branch -m merge_wxe_tmp verl_0902_wxe
 ```
+
+---
+
+## 10. 运行资源需求（合并后跑 `recipe/dancegrpo/run_dancegrpo*.sh`）
+
+### 10.1 脚本默认配置
+
+4 个启动脚本（`run_dancegrpo.sh` / `run_dancegrpo_joint.sh` / `run_dancegrpo_qwen.sh` / `run_dancegrpo_single.sh`）都是：
+
+```bash
+NNODES=${NNODES:-1}            # 节点数，默认 1，支持 env 覆盖
+trainer.n_gpus_per_node=8      # 每节点 8 张 GPU
+sp_size=1                      # Ulysses 序列并行度（未开）
+```
+
+**最小配置**：1 节点 × 8 GPU（共 8 卡）。
+
+### 10.2 模型规格（硬编码在 `run_dancegrpo.sh`）
+
+| 角色 | 模型 | 参数量 |
+|---|---|---|
+| Actor / Rollout / Ref | `Wan-AI/Wan2.2-T2V-A14B` | **14B** 文生视频 |
+| Reward Model | `Qwen2.5-VL-7B-Instruct` | **7B** VL |
+| VAE | `Wan2.1_VAE.pth` | — |
+
+训练循环内同时要加载 actor、ref、reward 三份模型权重（+ rollout 的 vllm/sglang 引擎），显存压力主要来自这里。
+
+### 10.3 资源需求估算
+
+| 配置 | 能否跑 | 备注 |
+|---|---|---|
+| 1 × 8 × H100 80G + `offload=True` | 勉强 | 14B 训练 + 7B reward + rollout，单卡 ~60-75G 占用 |
+| 1 × 8 × H100 80G + `offload=False` | ❌ OOM 风险高 | 不开 offload 14B 吃不下 |
+| **2 × 8 × 80G（16 卡）**｜**推荐起步** | ✅ | 可关 offload 提速 |
+| 4 × 8 = 32 卡 | ✅ 吞吐更好 | 可放大 `rollout_batch` / `mini_batch` |
+| A100/H100 **40G** 卡 | ❌ 14B 跑不动 | 14B 必须 80G 卡；40G 需换 1.3B 模型 |
+
+### 10.4 调整节点数 / 模型规模
+
+```bash
+# 2 节点 × 8 卡
+NNODES=2 bash recipe/dancegrpo/run_dancegrpo.sh
+
+# 用 1.3B 降成本（手改脚本里的 model.path）
+actor_rollout_ref.model.path='.../Wan-AI/Wan2.1-T2V-1.3B'
+# 1.3B 模型下，1 × 8 × 40G 可跑
+```
+
+### 10.5 需要业主自行确认
+
+- 模型权重路径 `'/gfs/space/chatrl/users/wxe/Wan-AI/Wan2.2-T2V-A14B'` 是 wxe 开发机的 GFS 路径，**在新环境要改成实际路径**
+- Reward 路径 `'/gfs/space/chatrl/public/models/Qwen2.5-VL-7B-Instruct'` 同上
+- `data` 路径、`SpectralVolumeReward` 相关权重同理
