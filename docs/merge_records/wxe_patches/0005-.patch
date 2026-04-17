@@ -1,0 +1,53 @@
+From f7b4510c64fce729d948ad4fb30839360e5cdfef Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Fri, 6 Feb 2026 11:53:33 +0800
+Subject: [PATCH 05/20] =?UTF-8?q?=E7=AC=AC=E4=B8=80=E6=AC=A1=E5=B0=9D?=
+ =?UTF-8?q?=E8=AF=95=E4=BF=AE=E5=A4=8D?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/config/dancegrpo_trainer.yaml | 2 +-
+ recipe/dancegrpo/dp_actor.py                   | 5 ++++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 68db4e41..0ca75b9e 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -29,7 +29,7 @@ actor_rollout_ref:
+     
+     grpo_guard:
+       enable: false
+-      ratio_norm: true
++      ratio_norm: false
+       grad_reweight: false
+       ratio_norm_eps: 1e-6
+       grad_reweight_eps: 1e-6
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index 92e1860f..07f5649a 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -208,6 +208,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 )
+ 
+                 old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
++                #  尝试修复
++                gen_len = old_log_probs.shape[1]
++                new_log_probs = new_log_probs[:, -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
+ 
+                 if ratio_norm:
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+@@ -218,7 +221,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
+                     scale = sqrt_dt * sigma_t
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+-                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale)
++                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                 else:
+                     ratio = torch.exp(new_log_probs - old_log_probs)
+ 
+-- 
+2.50.1 (Apple Git-155)
+

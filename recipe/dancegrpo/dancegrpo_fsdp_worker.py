@@ -1767,3 +1767,31 @@ class AsyncActorRolloutRefWorker(ActorRolloutRefWorker):
         await self.rollout.sleep()
         # return something to block the caller
         return True
+
+
+# === ported from wxe ===
+# 把 wxe 的 reward 插件系统 (recipe/dancegrpo/reward_models/* + unified_reward_worker)
+# 在本 module 末尾 re-export, 让 hydra/ray 配置可通过同一路径引用:
+#   worker_class: recipe.dancegrpo.dancegrpo_fsdp_worker.UnifiedRewardModelWorker
+# 行为 verl_0902 默认仍走上方 QwenRewardModelWorker 等; 仅当配置改为
+# UnifiedRewardModelWorker 时才走 wxe 插件系统.
+try:
+    from .unified_reward_worker import UnifiedRewardModelWorker
+    from .reward_models import (
+        RewardRegistry,
+        BaseRewardModel,
+        RewardConfig,
+        create_reward_model,
+    )
+    _WXE_REWARD_PLUGINS_AVAILABLE = True
+except ImportError as _e:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        f"[wxe-port] reward_models 插件加载失败, 回退至 verl_0902 内置 reward worker: {_e}"
+    )
+    UnifiedRewardModelWorker = None
+    RewardRegistry = None
+    BaseRewardModel = None
+    RewardConfig = None
+    create_reward_model = None
+    _WXE_REWARD_PLUGINS_AVAILABLE = False

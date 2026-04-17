@@ -1,0 +1,41 @@
+From ab085358e2d7e0fb720bc3fc5297b15b4f9aac79 Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Fri, 6 Feb 2026 14:08:14 +0800
+Subject: [PATCH 10/20] =?UTF-8?q?=E5=86=8D=E5=86=8D=E6=AC=A1=E4=BF=AE?=
+ =?UTF-8?q?=E6=94=B9=E4=BA=86=E9=A2=9D=E8=AE=A1=E7=AE=97log=5Fprob?=
+ =?UTF-8?q?=E7=9A=84=E9=80=BB=E8=BE=91=EF=BC=8C=E8=BF=98=E6=B2=A1=E6=A3=80?=
+ =?UTF-8?q?=E6=9F=A5=E6=98=AF=E5=90=A6=E6=AD=A3=E7=A1=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index e15d24c9..1e4dfa17 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -217,14 +217,16 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
+ 
+                 if ratio_norm:
++                    prev_sample_mean_step = prev_sample_mean[..., current_step]
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+-                    ratio_mean_bias = (prev_sample_mean - prev_sample_mean_old).pow(2).mean(
+-                        dim=tuple(range(1, prev_sample_mean.ndim))
++                    ratio_mean_bias = (prev_sample_mean_step - prev_sample_mean_old).pow(2).mean(
++                        dim=tuple(range(1, prev_sample_mean_step.ndim))
+                     )
+                     sqrt_dt = sqrt_dt.mean()
+                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
+                     scale = sqrt_dt * sigma_t
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
++                    print(f"Step {step_idx}: RatioNorm scale {scale.item()}, mean bias {ratio_mean_bias.item()}")
+                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                 else:
+                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
+-- 
+2.50.1 (Apple Git-155)
+

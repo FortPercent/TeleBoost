@@ -1,0 +1,30 @@
+From 257d0a68b59dba18974638c8e2373e6f886a9ca4 Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Fri, 6 Feb 2026 14:49:33 +0800
+Subject: [PATCH 13/20] =?UTF-8?q?=E4=BF=AE=E6=94=B9=E4=BA=86=E9=A2=9D?=
+ =?UTF-8?q?=E8=AE=A1=E7=AE=97log=5Fprob=E7=9A=84=E9=80=BB=E8=BE=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index bc037421..c507a9c4 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -232,6 +232,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                         std_dev_t_step = std_dev_t[..., current_step]
+                     sigma_t = std_dev_t_step / (sqrt_dt + ratio_norm_eps)
+                     scale = sqrt_dt * sigma_t
++                    if scale.ndim > 1:
++                        # Reduce to per-batch scalars to match log-prob shapes.
++                        scale = scale.mean(dim=tuple(range(1, scale.ndim)))
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                 else:
+-- 
+2.50.1 (Apple Git-155)
+

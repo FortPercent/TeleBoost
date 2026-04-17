@@ -1,0 +1,90 @@
+From a53b6ba4687e7dd35caf18a44c2bf719a9684a53 Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Fri, 6 Feb 2026 14:58:12 +0800
+Subject: [PATCH 14/20] =?UTF-8?q?=E4=BF=AE=E6=94=B9=E4=BA=86=E9=A2=9D?=
+ =?UTF-8?q?=E8=AE=A1=E7=AE=97log=5Fprob=E7=9A=84=E9=80=BB=E8=BE=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 37 ++++++++++++++++++------------------
+ 1 file changed, 19 insertions(+), 18 deletions(-)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index c507a9c4..235517fc 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -210,33 +210,34 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
+                 old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx]
+ 
+-                # 2. 拿到当前这一步的 new_log_prob (形状: Batch)
+-                current_step = -train_timesteps + step_idx
+-                new_log_probs_step = new_log_probs[..., current_step]
++                # 2. new_log_probs 本身就是当前时间步的 log_prob (形状: Batch)
++                new_log_probs_step = new_log_probs
+ 
+                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
+ 
+                 if ratio_norm:
+                     prev_sample_mean_step = prev_sample_mean
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+-                    print(f"Step {step_idx}: RatioNorm scale {prev_sample_mean_step.shape}, mean bias {prev_sample_mean_old.shape}")
+                     
++                    # 计算 ratio_mean_bias，规约到 [batch_size]
+                     ratio_mean_bias = (prev_sample_mean_step - prev_sample_mean_old).pow(2).mean(
+                         dim=tuple(range(1, prev_sample_mean_step.ndim))
+                     )
+                     
+-                    sqrt_dt = sqrt_dt.mean()
+-                    if std_dev_t.ndim == 0:
+-                        std_dev_t_step = std_dev_t
+-                    else:
+-                        std_dev_t_step = std_dev_t[..., current_step]
+-                    sigma_t = std_dev_t_step / (sqrt_dt + ratio_norm_eps)
+-                    scale = sqrt_dt * sigma_t
+-                    if scale.ndim > 1:
+-                        # Reduce to per-batch scalars to match log-prob shapes.
+-                        scale = scale.mean(dim=tuple(range(1, scale.ndim)))
++                    # sqrt_dt 和 std_dev_t 都是标量，不需要索引
++                    sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
++                    std_dev_t_scalar = std_dev_t.mean() if std_dev_t.ndim > 0 else std_dev_t
++                    
++                    sigma_t = std_dev_t_scalar / (sqrt_dt_scalar + ratio_norm_eps)
++                    scale = sqrt_dt_scalar * sigma_t
++                    
++                    # ratio_mean_bias 除以 scale^2，结果仍是 [batch_size]
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+-                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
++                    
++                    print(f"Step {step_idx}: ratio_mean_bias {ratio_mean_bias.shape}, scale {scale}")
++                    
++                    # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
++                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale)
+                 else:
+                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
+ 
+@@ -253,7 +254,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+ 
+                 policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                 if ratio_norm:
+-                    policy_loss = policy_loss / (sqrt_dt**2)
++                    policy_loss = policy_loss / (sqrt_dt_scalar**2)
+ 
+                 loss = policy_loss / (self.gradient_accumulation * train_timesteps)
+ 
+@@ -264,8 +265,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 }
+                 if ratio_norm:
+                     data_dict["actor/ratio_mean_bias"] = ratio_mean_bias.detach().mean().item()
+-                    data_dict["actor/ratio_scale"] = scale.detach().item()
+-                    data_dict["actor/sqrt_dt"] = sqrt_dt.detach().item()
++                    data_dict["actor/ratio_scale"] = scale if isinstance(scale, float) else scale.item()
++                    data_dict["actor/sqrt_dt"] = sqrt_dt_scalar if isinstance(sqrt_dt_scalar, float) else sqrt_dt_scalar.item()
+                 append_to_dict(metrics, data_dict)
+ 
+                 loss.backward()
+-- 
+2.50.1 (Apple Git-155)
+

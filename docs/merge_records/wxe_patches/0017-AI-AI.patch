@@ -1,0 +1,47 @@
+From 216cab61bd23f49d343c4bbf73e8d348ec37e8a7 Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 15:38:07 +0800
+Subject: [PATCH 17/20] =?UTF-8?q?=E7=BB=A7AI=E5=AE=9E=E7=8E=B0=E5=8A=9F?=
+ =?UTF-8?q?=E8=83=BD=E4=B9=8B=E5=90=8E=E7=8E=B0=E5=9C=A8=E9=83=BD=E8=83=BD?=
+ =?UTF-8?q?=E8=BF=90=E8=A1=8C=E4=BA=86=EF=BC=8C=E4=BD=86=E6=98=AF=E4=B8=8D?=
+ =?UTF-8?q?=E7=9F=A5=E9=81=93AI=E7=9A=84=E5=AE=9E=E7=8E=B0=E6=98=AF?=
+ =?UTF-8?q?=E5=90=A6=E6=AD=A3=E7=A1=AE=E7=9A=84=E9=9B=86=E6=88=90=E4=BA=86?=
+ =?UTF-8?q?=E8=BF=99=E4=BA=9B=E6=96=B9=E6=B3=95=EF=BC=8C=E8=BF=98=E9=9C=80?=
+ =?UTF-8?q?=E8=A6=81=E8=B7=9F=E7=9D=80=E4=BB=A3=E7=A0=81=E9=AA=8C=E8=AF=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/config/dancegrpo_trainer.yaml | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 7e8c8633..302ad91a 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -28,9 +28,9 @@ actor_rollout_ref:
+     max_grad_norm: 1.0
+     
+     grpo_guard:
+-      enable: true
+-      ratio_norm: true
+-      grad_reweight: true
++      enable: false
++      ratio_norm: false
++      grad_reweight: false
+       ratio_norm_eps: 1e-6
+       grad_reweight_eps: 1e-6
+       grad_reweight_alpha: 1.0
+@@ -53,7 +53,7 @@ actor_rollout_ref:
+ 
+   # if fast flow-grpo
+   flow_grpo:
+-    enable: false
++    enable: true
+     sde_window_size: 2
+     sde_window_range: [0, "${actor_rollout_ref.sampling_steps}"]
+     shuffle_timesteps: false
+-- 
+2.50.1 (Apple Git-155)
+

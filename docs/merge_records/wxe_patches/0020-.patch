@@ -1,0 +1,40 @@
+From bf171ed55060bae8e3a7568fbc95353440742d5c Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Wed, 11 Feb 2026 17:17:47 +0800
+Subject: [PATCH 20/20] =?UTF-8?q?=E5=87=86=E5=A4=87=E6=8B=89=E5=8F=96?=
+ =?UTF-8?q?=E6=96=B0=E4=B8=80=E4=B8=AA=E7=89=88=E6=9C=AC=E7=9A=84=E4=BB=A3?=
+ =?UTF-8?q?=E7=A0=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dancegrpo_ray_trainer.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/recipe/dancegrpo/dancegrpo_ray_trainer.py b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+index 301418ce..48c906b3 100644
+--- a/recipe/dancegrpo/dancegrpo_ray_trainer.py
++++ b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+@@ -405,7 +405,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
+             )
+             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+             reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
+-            gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids"])
++        
+         else:  # "single"
+             reward_input = gen_batch_output.select(
+                 batch_keys=["video_frames"],
+@@ -413,6 +413,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
+             )
+             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+ 
++        gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids", "video_frames"])  # reward计算完就可以丢掉大tensor了
++        # 清理原 batch（移除大 tensor）
++
+         self._debug_proto_batch("gen_batch_output", gen_batch_output)
+         self._debug_proto_batch("reward_tensor", reward_tensor)
+         gen_batch_output = gen_batch_output.union(reward_tensor)
+-- 
+2.50.1 (Apple Git-155)
+

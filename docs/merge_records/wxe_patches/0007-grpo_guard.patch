@@ -1,0 +1,33 @@
+From e7c4abe204b1cf12dd1be9e322fbfa5a291dd6fb Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 13:33:22 +0800
+Subject: [PATCH 07/20] =?UTF-8?q?grpo=5Fguard=E4=B9=9F=E6=9C=89=E7=BB=B4?=
+ =?UTF-8?q?=E5=BA=A6=E6=B2=A1=E5=AF=B9=E9=BD=90=E7=9A=84=E9=97=AE=E9=A2=98?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/config/dancegrpo_trainer.yaml | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 0ca75b9e..7e8c8633 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -28,9 +28,9 @@ actor_rollout_ref:
+     max_grad_norm: 1.0
+     
+     grpo_guard:
+-      enable: false
+-      ratio_norm: false
+-      grad_reweight: false
++      enable: true
++      ratio_norm: true
++      grad_reweight: true
+       ratio_norm_eps: 1e-6
+       grad_reweight_eps: 1e-6
+       grad_reweight_alpha: 1.0
+-- 
+2.50.1 (Apple Git-155)
+
