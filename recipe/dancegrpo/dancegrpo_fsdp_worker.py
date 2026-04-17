@@ -73,31 +73,6 @@ except ImportError:
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-def _zscore_tensor(values: torch.Tensor) -> torch.Tensor:
-    mean = values.mean()
-    std = values.std(unbiased=False)
-    return (values - mean) / (std + 1e-8)
-
-
-def _split_video_frames(data: DataProto, *, permute_to_tchw: bool) -> List[torch.Tensor]:
-    batch_size = data.batch.batch_size[0]
-    decoded = data.batch["video_frames"]
-    frames = [x.squeeze(0) for x in decoded.chunk(batch_size, dim=0)]
-    if permute_to_tchw:
-        frames = [x.permute(1, 0, 2, 3) for x in frames]
-    return frames
-
-
-def _split_captions(caption, batch_size: int) -> List[str]:
-    batch_caption = np.array_split(caption, batch_size)
-    return [str(x.squeeze(0)) for x in batch_caption]
-
-
-def _make_reward_batch(key: str, rewards: torch.Tensor, batch_size: int) -> DataProto:
-    batch = TensorDict({key: rewards}, batch_size=batch_size)
-    return DataProto(batch=batch)
-
-
             
 class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
     """
@@ -175,13 +150,12 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             self.rollout, self.rollout_sharding_manager = self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
 
         # fhd compile vae
-        if self._is_rollout and hasattr(self.rollout, "vae_module"):
-            self.rollout.vae_module.model.decoder = torch.compile(
-                self.rollout.vae_module.model.decoder, 
-                mode="max-autotune-no-cudagraphs", 
-                # fullgraph=True, 
-                # dynamic=True if self.is_hip() else None
-            )
+        self.rollout.vae_module.model.decoder = torch.compile(
+            self.rollout.vae_module.model.decoder, 
+            mode="max-autotune-no-cudagraphs", 
+            # fullgraph=True, 
+            # dynamic=True if self.is_hip() else None
+        )
         
         if self._is_ref:
             local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
@@ -245,67 +219,42 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
  
 class QwenRewardModelWorker(RewardModelWorker):
     """
-    Qwen VLM-based Reward Model Worker.
-    
-    Uses vLLM for distributed inference with Qwen VL model to evaluate
-    video quality through structured prompts.
-    
-    Configuration options (in reward_model config):
-        - rollout.temperature: Sampling temperature (default: 0.8)
-        - rollout.top_p: Top-p sampling (default: 0.9)
-        - rollout.max_tokens: Maximum output tokens (default: 128)
-        - extra_config.max_pixels: Max pixels for video (default: 360*420)
-        - extra_config.fps: Frames per second (default: 1.0)
-        - extra_config.video_base_path: Base path for video files (optional)
+    Note that we only implement the reward model that is subclass of AutoModelForTokenClassification.
+    Use vllm based Qwen model as the reward model.
     """
-    
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
-        """Initialize the Qwen reward model and sampling parameters."""
-        try:
-            self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
-            
-            # Get sampling params from config with defaults
-            from vllm import SamplingParams
-            temperature = self.config.rollout.get("temperature", 0.8)
-            top_p = self.config.rollout.get("top_p", 0.9)
-            max_tokens = self.config.rollout.get("max_tokens", 128)
-            
-            self.sampling_params = SamplingParams(
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens
-            )
-            
-            # Get extra config for video processing
-            extra_config = self.config.get("extra_config", {})
-            self.max_pixels = extra_config.get("max_pixels", 360 * 420)
-            self.fps = extra_config.get("fps", 1.0)
-            self.video_base_path = extra_config.get("video_base_path", "")
-            
-            logger.info(f"Qwen reward model initialized successfully")
-            logger.info(f"Sampling params: temp={temperature}, top_p={top_p}, max_tokens={max_tokens}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Qwen reward model: {e}")
-            raise
+        """
+        initialize the reward model and sampling_params
+        """
+        # This is used to import external_lib into the huggingface systems
+        # import_external_libs(self.config.model.get("external_lib", None))
+        self.reward_rollout, self.reward_rollout_sharding_manager = self._build_reward_rollout()
+        from vllm import SamplingParams
+        self.sampling_params = SamplingParams(temperature=0.8, top_p=0.90, max_tokens = 128)
+        print(f"成功初始化Qwen模型...")
+        print("="*40)
+        # exit(0)
+        # TODO
+        # self.image_processor = VaeImageProcessor(16)
+        return
 
-    def _build_reward_rollout(self, trust_remote_code=False):
+    def _build_reward_rollout(self,trust_remote_code=False):
         device_name = get_device_name()
 
         from torch.distributed.device_mesh import init_device_mesh
 
         # TODO(sgm): support FSDP hybrid shard for larger model
         infer_tp = self.config.rollout.tensor_model_parallel_size
-        dp = self.world_size // infer_tp # world_size 是总的环境卡数
+        dp = self.world_size // infer_tp
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
-        rollout_name = self.config.rollout.name # rollout使用的架构 vllm
+        rollout_name = self.config.rollout.name
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
         from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager
         log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
-        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False)) # use_shm 是否使用shared_memory
+        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False))
        
         # lora_kwargs = {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}} if self._is_lora else {}
         lora_kwargs = {}
@@ -391,49 +340,43 @@ class QwenRewardModelWorker(RewardModelWorker):
                 请严格按照输出格式要求，输出且只输出输出格式的内容。请依照以上标准、逻辑和格式，对视频进行结构化质量评估。
                 """
         
-    def _generate_chat_batch_prompts(self, batch_path, max_pixels=None, fps=None) -> List:
+    def _generate_chat_batch_prompts(self,batch_path, max_pixels = 360*420, fps = 1.0) -> List:
         """
-        Generate prompts for a batch of video paths.
-        
+        generate prompts for a batch of paths.
         Args:
-            batch_path: List of video file paths
-            max_pixels: Max pixels for video processing (uses self.max_pixels if None)
-            fps: Frames per second (uses self.fps if None)
-            
+            - batch_path: a List[str] item that consists all the paths of videos in the batch.
+            - max_pixels: default to 360*420, int
+            - fps: default to 1.0, float
         Returns:
-            List of message dicts for LLM chat
+            - A List[List[Dict[str,Any]]] item that each element is a List satisfying the conversation format of llm.chat method.
         """
-        max_pixels = max_pixels or getattr(self, 'max_pixels', 360 * 420)
-        fps = fps or getattr(self, 'fps', 1.0)
-        
-        messages = []
+        messages=[]
         prompt = self._create_simple_prompt()
-        
+        total_time=0
+        logger.info(f"Starting generating batch of prompts ...")
+        VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
         for file_path in batch_path:
-            # Use configurable base path instead of hardcoded value
-            video_path = str(file_path)
-            if hasattr(self, 'video_base_path') and self.video_base_path:
-                video_path = video_path.replace("./", self.video_base_path)
-            
-            message = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "video_url",
-                            "video_url": {"url": f"file://{video_path}"},
-                            "max_pixels": max_pixels,
-                            "fps": fps,
-                        },
-                        {
-                            "type": "text", 
-                            "text": prompt
-                        },
-                    ],
-                }
-            ]
-            messages.append(message)
-        
+            # if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
+                start_time=time.time()
+                video_path = str(file_path).replace("./","/gemini/space/ljm/Dancegrpo/")
+                # print(f"视频地址是file://{video_path}")
+                message = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "video_url",
+                                "video_url": {"url":f"file://{video_path}"},
+                                "max_pixels": max_pixels,
+                                "fps": fps,
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ]
+                messages.append(message)
+                processing_time=time.time()-start_time
+                total_time+=processing_time
         return messages
     
     def _generate_batch_prompts(self,batch_id) -> List:
@@ -535,77 +478,104 @@ class QwenRewardModelWorker(RewardModelWorker):
             
         return result 
     
-    def _get_batch_reward(self, batch_output: List) -> List:
+    def _get_batch_reward(self,batch_output: List) -> List:
         """
-        Extract rewards from batch output using _parse_simple_evaluation.
-        
+        extract rewards from a batch of output. Using self._parse_simple_evaluation method
         Args:
-            batch_output: List of model outputs to parse
-            
+            - batch_output: the batch of output in the form of list and need to be extract rewards.
         Returns:
-            List of overall scores
+            - A list that includes all the rewards of the batch_output.
         """
         results = []
         for single_prompt_output in batch_output:
             for response in single_prompt_output:
                 output = response.outputs[0]
                 output_text = output.text
-                logger.debug(f"Generated text length: {len(output_text)}")
-                logger.debug(f"Generated text preview: {output_text[:200]}...")
+                logger.info(f"Generated text length: {len(output_text)}")
+                logger.info(f"Generated text preview: {output_text[:200]}...")
                 
+            
+                # 解析结果
                 result = self._parse_simple_evaluation(output_text)
-                overall_score = result.get("overall_score", 50.0)
-                
-                logger.info(f"Quality score: {overall_score}/100")
-                results.append(overall_score)
+                overall_score = result.get("overall_score","N/A")
+                # processing_time = result.get("processing_time", 0)
+        
+                print(f"🎯 综合质量分数: {overall_score}/100")
+                # print(f"⏱️ 处理时间: {processing_time:.2f} 秒")
+                results.append(overall_score)  #仅保留overallscore
         return results
 
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, datas: DataProto):
-        """Compute reward scores using Qwen VLM."""
-        import time
-        start_time = time.time()
-        
-        datas = datas.to(get_device_id())
-        
-        with self.reward_rollout_sharding_manager:
-            datas = self.reward_rollout_sharding_manager.preprocess_data(datas)
+        # from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+        # datas = data.pop(
+        #         # batch_keys=['video_frames'],
+        #         non_tensor_batch_keys=["caption","video_ids"],
+        #     )
             
-            logger.info("Starting Qwen reward computation...")
-            video_ids = datas.non_tensor_batch['video_ids']
+        datas = datas.to(get_device_id())
+        #TODO
+        with self.reward_rollout_sharding_manager:
+            # Support all hardwares
+            
+            datas= self.reward_rollout_sharding_manager.preprocess_data(datas)
+            
+            
+            print("开始用llm计算得分：")
+            # video_paths = datas.non_tensor_batch['video_paths']
+            video_ids = datas.non_tensor_batch['video_ids']  # ids_batch
             
             import numpy as np
+            # batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
             batch_ids = np.array_split(video_ids, datas.batch.batch_size[0])
+            # batch_paths = [list(x) for x in  batch_paths]
+            video_ids = [list(x) for x in video_ids]
             
-            all_rewards = []
+            all_rewards = []  
+            # 每个batch_path是一批video_paths的列表
+            # batch_paths是很多批路径列表构成的列表
+            # log_gpu_memory_usage("After entering reward rollout sharding manager", logger=logger)
             for batch_id in batch_ids:
                 batch_message = self._generate_batch_prompts(batch_id)
                 batch_output = []
-                
                 for message in batch_message:
-                    output = self.reward_rollout.inference_engine.generate(
-                        message,
-                        sampling_params=self.sampling_params
-                    )
+                    output = self.reward_rollout.inference_engine.generate(message,
+                                                                           sampling_params = self.sampling_params)
+                    # with open('/gemini/space/ljm/Dancegrpo/videos/output.txt', 'a', encoding='utf-8') as f:
+                    #     f.write(f"rank {dist.get_rank()} \n output内容是{output[0].outputs}\n\n")
+               
+            # for batch_path in batch_paths:
+            #     batch_message=self._generate_chat_batch_prompts(batch_path)
+            #     batch_output = []
+            #     for message in batch_message:
+            #         output = self.reward_rollout.inference_engine.chat(message, 
+            #                                                            sampling_params = self.sampling_params)
+                    
                     batch_output.append(output)
                     
                 batch_reward = self._get_batch_reward(batch_output)
-                all_rewards += batch_reward
+                
+                all_rewards = all_rewards + batch_reward
+                # print(type(all_rewards[0]),all_rewards[0])
+                # print("\n")
         
             all_rewards = torch.tensor(all_rewards)
             batch = TensorDict(
-                {"rewards": all_rewards},
-                batch_size=datas.batch.batch_size[0]
+                {
+                    "rewards": all_rewards,
+                },
+                batch_size = datas.batch.batch_size[0]
             )
             
-            batch_reward = DataProto(batch=batch, non_tensor_batch=datas.non_tensor_batch)
+            non_tensor_batch = datas.non_tensor_batch
+            batch_reward = DataProto(batch=batch, non_tensor_batch = non_tensor_batch)
             batch_reward = self.reward_rollout_sharding_manager.postprocess_data(batch_reward)
-        
-        elapsed = time.time() - start_time
-        logger.info(f"Qwen reward computation completed in {elapsed:.2f}s")
-        
+            
+            # with open('/gemini/space/ljm/Dancegrpo/videos/my_file.txt', 'a', encoding='utf-8') as f:
+            #     f.write(f"rank {dist.get_rank()} \n batch['rewards'],内容是{batch_reward.batch['rewards']}\n\n")
+                
         return batch_reward
         
     
@@ -690,7 +660,9 @@ class DiffusionRewardModelWorker(RewardModelWorker):
         decoded_images = decoded_image.chunk(data.batch.batch_size[0], dim=0)
         decoded_images = [x.squeeze(0) for x in decoded_images]
         caption=data.non_tensor_batch['caption']
-        batch_caption = _split_captions(caption, data.batch.batch_size[0])
+        import numpy as np
+        batch_caption = np.array_split(caption, data.batch.batch_size[0])
+        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         all_rewards = []  
         self.reward_module.to(device=get_device_id())
@@ -723,9 +695,8 @@ class DiffusionRewardModelWorker(RewardModelWorker):
             batch_size=len(batch_caption)
         )
         self.reward_module.to(torch.device('cpu'))
-        batch_reward= DataProto(batch=batch)
         
-        return batch_reward
+        return DataProto(batch=batch)
 
 
 # ================================= Async related workers =================================
@@ -801,8 +772,6 @@ def _split_batch(data: DataProto, dp_size: int, dp_rank: int) -> DataProto:
     
     return DataProto(batch=local_batch, non_tensor_batch=local_non_tensor)
 
-
- # ------------------------------------------------------------------------------------------------
 # WORLD_SIZE = torch.distributed.get_world_size()
 # AestheticRewardModelWorker is a worker that computes aesthetic scores for images.
 class AestheticRewardModelWorker(RewardModelWorker):
@@ -864,14 +833,35 @@ class AestheticRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.aes_dp
             print(f"[RANK {self.rank}] AestheticWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            return _make_reward_batch("aes_rewards", dummy_rewards, empty_bs)
+            batch = TensorDict(
+                {
+                    "aes_rewards": dummy_rewards,
+                },
+                batch_size = empty_bs
+            )
+            return DataProto(batch=batch)
         
         datas = _split_batch(datas, self.aes_dp, self.rank % self.aes_dp)
         print(f"[RANK {self.rank}] AestheticWorker processing batch size: {datas.batch.batch_size[0]}")
-        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
+        # (B, C, H, W)
+        decoded_image = datas.batch['video_frames']
+        # List of [(1, C, H, W),...,...]
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+        # List of [(C, H, W),...,...]
+        decoded_images = [x.squeeze(0) for x in decoded_images]
+        
+        # (B, C, Frame, H, W)
+        decoded_image = datas.batch['video_frames']
+        # List of [(1, C, Frame, H, W),...,...]
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+        # List of [(C, Frame, H, W),...,...]
+        decoded_images = [x.squeeze(0) for x in decoded_images]
+        # List of [(Frame, C, H, W),...,...]
+        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
         caption = datas.non_tensor_batch['caption']       
 
-        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
         
         transform = clip_transform(224)
@@ -895,7 +885,10 @@ class AestheticRewardModelWorker(RewardModelWorker):
             
         all_rewards = torch.cat(all_rewards, dim=0)
         
-        all_rewards = _zscore_tensor(all_rewards)
+        # Z-score标准化
+        mean = all_rewards.mean()
+        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0        
         
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
@@ -1012,16 +1005,38 @@ class RAFTRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.raft_dp
             print(f"[RANK {self.rank}] RAFTWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            return _make_reward_batch("raft_rewards", dummy_rewards, empty_bs)
+            batch = TensorDict(
+                {
+                    "raft_rewards": dummy_rewards,
+                },
+                batch_size = empty_bs
+            )
+            return DataProto(batch=batch)
         datas = _split_batch(datas, self.raft_dp, self.rank % self.raft_dp)
         print(f"[RANK {self.rank}] RAFTWorker processing batch size: {datas.batch.batch_size[0]}")
-        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
+        # (B, C, H, W)
+        decoded_image = datas.batch['video_frames']
+        # List of [(1, C, H, W),...,...]
+        batch_size = len(decoded_image)
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+        # List of [(C, H, W),...,...]
+        # decoded_images = [x.squeeze(0) for x in decoded_images]
+
+        # (B, C, Frame, H, W)
+        decoded_image = datas.batch['video_frames']
+        # List of [(1, C, Frame, H, W),...,...]
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+        # List of [(C, Frame, H, W),...,...]
+        decoded_images = [x.squeeze(0) for x in decoded_images]
+        # List of [(Frame, C, H, W),...,...]
+        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
         
         caption = datas.non_tensor_batch['caption']       
-
-        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+        
+        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
-
+        
         self.raft_model.to(get_device_id())
         print(f"raft batch size: {len(batch_caption)}")
         all_rewards = []
@@ -1035,7 +1050,10 @@ class RAFTRewardModelWorker(RewardModelWorker):
             all_rewards.append(torch.tensor(flow_score, device=get_device_id()).unsqueeze(0))
             
         all_rewards = torch.cat(all_rewards, dim=0)
-        all_rewards = _zscore_tensor(all_rewards)
+        # Z-score标准化
+        mean = all_rewards.mean()
+        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0   
                 
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
@@ -1068,8 +1086,6 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         if self.rank < self.videoclip_dp:
             self.is_active = True
             videoclip_cfg = self.config.get("videoclip", {}) or {}
-            # get() 方法用于从字典中获取指定键的值，如果键不存在则返回默认值
-            # .get(key, default_value)
             self.videoclip_model_path = videoclip_cfg.get(
                 "model_path",
                 "/gemini/space/wyb/model/arena_model/VideoCLIP-XL/VideoCLIP-XL.bin",
@@ -1136,18 +1152,29 @@ class VideoclipRewardModelWorker(RewardModelWorker):
             empty_bs = datas.batch.batch_size[0] // self.videoclip_dp
             print(f"[RANK {self.rank}] VideoclipWorker is inactive, returning zeros")
             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
-            return _make_reward_batch("videoclip_rewards", dummy_rewards, empty_bs)
+            batch = TensorDict(
+                {
+                    "videoclip_rewards": dummy_rewards,
+                },
+                batch_size = empty_bs
+            )
+            return DataProto(batch=batch)
         
         datas = _split_batch(datas, self.videoclip_dp, self.rank % self.videoclip_dp)
         print(f"[RANK {self.rank}] VideoclipWorker processing batch size: {datas.batch.batch_size[0]}")
         # (B, C, Frame, H, W)
+        decoded_image = datas.batch['video_frames']
+        # List of [(1, C, Frame, H, W),...,...]
         if datas.batch.batch_size[0]==0:
             print(torch.get.dis)
-        decoded_images = _split_video_frames(datas, permute_to_tchw=False)
+        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+        # List of [(C, Frame, H, W),...,...]
+        decoded_images = [x.squeeze(0) for x in decoded_images]
 
         caption = datas.non_tensor_batch['caption']       
 
-        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
 
         from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
@@ -1172,7 +1199,10 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         
         all_rewards = torch.cat(all_rewards, dim=0)
         
-        all_rewards = _zscore_tensor(all_rewards)
+        # Z-score标准化
+        mean = all_rewards.mean()
+        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0           
         
         all_rewards = all_rewards.to(torch.device('cpu'))
         batch = TensorDict(
@@ -1691,3 +1721,49 @@ class MultiRewardModelWorker(RewardModelWorker):
         non_tensor_batch = data.non_tensor_batch
         print(f"cuda worker batch['aes_rewards'].shape: {batch['aes_rewards'].shape}")
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+             
+        
+# ================================= Async related workers =================================
+class AsyncActorRolloutRefWorker(ActorRolloutRefWorker):
+    def _build_rollout(self, trust_remote_code=False):
+        rollout, rollout_sharding_manager = super()._build_rollout(trust_remote_code)
+
+        # NOTE: rollout is not actually initialized here, it's deferred
+        # to be initialized by AsyncvLLMServer.
+
+        self.vllm_tp_size = self.config.rollout.tensor_model_parallel_size
+        self.vllm_dp_rank = int(os.environ["RANK"]) // self.vllm_tp_size
+        self.vllm_tp_rank = int(os.environ["RANK"]) % self.vllm_tp_size
+
+        # used for sleep/wake_up
+        rollout.sharding_manager = rollout_sharding_manager
+
+        return rollout, rollout_sharding_manager
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    def generate_sequences(self, prompts: DataProto):
+        raise NotImplementedError("AsyncActorRolloutRefWorker does not support generate_sequences")
+
+    @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD)
+    def execute_method(self, method: Union[str, bytes], *args, **kwargs):
+        """Called by ExternalRayDistributedExecutor collective_rpc."""
+        if self.vllm_tp_rank == 0 and method != "execute_model":
+            print(f"[DP={self.vllm_dp_rank},TP={self.vllm_tp_rank}] execute_method: {method if isinstance(method, str) else 'Callable'}")
+        return self.rollout.execute_method(method, *args, **kwargs)
+
+    @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD, blocking=False)
+    async def chat_completion(self, json_request):
+        ret = await self.rollout.chat_completion(json_request)
+        return ret
+
+    @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD)
+    async def wake_up(self):
+        await self.rollout.wake_up()
+        # return something to block the caller
+        return True
+
+    @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD)
+    async def sleep(self):
+        await self.rollout.sleep()
+        # return something to block the caller
+        return True
