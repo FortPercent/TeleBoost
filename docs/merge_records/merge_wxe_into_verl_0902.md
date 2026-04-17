@@ -147,7 +147,15 @@ A  utFile                                        ← 0 字节空文件（wxe 残
 
 ---
 
-## 6. **未自动合入**（待后续 cherry-pick 的 wxe 改动）
+## 6. Tier A 的 wxe 改动（第二阶段已整文件覆盖）
+
+> **更新（2026-04-17, commit `f9c44a4f`）**：本节原标题为"未自动合入（待后续 cherry-pick）"。
+> 应使用者要求，**已将下表 7 个 Tier A 文件整体从 `ours`（verl_0902）切换为 `theirs`（wxe）**。
+> 相当于二次合并——先用 `ours` 保住 verl_0902 绝大部分（737 个 Tier B + 900+ 独有文件），
+> 再对 7 个业务核心文件用 `theirs` 覆盖以吸收 wxe 算法修复。
+> 被覆盖的 verl_0902 版本可通过 `git show c4f237d0:<path>` 找回。
+
+### 已覆盖内容
 
 以下改动存在于 wxe 的 Tier A 文件中，被 `ours` 策略丢弃，需作为独立任务手动 patch 到 verl_0902 版本的代码上：
 
@@ -174,11 +182,18 @@ git diff origin/verl_0902:recipe/dancegrpo/dp_actor.py dance-grpo/wxe:recipe/dan
 git checkout dance-grpo/wxe -- recipe/dancegrpo/dp_actor.py
 ```
 
-### Cherry-pick 建议顺序
+### 第二阶段覆盖的风险与后续
 
-1. **先 `unified_reward_worker` + `reward_models/` 集成**：把 `dancegrpo_fsdp_worker.py` 里加载 reward model 的入口改成 wxe 的注册表方式（参考 `reward_models/registry.py`）
-2. **再 log_prob 对齐**：从 wxe `dp_actor.py` 抽取 log_prob 计算的 diff，应用到 verl_0902 的 `dp_actor.py`（注意 verl_0902 已有 torch compile 和 offload 改动，需合并兼容）
-3. **最后 GRPO-Guard backward**：在 `dancegrpo_ray_trainer.py` 中的训练循环里，参考 wxe 的 `dba4a41` commit 添加 backward 对齐
+**丢失的 verl_0902 改动**（在这 7 个文件内）：
+- `recipe/dancegrpo/dancegrpo_fsdp_worker.py`：verl_0902 里的 `qwen_reward` 服务调用入口、torch compile 集成点、offload/OOM 修复 → **覆盖后丢失**
+- `recipe/dancegrpo/dp_actor.py`：verl_0902 的 offload / compile 相关改动
+- `verl/trainer/ppo/ray_trainer.py`：上游 verl rebase 的 PPO trainer 更新
+- `verl/workers/rollout/diffusion_rollout.py`：上游 verl rebase 的 diffusion rollout 修复
+
+**需人工验证或二次调整**：
+1. `qwen_reward/` 目录仍然存在，但 `dancegrpo_fsdp_worker.py` 已是 wxe 版（不知道 qwen_reward），若要同时用 verl_0902 的 qwen reward 服务和 wxe 的 reward_models 插件，需在 wxe 版 worker 里**重新加入** `qwen_reward` 调用点
+2. 跑通性验证：wxe 的 `dancegrpo_fsdp_worker.py` 可能引用了 verl_0902 没有的某些上游符号，或引用了 verl_0902 重构后改名的符号，需启动一次看 ImportError / AttributeError
+3. torch compile / offload 若想保留，需参考 `git show c4f237d0:recipe/dancegrpo/dp_actor.py` 把 verl_0902 的相应逻辑补回去
 
 ---
 
