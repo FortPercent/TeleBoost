@@ -169,18 +169,21 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             with open_dict(self.config.actor):
                 self.config.actor.use_remove_padding = use_remove_padding
                 self.config.actor.use_fused_kernels = use_fused_kernels
+            # compile actor DiT forward; ratio=1 holds because compute_log_prob
+            # and update both go through the same compiled forward
+            self.actor_module_fsdp = torch.compile(
+                self.actor_module_fsdp,
+                mode="max-autotune-no-cudagraphs",
+            )
             self.actor = DataParallelPPOActor(config=self.config.actor, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer)
 
         if self._is_rollout:
             self.rollout, self.rollout_sharding_manager = self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
 
-        # fhd compile vae
         if self._is_rollout and hasattr(self.rollout, "vae_module"):
             self.rollout.vae_module.model.decoder = torch.compile(
-                self.rollout.vae_module.model.decoder, 
-                mode="max-autotune-no-cudagraphs", 
-                # fullgraph=True, 
-                # dynamic=True if self.is_hip() else None
+                self.rollout.vae_module.model.decoder,
+                mode="max-autotune-no-cudagraphs",
             )
         
         if self._is_ref:
