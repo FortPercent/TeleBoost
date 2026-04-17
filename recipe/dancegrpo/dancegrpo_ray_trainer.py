@@ -749,7 +749,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         self._debug_proto_batch("reward_tensor", reward_tensor)
         gen_batch_output = gen_batch_output.union(reward_tensor)
 
-        metrics["train/rewards"] = gen_batch_output.batch["rewards"].mean()
+        # [smoke-patch] reward key 在 single 模式下是 "{model_name}_rewards" (e.g. hps_rewards),
+        # 而原代码硬编码 "rewards"; 兼容两种命名
+        if "rewards" in gen_batch_output.batch:
+            _reward_key = "rewards"
+        else:
+            _reward_key = next((k for k in gen_batch_output.batch.keys() if k.endswith("_rewards")), None)
+            if _reward_key is None:
+                raise KeyError(f"no '*rewards' key in gen_batch_output.batch (keys={list(gen_batch_output.batch.keys())})")
+        metrics["train/rewards"] = gen_batch_output.batch[_reward_key].mean()
         metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
         return gen_batch_output
 
