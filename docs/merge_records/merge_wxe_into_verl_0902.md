@@ -147,15 +147,19 @@ A  utFile                                        ← 0 字节空文件（wxe 残
 
 ---
 
-## 6. Tier A 的 wxe 改动（第二阶段已整文件覆盖）
+## 6. Tier A 的 wxe 改动（经两次翻转后：**仍为 verl_0902 版**）
 
-> **更新（2026-04-17, commit `f9c44a4f`）**：本节原标题为"未自动合入（待后续 cherry-pick）"。
-> 应使用者要求，**已将下表 7 个 Tier A 文件整体从 `ours`（verl_0902）切换为 `theirs`（wxe）**。
-> 相当于二次合并——先用 `ours` 保住 verl_0902 绝大部分（737 个 Tier B + 900+ 独有文件），
-> 再对 7 个业务核心文件用 `theirs` 覆盖以吸收 wxe 算法修复。
-> 被覆盖的 verl_0902 版本可通过 `git show c4f237d0:<path>` 找回。
+> **历史（保留作记录）**：
+> - 首次 merge（`c4f237d0`, `ours`）：7 个 Tier A 文件取 verl_0902 版
+> - 第二阶段（`f9c44a4f`）：应请求改为 wxe 版整文件覆盖（二次合并吸收 wxe 算法修复）
+> - 校验后回退（`b1553b86` + `ed554da8`）：按 "以 verl_0902 为主" 原则，7 个 Tier A **全部回到 verl_0902 版**
+>
+> **最终实质效果**：分支 = verl_0902 + wxe 的 21 个**纯新增**文件（reward_models/, unified_reward_worker.py, prompts/, 新启动脚本）。wxe 的 **Tier A 算法修复（log_prob 对齐 / GRPO_guard backward / diffusion rollout fix）未合入**。
+>
+> 被 f9c44a4f 短暂覆盖过的 verl_0902 文件可通过 `git show c4f237d0:<path>` 确认未丢失；
+> wxe 版同一文件可通过 `git show dance-grpo/wxe:<path>` 取出，作为后续手动 cherry-pick 参考。
 
-### 已覆盖内容
+### wxe Tier A 文件保留的价值（未合入，待手动 cherry-pick）
 
 以下改动存在于 wxe 的 Tier A 文件中，被 `ours` 策略丢弃，需作为独立任务手动 patch 到 verl_0902 版本的代码上：
 

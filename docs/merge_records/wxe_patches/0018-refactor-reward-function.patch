@@ -1,0 +1,3725 @@
+From 3cb91077634bb415f9dc339e0409678b63af360f Mon Sep 17 00:00:00 2001
+From: Xuaner <wuxuaner@wuxuanerdeMacBook-Air-2.local>
+Date: Sat, 7 Feb 2026 18:21:33 +0800
+Subject: [PATCH 18/20] refactor reward function
+
+---
+ .../dancegrpo/config/dancegrpo_trainer.yaml   | 117 +++++
+ recipe/dancegrpo/dancegrpo_ray_trainer.py     | 309 ++++++++++---
+ recipe/dancegrpo/main_dancegrpo.py            | 398 ++++++++++++-----
+ recipe/dancegrpo/reward_models/__init__.py    |  57 +++
+ recipe/dancegrpo/reward_models/aesthetic.py   | 151 +++++++
+ recipe/dancegrpo/reward_models/base.py        | 392 +++++++++++++++++
+ recipe/dancegrpo/reward_models/composite.py   | 384 +++++++++++++++++
+ .../dancegrpo/reward_models/dynamic_joint.py  | 408 ++++++++++++++++++
+ recipe/dancegrpo/reward_models/hps.py         | 146 +++++++
+ recipe/dancegrpo/reward_models/qwen.py        | 254 +++++++++++
+ recipe/dancegrpo/reward_models/raft.py        | 165 +++++++
+ recipe/dancegrpo/reward_models/registry.py    | 102 +++++
+ recipe/dancegrpo/reward_models/videoclip.py   | 179 ++++++++
+ recipe/dancegrpo/reward_models/videophy.py    | 328 ++++++++++++++
+ 14 files changed, 3215 insertions(+), 175 deletions(-)
+ create mode 100644 recipe/dancegrpo/reward_models/__init__.py
+ create mode 100644 recipe/dancegrpo/reward_models/aesthetic.py
+ create mode 100644 recipe/dancegrpo/reward_models/base.py
+ create mode 100644 recipe/dancegrpo/reward_models/composite.py
+ create mode 100644 recipe/dancegrpo/reward_models/dynamic_joint.py
+ create mode 100644 recipe/dancegrpo/reward_models/hps.py
+ create mode 100644 recipe/dancegrpo/reward_models/qwen.py
+ create mode 100644 recipe/dancegrpo/reward_models/raft.py
+ create mode 100644 recipe/dancegrpo/reward_models/registry.py
+ create mode 100644 recipe/dancegrpo/reward_models/videoclip.py
+ create mode 100644 recipe/dancegrpo/reward_models/videophy.py
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 302ad91a..c80c7010 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -50,6 +50,15 @@ actor_rollout_ref:
+   shift: 8.0
+   timestep_fraction: 0.6
+   init_same_noise: True
++  
++  # Tokenizer path (relative to model path)
++  tokenizer_path: google/umt5-xxl
++  
++  # VAE configuration
++  # vae_stride: Spatial/temporal compression ratio [temporal, height, width]
++  vae_stride: [4, 8, 8]
++  # latent_channels: Number of channels in VAE latent space
++  latent_channels: 16
+ 
+   # if fast flow-grpo
+   flow_grpo:
+@@ -67,15 +76,123 @@ reward_model:
+   
+   strategy: diffusion
+ 
++  # Reward model type options:
++  # - qwen: Use Qwen VL model for video quality evaluation
++  # - single: Use HPS/aesthetic model only
++  # - joint: Use multiple reward models dynamically from 'joint' config
+   type: qwen # qwen/single/joint
+ 
++  # ============================================================
++  # DYNAMIC JOINT REWARD CONFIGURATION (used when type: joint)
++  # ============================================================
++  # This section allows you to configure ANY number of reward models
++  # with individual weights, GPU allocation, and MPS settings.
++  joint:
++    # Aggregation method: weighted_sum, mean, max, min
++    aggregation: weighted_sum
++    
++    # Whether to normalize each model's output before aggregation
++    normalize_individual: true
++    
++    # Whether to normalize the final aggregated output
++    normalize_final: false
++    
++    # Whether to compute rewards in parallel (recommended)
++    parallel_compute: true
++    
++    # MPS (CUDA Multi-Process Service) configuration
++    # Allows fine-grained GPU resource allocation per model
++    mps:
++      enabled: true
++      default_percentage: 25  # Default MPS percentage if not specified per model
++      # Per-model MPS percentage overrides
++      model_percentages:
++        aesthetic: 20
++        raft: 30
++        videoclip: 25
++        videophy: 25
++    
++    # List of reward models to use
++    # Each model MUST have a registered name in the reward_models/ registry
++    # You can add/remove models freely - just ensure they are registered
++    models:
++      - name: aesthetic
++        enabled: true
++        weight: 1.0
++        dp_fraction: 0.25      # Use 1/4 of GPUs (e.g., 2 out of 8)
++        rank_offset: 0         # Start from rank 0
++        mps_percentage: 20     # 20% of GPU threads (overrides mps.model_percentages)
++        normalize: true
++        model_path: ""
++        extra_config:
++          clip_model_path: /root/models/aesthetic/ViT-L-14.pt
++          aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
++      
++      - name: raft
++        enabled: true
++        weight: 1.0
++        dp_fraction: 0.25
++        rank_offset: 2         # Start from rank 2
++        mps_percentage: 30
++        normalize: true
++        model_path: /root/models/raft/raft-things.pth
++        extra_config:
++          stride: 1
++          iters: 20
++      
++      - name: videoclip
++        enabled: true
++        weight: 1.5            # Higher weight = more influence
++        dp_fraction: 0.25
++        rank_offset: 4
++        mps_percentage: 25
++        normalize: true
++        model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
++        extra_config:
++          num_frames: 8
++          target_size: 224
++      
++      - name: videophy
++        enabled: true
++        weight: 0.8            # Lower weight
++        dp_fraction: 0.25
++        rank_offset: 6
++        mps_percentage: 25
++        normalize: true
++        model_path: /root/models/videocon_physics
++        extra_config:
++          max_length: 256
++      
++      # Example: Adding HPS model (commented out)
++      # - name: hps
++      #   enabled: false
++      #   weight: 1.0
++      #   dp_fraction: 0.125
++      #   rank_offset: 0
++      #   mps_percentage: 15
++      #   model_path: /root/models/hps/hpsv2.pt
++      #   extra_config:
++      #     model_type: ViT-H-14
++
++  # ============================================================
++  # LEGACY CONFIGURATION (for backward compatibility)
++  # ============================================================
++  # These are used when type is NOT 'joint'
++  weights:
++    aes: 1.0
++    raft: 1.0
++    videoclip: 1.0
++    videophy: 1.0
++
+   aesthetic:
+     clip_model_path: /root/models/aesthetic/ViT-L-14.pt
+     aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
+   raft:
+     model_path: /root/models/raft/raft-things.pth
++    stride: 1
+   videoclip:
+     model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
++    num_frames: 8
+   videophy:
+     model_path: /root/models/videocon_physics
+ 
+diff --git a/recipe/dancegrpo/dancegrpo_ray_trainer.py b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+index 301418ce..3201f8c9 100644
+--- a/recipe/dancegrpo/dancegrpo_ray_trainer.py
++++ b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+@@ -1,8 +1,18 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Dance-GRPO Ray Trainer
++
++This module provides the distributed trainer for Dance-GRPO,
++which orchestrates video generation and reward computation across
++multiple GPU workers.
++"""
++
++import logging
+ import time
+ import uuid
+ from collections import defaultdict
+ from copy import deepcopy
+-from typing import Dict, List
++from typing import Any, Dict, List, Optional, Tuple
+ 
+ import numpy as np
+ import torch
+@@ -13,6 +23,12 @@ from verl.trainer.ppo.metric_utils import compute_timing_metrics, reduce_metrics
+ from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
+ from verl.utils.debug import marked_timer
+ 
++logger = logging.getLogger(__name__)
++
++# Default configuration values
++DEFAULT_VAE_STRIDE = [4, 8, 8]
++DEFAULT_LATENT_CHANNELS = 16
++
+ 
+ def compute_advantage(
+     data: DataProto,
+@@ -36,67 +52,103 @@ def compute_advantage(
+     return data
+ 
+ 
+-def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") -> DataProto:
++def merge_worker_results(
++    data_list: List[DataProto],
++    skip_all_zero: bool = True,
++    use_validity_flag: bool = True
++) -> DataProto:
+     """
+-    拼接多个 DataProto。
+-    对于每个数据键(key)，只拼接那些自身包含非零元素的 tensor/array。
+-    完全由零组成的 tensor/array 会被忽略。
++    Merge results from multiple DataProto instances.
++
++    This function handles the merging of results from different data-parallel
++    workers. It provides two strategies for identifying valid data:
++
++    1. Validity flag (preferred): Check for '_valid' meta info
++    2. Non-zero check (fallback): Skip tensors that are all zeros
++
++    IMPORTANT: The non-zero check can incorrectly skip valid data where
++    all values happen to be zero. Prefer using validity flags when possible.
+ 
+     Args:
+-        data_list (List[DataProto]): 多个 DataProto
+-        dummy_key (str): (此参数在当前逻辑中未使用)
++        data_list: List of DataProto from different workers
++        skip_all_zero: If True, skip tensors/arrays that are all zeros
++        use_validity_flag: If True, prefer validity flags over zero-checking
+ 
+     Returns:
+-        DataProto: 拼接后的 DataProto
++        Merged DataProto combining valid data from all workers
+     """
+-    _ = dummy_key
+     if data_list is None:
+         return DataProto()
+     if isinstance(data_list, DataProto):
+         return data_list
+     if not data_list:
+         return DataProto()
++    if len(data_list) == 1:
++        return data_list[0]
+ 
+-    # 1. 收集所有唯一的 key
++    # Collect all unique keys
+     all_batch_keys = set()
+     all_non_tensor_keys = set()
++
+     for dp in data_list:
+         if dp.batch is not None:
+             all_batch_keys.update(dp.batch.keys())
+         if dp.non_tensor_batch is not None:
+             all_non_tensor_keys.update(dp.non_tensor_batch.keys())
+ 
+-    # 2. 处理 batch (PyTorch tensors)
++    def _is_valid_tensor(dp: DataProto, key: str, tensor: torch.Tensor) -> bool:
++        """Check if a tensor is valid using multiple strategies."""
++        # Strategy 1: Check validity flag in meta_info
++        if use_validity_flag and hasattr(dp, 'meta_info') and dp.meta_info:
++            validity_key = f'{key}_valid'
++            if validity_key in dp.meta_info:
++                return dp.meta_info[validity_key]
++
++        # Strategy 2: Check for non-zero values (fallback)
++        if skip_all_zero:
++            return torch.any(tensor != 0).item()
++
++        return True
++
++    def _is_valid_array(dp: DataProto, key: str, arr: np.ndarray) -> bool:
++        """Check if a numpy array is valid using multiple strategies."""
++        # Strategy 1: Check validity flag in meta_info
++        if use_validity_flag and hasattr(dp, 'meta_info') and dp.meta_info:
++            validity_key = f'{key}_valid'
++            if validity_key in dp.meta_info:
++                return dp.meta_info[validity_key]
++
++        # Strategy 2: Check for non-zero values (fallback)
++        # Note: Only apply to numeric arrays
++        if skip_all_zero:
++            if np.issubdtype(arr.dtype, np.number):
++                return np.any(arr != 0)
++
++        return True
++
++    # Process batch tensors
+     batch_dict = {}
+     for key in all_batch_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）tensors
+         tensors_to_concat = []
+         for dp in data_list:
+             if dp.batch is not None and key in dp.batch:
+                 tensor = dp.batch[key]
+-                # 关键改动：检查这一个 tensor 是否包含非零元素
+-                if torch.any(tensor != 0):
+-                    # 如果包含，则将其加入待拼接列表
++                if _is_valid_tensor(dp, key, tensor):
+                     tensors_to_concat.append(tensor)
+ 
+-        # 如果列表不为空（即至少有一个 tensor 是有意义的），则执行拼接
+         if tensors_to_concat:
+             batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
+ 
+-    # 3. 处理 non_tensor_batch (NumPy arrays)
++    # Process non_tensor_batch arrays
+     non_tensor_dict = {}
+     for key in all_non_tensor_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）arrays
+         arrays_to_concat = []
+         for dp in data_list:
+             if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
+                 arr = dp.non_tensor_batch[key]
+-                # 关键改动：检查这一个 array 是否包含非零元素
+-                if np.any(arr != 0):
+-                    # 如果包含，则将其加入待拼接列表
++                if _is_valid_array(dp, key, arr):
+                     arrays_to_concat.append(arr)
+ 
+-        # 如果列表不为空，则执行拼接
+         if arrays_to_concat:
+             non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
+ 
+@@ -272,8 +324,45 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
+                 self.global_steps += 1
+ 
+     def _maybe_create_joint_reward_runner(self):
++        """
++        Create a joint reward runner if configured.
++        
++        Supports two modes:
++        1. Legacy mode: Uses fixed 4 workers (aes, raft, videoclip, videophy)
++        2. Dynamic mode: Uses DynamicJointRewardRunner with config-driven models
++        
++        Returns:
++            A reward runner instance, or None if not using joint rewards
++        """
+         if not self.use_rm or self.config.reward_model.type != "joint":
+             return None
++        
++        # Check if using dynamic joint configuration
++        joint_config = self.config.reward_model.get("joint", None)
++        
++        if joint_config and joint_config.get("models"):
++            # Use new dynamic joint reward runner
++            from .reward_models.dynamic_joint import (
++                DynamicJointRewardRunner,
++                JointRewardConfig
++            )
++            import torch.distributed as dist
++            
++            rank = dist.get_rank() if dist.is_initialized() else 0
++            world_size = dist.get_world_size() if dist.is_initialized() else 1
++            
++            config = JointRewardConfig.from_dict(joint_config)
++            runner = DynamicJointRewardRunner(config, rank, world_size)
++            runner.init_all_models()
++            
++            logger.info(
++                f"Created DynamicJointRewardRunner with {len(runner)} models: "
++                f"{runner.list_models()}"
++            )
++            return runner
++        
++        # Legacy mode: use fixed 4 workers
++        logger.info("Using legacy joint reward runner with fixed workers")
+         workers = {
+             "aes": self.aes_rm_wg,
+             "raft": self.raft_rm_wg,
+@@ -304,26 +393,50 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
+         )
+ 
+     def _prepare_diffusion_inputs(self, new_batch: DataProto, gen_batch: DataProto) -> None:
+-        # 形状与配置
++        """
++        Prepare latent inputs for diffusion model generation.
++        
++        This initializes:
++        - Random noise in latent space
++        - Sigma schedule for the diffusion process
++        
++        Args:
++            new_batch: Source batch with metadata
++            gen_batch: Target batch to add diffusion inputs to
++        """
+         batch_size = new_batch.batch.batch_size[0]
+         num_steps = self.config.actor_rollout_ref.sampling_steps
+         num_frames = self.config.actor_rollout_ref.num_frames
+         size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
+-        vae_stride = [4, 8, 8]  # VAE
++        
++        # Get VAE stride from config (with default fallback)
++        # vae_stride controls the spatial/temporal compression ratio
++        vae_stride = self.config.actor_rollout_ref.get(
++            "vae_stride", DEFAULT_VAE_STRIDE
++        )
++        
++        # Get latent channels from config (default: 16)
++        # This is the number of channels in the VAE latent space
++        latent_channels = self.config.actor_rollout_ref.get(
++            "latent_channels", DEFAULT_LATENT_CHANNELS
++        )
++        
+         latent_shape = (
+-            16,  # 这里的16指的是什么
++            latent_channels,
+             (num_frames - 1) // vae_stride[0] + 1,
+             size[1] // vae_stride[1],
+             size[0] // vae_stride[2],
+         )
+ 
+-        # 预分配批量张量
++        # Pre-allocate batch tensors
+         input_latents = torch.empty((batch_size, *latent_shape), dtype=torch.float32)
+         sigma_schedule_B = torch.empty((batch_size, num_steps + 1), dtype=torch.float32)
+ 
+         for i in range(batch_size):
+             sigma_schedule = torch.linspace(1, 0, num_steps + 1)
+-            sigma_schedule = self._sd3_time_shift(self.config.actor_rollout_ref.shift, sigma_schedule)
++            sigma_schedule = self._sd3_time_shift(
++                self.config.actor_rollout_ref.shift, sigma_schedule
++            )
+             sigma_schedule_B[i] = sigma_schedule
+             input_latents[i] = torch.randn(latent_shape, dtype=torch.float32)
+ 
+@@ -359,42 +472,122 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
+         gen_batch_output.pop(batch_keys=["video_frames"])
+         return gen_batch_output
+ 
+-    def _compute_joint_reward(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner):
++    def _compute_joint_reward(
++        self, 
++        gen_batch_output: DataProto, 
++        metrics: dict, 
++        joint_reward_runner
++    ) -> DataProto:
++        """
++        Compute weighted combination of multiple reward signals.
++        
++        Supports two runner types:
++        1. DynamicJointRewardRunner: Uses compute_and_aggregate() for full processing
++        2. Legacy _JointRewardRunner: Uses manual aggregation with fixed 4 models
++        
++        Args:
++            gen_batch_output: Generated video batch
++            metrics: Dict to store metrics
++            joint_reward_runner: Runner managing parallel reward computation
++            
++        Returns:
++            DataProto with combined rewards
++        """
++        from tensordict import TensorDict
++        from .reward_models.dynamic_joint import DynamicJointRewardRunner
++        
+         start_time = time.time()
+-
++        
++        # Check if using dynamic runner (has compute_and_aggregate method)
++        if isinstance(joint_reward_runner, DynamicJointRewardRunner):
++            # Use the new dynamic runner which handles everything internally
++            final_batch = joint_reward_runner.compute_and_aggregate(gen_batch_output)
++            
++            # Add metrics from the dynamic runner
++            rewards_dict = joint_reward_runner.compute(gen_batch_output)
++            metrics.update(joint_reward_runner.get_metrics(rewards_dict))
++            metrics["train/rewards"] = final_batch.batch["rewards"].mean().item()
++            
++            if "log_probs" in gen_batch_output.batch.keys():
++                final_batch = gen_batch_output.union(final_batch)
++                metrics["train/log_probs"] = final_batch.batch["log_probs"].mean().item()
++            
++            elapsed = time.time() - start_time
++            logger.info(f"Dynamic joint reward computation took {elapsed:.2f}s")
++            return final_batch
++        
++        # Legacy mode: manual aggregation with fixed 4 models
+         rewards = joint_reward_runner.compute(gen_batch_output)
+-        aes_tensor = rewards["aes"]
+-        raft_tensor = rewards["raft"]
+-        videoclip_tensor = rewards["videoclip"]
+-        videophy_tensor = rewards["videophy"]
+-
+-        batch_with_rewards = (
+-            gen_batch_output.union(aes_tensor)
+-            .union(raft_tensor)
+-            .union(videoclip_tensor)
+-            .union(videophy_tensor)
++        aes_tensor = rewards.get("aes")
++        raft_tensor = rewards.get("raft")
++        videoclip_tensor = rewards.get("videoclip")
++        videophy_tensor = rewards.get("videophy")
++
++        batch_with_rewards = gen_batch_output
++        if aes_tensor is not None:
++            batch_with_rewards = batch_with_rewards.union(aes_tensor)
++        if raft_tensor is not None:
++            batch_with_rewards = batch_with_rewards.union(raft_tensor)
++        if videoclip_tensor is not None:
++            batch_with_rewards = batch_with_rewards.union(videoclip_tensor)
++        if videophy_tensor is not None:
++            batch_with_rewards = batch_with_rewards.union(videophy_tensor)
++
++        # Get configurable weights (with sensible defaults)
++        weights_config = self.config.reward_model.get("weights", {})
++        w_aes = weights_config.get("aes", 1.0)
++        w_raft = weights_config.get("raft", 1.0)
++        w_videoclip = weights_config.get("videoclip", 1.0)
++        w_videophy = weights_config.get("videophy", 1.0)
++        
++        logger.debug(
++            f"Reward weights: aes={w_aes}, raft={w_raft}, "
++            f"videoclip={w_videoclip}, videophy={w_videophy}"
+         )
+ 
+-        # 计算平均 reward（可配置权重）
+-        avg_reward = (
+-            batch_with_rewards.batch["aes_rewards"]
+-            + batch_with_rewards.batch["raft_rewards"]
+-            + batch_with_rewards.batch["videoclip_rewards"]
+-            + batch_with_rewards.batch["videophy_rewards"]
++        # Compute weighted sum of rewards (handle missing rewards gracefully)
++        combined_reward = torch.zeros_like(batch_with_rewards.batch.get(
++            "aes_rewards", 
++            batch_with_rewards.batch.get("raft_rewards")
++        ))
++        
++        if "aes_rewards" in batch_with_rewards.batch.keys():
++            combined_reward = combined_reward + w_aes * batch_with_rewards.batch["aes_rewards"]
++            metrics["train/rewards_aes"] = batch_with_rewards.batch["aes_rewards"].mean().item()
++        if "raft_rewards" in batch_with_rewards.batch.keys():
++            combined_reward = combined_reward + w_raft * batch_with_rewards.batch["raft_rewards"]
++            metrics["train/rewards_raft"] = batch_with_rewards.batch["raft_rewards"].mean().item()
++        if "videoclip_rewards" in batch_with_rewards.batch.keys():
++            combined_reward = combined_reward + w_videoclip * batch_with_rewards.batch["videoclip_rewards"]
++            metrics["train/rewards_videoclip"] = batch_with_rewards.batch["videoclip_rewards"].mean().item()
++        if "videophy_rewards" in batch_with_rewards.batch.keys():
++            combined_reward = combined_reward + w_videophy * batch_with_rewards.batch["videophy_rewards"]
++            metrics["train/rewards_videophy"] = batch_with_rewards.batch["videophy_rewards"].mean().item()
++
++        # Build final result with combined reward
++        reward_td = TensorDict(
++            {"rewards": combined_reward}, 
++            batch_size=combined_reward.shape[0]
+         )
+-
+-        # 构造最终 reward DataProto（带平均 reward）
+-        from tensordict import TensorDict
+-
+-        avg_reward_td = TensorDict({"rewards": avg_reward}, batch_size=avg_reward.shape[0])
+-        avg_reward_proto = DataProto(batch=avg_reward_td, non_tensor_batch=aes_tensor.non_tensor_batch)
+-        final_batch = batch_with_rewards.union(avg_reward_proto)
+-
+-        # 更新指标
+-        metrics["train/rewards"] = avg_reward.mean()
+-        metrics["train/log_probs"] = final_batch.batch["log_probs"].mean()
+-
+-        print(f"reward time: {time.time() - start_time:.2f}s")
++        
++        # Get non_tensor_batch from first available tensor
++        non_tensor = {}
++        for tensor in [aes_tensor, raft_tensor, videoclip_tensor, videophy_tensor]:
++            if tensor is not None and tensor.non_tensor_batch:
++                non_tensor = tensor.non_tensor_batch
++                break
++        
++        reward_proto = DataProto(batch=reward_td, non_tensor_batch=non_tensor)
++        final_batch = batch_with_rewards.union(reward_proto)
++
++        # Log metrics
++        metrics["train/rewards"] = combined_reward.mean().item()
++        if "log_probs" in final_batch.batch.keys():
++            metrics["train/log_probs"] = final_batch.batch["log_probs"].mean().item()
++
++        elapsed = time.time() - start_time
++        logger.info(f"Legacy joint reward computation took {elapsed:.2f}s")
++        
+         return final_batch
+ 
+     def _compute_single_rm_reward(self, gen_batch_output: DataProto, metrics: dict):
+diff --git a/recipe/dancegrpo/main_dancegrpo.py b/recipe/dancegrpo/main_dancegrpo.py
+index 59560ab7..bdc12581 100644
+--- a/recipe/dancegrpo/main_dancegrpo.py
++++ b/recipe/dancegrpo/main_dancegrpo.py
+@@ -1,12 +1,29 @@
+-import hydra
++# Copyright 2024 Dance-GRPO Team
++"""
++Dance-GRPO Main Entry Point
++
++This module provides the main entry point for Dance-GRPO training,
++which applies Group Relative Policy Optimization to diffusion models
++for video generation with multiple reward signals.
++"""
++
++import logging
++import os
++from typing import Dict, Optional, Tuple, Any
+ 
+-# os.environ["RAY_DEDUP_LOGS"] = "0"
++import hydra
+ import ray
++from omegaconf import DictConfig, OmegaConf
++from pprint import pprint
+ 
+ from verl.trainer.ppo.reward import get_custom_reward_fn
++from verl.utils.fs import copy_to_local
+ 
+ from .dancegrpo_ray_trainer import RayDanceGRPOTrainer
+ 
++logger = logging.getLogger(__name__)
++
++# Ray environment variables for distributed training
+ RAY_ENV_VARS = {
+     "TOKENIZERS_PARALLELISM": "true",
+     "NCCL_DEBUG": "WARN",
+@@ -15,187 +32,320 @@ RAY_ENV_VARS = {
+ }
+ 
+ 
+-def _init_ray(config) -> None:
++def _init_ray(config: DictConfig) -> None:
++    """
++    Initialize Ray runtime if not already initialized.
++    
++    Args:
++        config: Configuration with ray_init settings
++    """
+     if ray.is_initialized():
++        logger.info("Ray already initialized, skipping")
+         return
+-    # this is for local ray cluster
++    
+     ray.init(
+         runtime_env={"env_vars": RAY_ENV_VARS},
+         num_cpus=config.ray_init.num_cpus,
+     )
+-
+-
+-def _build_tokenizer_and_processor(local_path):
+-    import os
++    logger.info(f"Ray initialized with {config.ray_init.num_cpus} CPUs")
++
++
++def _build_tokenizer_and_processor(
++    local_path: str, 
++    config: Optional[DictConfig] = None
++) -> Tuple[Any, Any]:
++    """
++    Build tokenizer and processor for the model.
++    
++    Args:
++        local_path: Local path to the model
++        config: Optional config for custom tokenizer path
++        
++    Returns:
++        Tuple of (tokenizer, processor)
++        
++    Raises:
++        RuntimeError: If tokenizer loading fails
++    """
+     from verl.utils import hf_processor, hf_tokenizer
+ 
+-    tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
+-    tokenizer = hf_tokenizer(tokenizer_path)
+-    processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
+-    return tokenizer, processor
+-
+-
+-def _resolve_actor_worker_and_group(config):
++    # Allow configurable tokenizer path with sensible default
++    tokenizer_subpath = "google/umt5-xxl"
++    if config is not None:
++        tokenizer_subpath = config.get("tokenizer_path", tokenizer_subpath)
++    
++    tokenizer_path = os.path.join(local_path, tokenizer_subpath)
++    
++    try:
++        tokenizer = hf_tokenizer(tokenizer_path)
++        processor = hf_processor(local_path, use_fast=True)
++        logger.info(f"Loaded tokenizer from {tokenizer_path}")
++        return tokenizer, processor
++    except Exception as e:
++        raise RuntimeError(f"Failed to load tokenizer from {tokenizer_path}: {e}")
++
++
++def _resolve_actor_worker_and_group(config: DictConfig) -> Tuple[type, type]:
++    """
++    Resolve the worker class and group class based on strategy.
++    
++    Args:
++        config: Configuration with actor_rollout_ref settings
++        
++    Returns:
++        Tuple of (RayWorkerGroupClass, ActorWorkerClass)
++        
++    Raises:
++        NotImplementedError: If strategy is not supported
++    """
+     strategy = config.actor_rollout_ref.actor.strategy
+-    assert strategy == config.critic.strategy
++    
++    # Only check critic strategy if critic is enabled
++    use_critic = config.algorithm.get("adv_estimator", "grpo") == "gae"
++    if use_critic and hasattr(config, 'critic'):
++        assert strategy == config.critic.strategy, (
++            f"Actor strategy ({strategy}) must match critic strategy ({config.critic.strategy})"
++        )
+ 
+-    if strategy == "fsdp":  # actor的策略
++    if strategy == "fsdp":
+         from verl.single_controller.ray import RayWorkerGroup
+         from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
+-
+         return RayWorkerGroup, DiffusionActorRolloutRefWorker
+ 
+     if strategy == "megatron":
+         from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
+         from verl.workers.megatron_workers import ActorRolloutRefWorker
+-
+         return NVMegatronRayWorkerGroup, ActorRolloutRefWorker
+ 
+     raise NotImplementedError(f"Unknown actor strategy: {strategy}")
+ 
+ 
+-def _build_reward_fns(config, tokenizer):
++def _build_reward_fns(config: DictConfig, tokenizer):
++    """
++    Build reward functions for training and validation.
++    
++    Args:
++        config: Configuration with reward_model settings
++        tokenizer: Tokenizer for the model
++        
++    Returns:
++        Tuple of (reward_fn, val_reward_fn)
++    """
+     from verl.workers.reward_manager import get_reward_manager_cls
+ 
+-    # Note(haibin.lin): please make sure custom reward managers are imported and
+-    # registered via `verl.workers.reward_manager.register`
+     reward_manager_name = config.reward_model.get("reward_manager", "naive")
+-    reward_manager_cls = get_reward_manager_cls(reward_manager_name)  # 这里看注册的reward manager是什么
+-    compute_score = get_custom_reward_fn(config)  # 这里返回None，表示没有自定义的reward function
++    reward_manager_cls = get_reward_manager_cls(reward_manager_name)
++    compute_score = get_custom_reward_fn(config)
+ 
+-    # 初始化reward function，这个函数会被传入每一个worker中，作为计算reward的接口
+-    # 使用的reward manager 是 dancegrpo(从config中读取的) -> AIGCRewardManager
++    # Training reward function
+     reward_fn = reward_manager_cls(
+         tokenizer=tokenizer,
+         num_examine=0,
+-        compute_score=compute_score,  # 没有定义的话这里会自动转为默认的default_compute_score函数
++        compute_score=compute_score,
+     )
+ 
+-    # Note that we always use function-based RM for validation
++    # Validation reward function (with sample examination)
+     val_reward_fn = reward_manager_cls(
+         tokenizer=tokenizer,
+         num_examine=1,
+         compute_score=compute_score,
+     )
++    
+     return reward_fn, val_reward_fn
+ 
+ 
+-def run_ppo(config) -> None:
++def _validate_config(config: DictConfig) -> None:
++    """
++    Validate Dance-GRPO specific configuration.
++    
++    Args:
++        config: Configuration to validate
++        
++    Raises:
++        ValueError: If configuration is invalid
++    """
++    # Validate reward model configuration
++    if config.reward_model.enable:
++        strategy = config.reward_model.strategy
++        valid_strategies = ["fsdp", "megatron", "diffusion"]
++        if strategy not in valid_strategies:
++            raise ValueError(
++                f"Invalid reward_model.strategy: {strategy}. "
++                f"Must be one of {valid_strategies}"
++            )
++        
++        if strategy == "diffusion":
++            rm_type = config.reward_model.type
++            valid_types = ["qwen", "single", "joint"]
++            if rm_type not in valid_types:
++                raise ValueError(
++                    f"Invalid reward_model.type: {rm_type}. "
++                    f"Must be one of {valid_types}"
++                )
++    
++    logger.info("Configuration validation passed")
++
++
++def _register_reward_workers(
++    config: DictConfig,
++    role_worker_mapping: Dict,
++    mapping: Dict,
++    global_pool_id: str
++) -> None:
++    """
++    Register reward model workers based on configuration.
++    
++    This function handles the registration of different reward model types:
++    - qwen: Single Qwen VL model
++    - single: Single diffusion-based reward
++    - joint: Multiple specialized reward models
++
++    
++    Args:
++        config: Configuration with reward_model settings
++        role_worker_mapping: Dict to store role -> worker class mappings
++        mapping: Dict to store role -> pool_id mappings
++        global_pool_id: The global resource pool ID
++    """
++    from verl.trainer.ppo.ray_trainer import Role
++    
++    if not config.reward_model.enable:
++        return
++    
++    strategy = config.reward_model.strategy
++    rm_type = config.reward_model.type
++    
++    def register_role(role, worker_cls):
++        role_worker_mapping[role] = ray.remote(worker_cls)
++        mapping[role] = global_pool_id
++        logger.info(f"Registered {role} with worker {worker_cls.__name__}")
++    
++    if strategy == "fsdp":
++        from .dancegrpo_fsdp_worker import RewardModelWorker
++        register_role(Role.RewardModel, RewardModelWorker)
++        
++    elif strategy == "megatron":
++        from verl.workers.megatron_workers import RewardModelWorker
++        register_role(Role.RewardModel, RewardModelWorker)
++        
++    elif strategy == "diffusion":
++        if rm_type == "qwen":
++            from .dancegrpo_fsdp_worker import QwenRewardModelWorker
++            register_role(Role.RewardModel, QwenRewardModelWorker)
++            
++        elif rm_type == "single":
++            from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker
++            register_role(Role.RewardModel, DiffusionRewardModelWorker)
++            
++        elif rm_type == "joint":
++            from .dancegrpo_fsdp_worker import (
++                AestheticRewardModelWorker,
++                RAFTRewardModelWorker,
++                VideoclipRewardModelWorker,
++                VideophyRewardModelWorker,
++            )
++            register_role(Role.AestheticRewardModel, AestheticRewardModelWorker)
++            register_role(Role.RAFTRewardModel, RAFTRewardModelWorker)
++            register_role(Role.VideoclipRewardModel, VideoclipRewardModelWorker)
++            register_role(Role.VideophyRewardModel, VideophyRewardModelWorker)
++            
++
++        else:
++            raise NotImplementedError(f"Unknown reward model type: {rm_type}")
++    else:
++        raise NotImplementedError(f"Unknown reward model strategy: {strategy}")
++
++
++def run_ppo(config: DictConfig) -> None:
++    """
++    Initialize Ray and start the PPO training task.
++    
++    Args:
++        config: Hydra configuration
++    """
+     _init_ray(config)
+-
++    
+     runner = TaskRunner.remote()
+     ray.get(runner.run.remote(config))
+ 
+ 
+-@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
+-def main(config):
+-    run_ppo(config)
+-
+-
+-@ray.remote(num_cpus=1)  # please make sure main_task is not scheduled on head
++@ray.remote(num_cpus=1)
+ class TaskRunner:
+-    def run(self, config):
+-        # print initial config
+-        from pprint import pprint
+-        from omegaconf import OmegaConf
+-        from verl.utils.fs import copy_to_local
+-
+-        pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
++    """
++    Remote task runner for Dance-GRPO training.
++    
++    This class runs on a Ray worker (not the head node) to avoid
++    resource contention with the driver process.
++    """
++    
++    def run(self, config: DictConfig) -> None:
++        """
++        Execute the training pipeline.
++        
++        Args:
++            config: Training configuration
++        """
++        from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
++        from verl.single_controller.ray import RayWorkerGroup
++        
++        # Print and resolve configuration
++        pprint(OmegaConf.to_container(config, resolve=True))
+         OmegaConf.resolve(config)
++        
++        # Validate configuration
++        _validate_config(config)
++
++        # Download model checkpoint
++        try:
++            local_path = copy_to_local(config.actor_rollout_ref.model.path)
++            logger.info(f"Model downloaded to {local_path}")
++        except Exception as e:
++            raise RuntimeError(
++                f"Failed to download model from {config.actor_rollout_ref.model.path}: {e}"
++            )
++
++        # Build tokenizer and processor
++        tokenizer, processor = _build_tokenizer_and_processor(
++            local_path, 
++            config.actor_rollout_ref.model
++        )
+ 
+-        # download the checkpoint from hdfs
+-        local_path = copy_to_local(config.actor_rollout_ref.model.path)
+-
+-        # instantiate tokenizer
+-        # 需要tokenizer和preprocessor
+-        tokenizer, processor = _build_tokenizer_and_processor(local_path)
+-
+-        # define worker classes
++        # Resolve worker classes
+         ray_worker_group_cls, actor_rollout_worker_cls = _resolve_actor_worker_and_group(config)
+ 
+-        from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
+-
+-        # Dict[Role, RayClass]
++        # Setup role-worker mapping
+         role_worker_mapping = {}
+-
+         global_pool_id = "global_pool"
+-        # Dict[str, List[int]]
++        
+         resource_pool_spec = {
+             global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+         }
+-
+-        # Dict[Role, str]
+-        # global_pool_id 本身也是一个Dict[str, List[int]]
+         mapping = {}
+ 
+         def register_role(role, worker_cls):
+-            # ray.remote(Worker).remote() 这才是启动一个远程worker
+             role_worker_mapping[role] = ray.remote(worker_cls)
+             mapping[role] = global_pool_id
+ 
+-        # 调用ActorRollout，需要通过ray.remote的方式实例化worker
++        # Register actor/rollout worker
+         register_role(Role.ActorRollout, actor_rollout_worker_cls)
+ 
+-        # we should adopt a multi-source reward function here
+-        # - for rule-based rm, we directly call a reward score
+-        # - for model-based rm, we call a model
+-        # - for code related prompt, we send to a sandbox if there are test cases
+-        # - finally, we combine all the rewards together
+-        # - The reward type depends on the tag of the data
+-
+-        if config.reward_model.enable:  # reward model的策略
+-            # 以何种分布式并行方式加载这个奖励模型 LLM（大语言模型）
+-            if config.reward_model.strategy == "fsdp":
+-                from .fsdp_worker import RewardModelWorker
+-                register_role(Role.RewardModel, RewardModelWorker)
+-                print(f"Mapping type {Role.RewardModel} to be the reward model")
+-
+-            elif config.reward_model.strategy == "megatron":
+-                from verl.workers.megatron_workers import RewardModelWorker
+-                register_role(Role.RewardModel, RewardModelWorker)
+-                print(f"Mapping type {Role.RewardModel} to be the reward model")
+-
+-            # reward model 使用 diffusion 模型
+-            elif config.reward_model.strategy == "diffusion":  # reward使用的是diffusion
+-                if config.reward_model.type == "qwen":  # reward model的类型
+-                    from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+-                    register_role(Role.RewardModel, RewardModelWorker)
+-                    print(f"Mapping type {Role.RewardModel} to be the Qwen reward model")
+-
+-                elif config.reward_model.type == "single":
+-                    from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
+-                    register_role(Role.RewardModel, RewardModelWorker)
+-                    print(f"Mapping type {Role.RewardModel} to be the single diffusion reward model")
+-
+-                elif config.reward_model.type == "joint":
+-                    from .dancegrpo_fsdp_worker import (
+-                        AestheticRewardModelWorker,
+-                        RAFTRewardModelWorker,
+-                        VideoclipRewardModelWorker,
+-                        VideophyRewardModelWorker,
+-                    )
+-                    # 注意：joint 模式下可能不需要单一的 RewardModelWorker
+-                    # 而是注册多个具体角色的 worker
+-                    register_role(Role.AestheticRewardModel, AestheticRewardModelWorker)
+-                    register_role(Role.RAFTRewardModel, RAFTRewardModelWorker)
+-                    register_role(Role.VideoclipRewardModel, VideoclipRewardModelWorker)
+-                    register_role(Role.VideophyRewardModel, VideophyRewardModelWorker)
+-
+-                    print("Mapping multiple reward models for 'joint' type", role_worker_mapping)
+-
+-                else:
+-                    raise NotImplementedError(f"Unknown diffusion reward model type: {config.reward_model.type}")
+-
+-            else:
+-                raise NotImplementedError(f"Unknown reward model strategy: {config.reward_model.strategy}")
++        # Register reward workers
++        _register_reward_workers(config, role_worker_mapping, mapping, global_pool_id)
+ 
++        # Build reward functions
+         reward_fn, val_reward_fn = _build_reward_fns(config, tokenizer)
+ 
+-        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
++        # Create resource pool manager
++        resource_pool_manager = ResourcePoolManager(
++            resource_pool_spec=resource_pool_spec, 
++            mapping=mapping
++        )
+ 
++        # Get collate function
+         from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
+ 
+-        trainer = RayDanceGRPOTrainer(  # 初始化训练类
++        # Create and run trainer
++        trainer = RayDanceGRPOTrainer(
+             config=config,
+             tokenizer=tokenizer,
+             processor=processor,
+@@ -206,8 +356,22 @@ class TaskRunner:
+             reward_fn=reward_fn,
+             val_reward_fn=val_reward_fn,
+         )
+-        trainer.init_workers()  # 初始化所有的worker
+-        trainer.fit()  # 开始训练
++        
++        trainer.init_workers()
++        trainer.fit()
++
++
++@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
++def main(config: DictConfig) -> None:
++    """
++    Main entry point for Dance-GRPO training.
++    
++    Uses Hydra for configuration management.
++    
++    Args:
++        config: Hydra-loaded configuration
++    """
++    run_ppo(config)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/recipe/dancegrpo/reward_models/__init__.py b/recipe/dancegrpo/reward_models/__init__.py
+new file mode 100644
+index 00000000..c134e6fa
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/__init__.py
+@@ -0,0 +1,57 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Reward Models Module
++
++This module provides a unified abstraction for various reward models used in video generation RL.
++Supports dynamic loading of reward models from configuration.
++"""
++
++from .registry import RewardRegistry
++from .base import BaseRewardModel, RewardConfig, MPSConfig
++from .composite import CompositeRewardManager, CompositeRewardConfig
++from .dynamic_joint import (
++    DynamicJointRewardRunner, 
++    JointRewardConfig,
++    create_joint_runner_from_config
++)
++
++# Import all reward models to trigger registration
++from . import aesthetic
++from . import raft
++from . import videoclip
++from . import videophy
++from . import hps
++from . import qwen
++
++__all__ = [
++    "RewardRegistry",
++    "BaseRewardModel", 
++    "RewardConfig",
++    "MPSConfig",
++    "CompositeRewardManager",
++    "CompositeRewardConfig",
++    "DynamicJointRewardRunner",
++    "JointRewardConfig",
++    "create_joint_runner_from_config",
++]
++
++
++def list_available_models():
++    """List all available reward model names."""
++    return RewardRegistry.list_available()
++
++
++def create_reward_model(name: str, config: RewardConfig, rank: int, world_size: int):
++    """
++    Create a reward model instance by name.
++    
++    Args:
++        name: Registered name of the reward model
++        config: Configuration for the model
++        rank: Current process rank
++        world_size: Total number of processes
++        
++    Returns:
++        BaseRewardModel instance
++    """
++    return RewardRegistry.create(name, config, rank, world_size)
+diff --git a/recipe/dancegrpo/reward_models/aesthetic.py b/recipe/dancegrpo/reward_models/aesthetic.py
+new file mode 100644
+index 00000000..df9c78de
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/aesthetic.py
+@@ -0,0 +1,151 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Aesthetic Reward Model - Evaluates aesthetic quality of video frames using CLIP + Linear.
++
++This model computes an aesthetic score based on CLIP visual features
++processed through a trained linear regression head.
++"""
++
++import logging
++from typing import Optional
++
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
++from torchvision import transforms
++
++from .base import BaseRewardModel, RewardConfig
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++# Try to import interpolation mode for transforms
++try:
++    from torchvision.transforms import InterpolationMode
++    BICUBIC = InterpolationMode.BICUBIC
++except ImportError:
++    from PIL import Image
++    BICUBIC = Image.BICUBIC
++
++
++def clip_transform(n_px: int):
++    """Create CLIP-compatible image transform."""
++    return transforms.Compose([
++        transforms.Resize(n_px, interpolation=BICUBIC, antialias=False),
++        transforms.CenterCrop(n_px),
++        transforms.Lambda(lambda x: x.float().div(255.0)),
++        transforms.Normalize(
++            mean=(0.48145466, 0.4578275, 0.40821073),
++            std=(0.26862954, 0.26130258, 0.27577711)
++        )
++    ])
++
++
++@RewardRegistry.register("aesthetic")
++class AestheticRewardModel(BaseRewardModel):
++    """
++    Aesthetic quality reward model.
++    
++    Uses a CLIP vision encoder to extract features, then applies a trained
++    linear head to predict aesthetic scores.
++    
++    Config extra_config keys:
++        - clip_model_path: Path to CLIP model weights
++        - aes_model_path: Path to aesthetic linear head weights
++    """
++    
++    REWARD_KEY = "aes_rewards"
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.clip_model: Optional[nn.Module] = None
++        self.aes_model: Optional[nn.Module] = None
++        self.transform = clip_transform(224)
++    
++    def init_model(self) -> None:
++        """Initialize CLIP and aesthetic models."""
++        if not self.is_active:
++            logger.info(f"[aesthetic] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        clip_path = extra.get("clip_model_path")
++        aes_path = extra.get("aes_model_path")
++        
++        if not clip_path or not aes_path:
++            raise ValueError(
++                "aesthetic model requires 'clip_model_path' and 'aes_model_path' in extra_config"
++            )
++        
++        # Load CLIP model
++        try:
++            from verl.models.offline_clip import create_offline_clip_model
++            self.clip_model = create_offline_clip_model(clip_path, "cpu")
++            logger.info(f"Loaded CLIP model from {clip_path}")
++        except Exception as e:
++            logger.error(f"Failed to load CLIP model: {e}")
++            raise
++        
++        # Load aesthetic head
++        self.aes_model = self._load_aesthetic_head(aes_path)
++        
++        # Log parameter counts
++        clip_params = sum(p.numel() for p in self.clip_model.parameters())
++        aes_params = sum(p.numel() for p in self.aes_model.parameters())
++        logger.info(f"Aesthetic model initialized: CLIP={clip_params:,}, Head={aes_params:,} params")
++    
++    def _load_aesthetic_head(self, path: str) -> nn.Module:
++        """Load the aesthetic linear regression head."""
++        model = nn.Linear(768, 1)
++        state_dict = torch.load(path, map_location="cpu")
++        model.load_state_dict(state_dict)
++        model.eval()
++        logger.info(f"Loaded aesthetic head from {path}")
++        return model
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute aesthetic score for a single video.
++        
++        Uses the first frame of the video for scoring.
++        
++        Args:
++            video_frames: Video tensor, shape (T, C, H, W)
++            caption: Text caption (unused for aesthetic scoring)
++            
++        Returns:
++            Normalized aesthetic score
++        """
++        # Take first frame: (T, C, H, W) -> (C, H, W)
++        frame = video_frames[0]
++        
++        # Apply transform and add batch dim
++        transformed = self.transform(frame).unsqueeze(0)
++        transformed = transformed.to(self.get_device())
++        
++        # Move models to device
++        self.clip_model.to(self.get_device())
++        self.aes_model.to(self.get_device())
++        
++        try:
++            with torch.no_grad():
++                # Extract CLIP features
++                features = self.clip_model.encode_image(transformed).float()
++                features = F.normalize(features, dim=-1)
++                
++                # Compute aesthetic score
++                score = self.aes_model(features).squeeze(-1)
++            
++            # Normalize to reasonable range and return mean
++            mean_score = (score / 10.0).mean().item()
++            logger.debug(f"Aesthetic score: {mean_score:.4f}")
++            return mean_score
++            
++        finally:
++            # Move models back to CPU to free GPU memory
++            self.clip_model.to("cpu")
++            self.aes_model.to("cpu")
+diff --git a/recipe/dancegrpo/reward_models/base.py b/recipe/dancegrpo/reward_models/base.py
+new file mode 100644
+index 00000000..fbe49c5b
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/base.py
+@@ -0,0 +1,392 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Base classes and utilities for Reward Models.
++
++This module provides the abstract base class that all reward models should inherit from,
++along with common utilities for data parallel processing and result aggregation.
++"""
++
++from abc import ABC, abstractmethod
++from dataclasses import dataclass, field
++from typing import Any, Dict, List, Optional, Tuple
++import logging
++import time
++import os
++
++import numpy as np
++import torch
++import torch.nn.functional as F
++from tensordict import TensorDict
++
++from verl import DataProto
++from verl.utils.device import get_device_id
++
++logger = logging.getLogger(__name__)
++
++
++@dataclass
++class RewardConfig:
++    """
++    Configuration for a single reward model.
++    
++    Attributes:
++        name: Unique identifier for the reward model (must match registry name)
++        model_path: Path to the model weights
++        weight: Weight in composite reward calculation (default: 1.0)
++        dp_fraction: Fraction of GPUs to use (e.g., 0.25 = 1/4 of all GPUs)
++        rank_offset: Starting rank for this model's active workers
++        enabled: Whether this model is enabled
++        normalize: Whether to apply z-score normalization to rewards
++        mps_percentage: CUDA MPS active thread percentage (0-100, 0 means disabled)
++        extra_config: Model-specific configuration dictionary
++    """
++    name: str
++    model_path: str = ""
++    weight: float = 1.0
++    dp_fraction: float = 1.0
++    rank_offset: int = 0
++    enabled: bool = True
++    normalize: bool = True
++    mps_percentage: int = 0  # 0 means MPS disabled, e.g., 25 means 25% GPU threads
++    extra_config: Dict[str, Any] = field(default_factory=dict)
++    
++    @classmethod
++    def from_dict(cls, d: Dict[str, Any]) -> "RewardConfig":
++        """Create a RewardConfig from a dictionary."""
++        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
++    
++    def get_mps_env_value(self) -> Optional[str]:
++        """Get the MPS environment variable value, or None if disabled."""
++        if self.mps_percentage > 0:
++            return str(self.mps_percentage)
++        return None
++
++
++@dataclass
++class MPSConfig:
++    """
++    Configuration for CUDA MPS (Multi-Process Service) allocation.
++    
++    This allows fine-grained control over GPU resource allocation 
++    when running multiple reward models concurrently.
++    
++    Attributes:
++        enabled: Whether MPS is enabled globally
++        default_percentage: Default percentage for models without explicit config
++        model_percentages: Per-model MPS percentage overrides
++    """
++    enabled: bool = False
++    default_percentage: int = 25  # Default 25% per model
++    model_percentages: Dict[str, int] = field(default_factory=dict)
++    
++    @classmethod
++    def from_dict(cls, d: Dict[str, Any]) -> "MPSConfig":
++        """Create from a dictionary (e.g., from YAML config)."""
++        if d is None:
++            return cls()
++        return cls(
++            enabled=d.get("enabled", False),
++            default_percentage=d.get("default_percentage", 25),
++            model_percentages=d.get("model_percentages", {}),
++        )
++    
++    def get_percentage_for_model(self, model_name: str) -> int:
++        """Get MPS percentage for a specific model."""
++        return self.model_percentages.get(model_name, self.default_percentage)
++    
++    def apply_mps_env(self, model_name: str) -> None:
++        """Apply MPS environment variable for a model."""
++        if self.enabled:
++            percentage = self.get_percentage_for_model(model_name)
++            os.environ["CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"] = str(percentage)
++            logger.info(f"Set MPS percentage for {model_name}: {percentage}%")
++
++
++def zscore_normalize(values: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
++    """
++    Apply z-score normalization to a tensor.
++    
++    Args:
++        values: Input tensor
++        eps: Small value to prevent division by zero
++        
++    Returns:
++        Normalized tensor with mean 0 and std 1
++    """
++    mean = values.mean()
++    std = values.std() + eps
++    return (values - mean) / std
++
++
++def split_batch_for_dp(
++    data: DataProto, 
++    dp_size: int, 
++    dp_rank: int
++) -> DataProto:
++    """
++    Split a DataProto batch for data parallelism.
++    
++    Args:
++        data: The full batch
++        dp_size: Number of data parallel workers
++        dp_rank: Current worker's rank within the DP group
++        
++    Returns:
++        A subset of the data for this worker
++    """
++    batch_size = data.batch.batch_size[0]
++    
++    # Calculate start and end indices for this rank
++    base = batch_size // dp_size
++    remainder = batch_size % dp_size
++    start = dp_rank * base + min(dp_rank, remainder)
++    end = start + base + (1 if dp_rank < remainder else 0)
++    
++    # Slice the data
++    local_batch = data.batch[start:end]
++    local_non_tensor = {k: v[start:end] for k, v in data.non_tensor_batch.items()}
++    
++    return DataProto(batch=local_batch, non_tensor_batch=local_non_tensor)
++
++
++def split_video_frames(data: DataProto, permute_to_tchw: bool = True) -> List[torch.Tensor]:
++    """
++    Split video frames from a DataProto batch into individual samples.
++    
++    Args:
++        data: DataProto containing 'video_frames' in batch
++        permute_to_tchw: If True, permute from (C, T, H, W) to (T, C, H, W)
++        
++    Returns:
++        List of video tensors, one per sample
++    """
++    video_frames = data.batch['video_frames']  # Shape: (B, C, T, H, W)
++    batch_size = data.batch.batch_size[0]
++    
++    # Split into individual samples
++    frames_list = video_frames.chunk(batch_size, dim=0)
++    frames_list = [f.squeeze(0) for f in frames_list]  # Remove batch dim
++    
++    if permute_to_tchw:
++        # (C, T, H, W) -> (T, C, H, W)
++        frames_list = [f.permute(1, 0, 2, 3) for f in frames_list]
++    
++    return frames_list
++
++
++def split_captions(captions: np.ndarray, batch_size: int) -> List[str]:
++    """
++    Split captions array into a list of strings.
++    
++    Args:
++        captions: Array of captions
++        batch_size: Expected batch size
++        
++    Returns:
++        List of caption strings
++    """
++    if isinstance(captions, np.ndarray):
++        return [str(c) for c in captions[:batch_size]]
++    return list(captions[:batch_size])
++
++
++def make_reward_batch(
++    reward_key: str, 
++    rewards: torch.Tensor, 
++    batch_size: int
++) -> DataProto:
++    """
++    Create a DataProto containing rewards.
++    
++    Args:
++        reward_key: Key name for the rewards (e.g., "aes_rewards")
++        rewards: Tensor of reward values
++        batch_size: Batch size for the TensorDict
++        
++    Returns:
++        DataProto with the rewards
++    """
++    batch = TensorDict(
++        {reward_key: rewards},
++        batch_size=batch_size
++    )
++    return DataProto(batch=batch)
++
++
++class BaseRewardModel(ABC):
++    """
++    Abstract base class for all reward models.
++    
++    Subclasses must implement:
++        - init_model(): Initialize the model weights
++        - compute_single_score(): Compute reward for a single sample
++        
++    The base class provides:
++        - Data parallel batch splitting
++        - Z-score normalization
++        - Device management
++        - MPS configuration
++        - Timing and logging
++    """
++    
++    # Subclasses should set this to specify the reward key name
++    REWARD_KEY: str = "rewards"
++    
++    def __init__(
++        self, 
++        config: RewardConfig, 
++        global_rank: int, 
++        world_size: int
++    ):
++        """
++        Initialize the reward model.
++        
++        Args:
++            config: Configuration for this reward model
++            global_rank: Current process's global rank
++            world_size: Total number of processes
++        """
++        self.config = config
++        self.global_rank = global_rank
++        self.world_size = world_size
++        self.device = None  # Set during init_model
++        
++        # Calculate DP info
++        self.dp_size = max(1, int(world_size * config.dp_fraction))
++        self.is_active = self._check_active()
++        
++        if self.is_active:
++            self.local_dp_rank = (global_rank - config.rank_offset) % self.dp_size
++            # Apply MPS settings if configured
++            self._apply_mps_settings()
++        else:
++            self.local_dp_rank = -1
++            
++        logger.info(
++            f"[{self.config.name}] Rank {global_rank}: "
++            f"active={self.is_active}, dp_size={self.dp_size}, "
++            f"local_rank={self.local_dp_rank}, mps={config.mps_percentage}%"
++        )
++    
++    def _check_active(self) -> bool:
++        """Check if this rank should be active for this reward model."""
++        start_rank = self.config.rank_offset
++        end_rank = start_rank + self.dp_size
++        return start_rank <= self.global_rank < end_rank
++    
++    def _apply_mps_settings(self) -> None:
++        """Apply MPS environment settings if configured."""
++        mps_value = self.config.get_mps_env_value()
++        if mps_value:
++            os.environ["CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"] = mps_value
++            logger.info(
++                f"[{self.config.name}] Set CUDA_MPS_ACTIVE_THREAD_PERCENTAGE={mps_value}"
++            )
++    
++    def get_mps_percentage(self) -> int:
++        """Get the configured MPS percentage."""
++        return self.config.mps_percentage
++    
++    def get_device(self) -> torch.device:
++        """Get the device for this worker."""
++        if self.device is None:
++            self.device = get_device_id()
++        return self.device
++    
++    @abstractmethod
++    def init_model(self) -> None:
++        """
++        Initialize the reward model.
++        
++        Subclasses should load model weights here.
++        This method is only called on active ranks.
++        """
++        pass
++    
++    @abstractmethod
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute the reward score for a single sample.
++        
++        Args:
++            video_frames: Video frames tensor, shape depends on model
++            caption: Text caption for the video
++            
++        Returns:
++            Scalar reward value
++        """
++        pass
++    
++    def compute_batch_score(self, data: DataProto) -> DataProto:
++        """
++        Compute reward scores for a batch of samples.
++        
++        This method handles:
++        - Checking if this worker is active
++        - Splitting data for data parallelism
++        - Calling compute_single_score for each sample
++        - Normalizing results if configured
++        - Packaging results into DataProto
++        
++        Args:
++            data: Input DataProto with 'video_frames' and 'caption'
++            
++        Returns:
++            DataProto with computed rewards
++        """
++        start_time = time.time()
++        
++        # Extract data
++        extracted = data.pop(
++            batch_keys=['video_frames'],
++            non_tensor_batch_keys=['caption'],
++        )
++        
++        # Handle inactive workers
++        if not self.is_active:
++            batch_size = extracted.batch.batch_size[0] // self.dp_size
++            logger.info(f"[{self.config.name}] Rank {self.global_rank} inactive, returning zeros")
++            dummy_rewards = torch.zeros(batch_size, device='cpu')
++            return make_reward_batch(self.REWARD_KEY, dummy_rewards, batch_size)
++        
++        # Split data for this DP rank
++        local_data = split_batch_for_dp(extracted, self.dp_size, self.local_dp_rank)
++        batch_size = local_data.batch.batch_size[0]
++        
++        logger.info(f"[{self.config.name}] Rank {self.global_rank} processing batch_size={batch_size}")
++        
++        # Get video frames and captions
++        video_frames_list = split_video_frames(local_data, permute_to_tchw=True)
++        captions = split_captions(local_data.non_tensor_batch['caption'], batch_size)
++        
++        # Compute scores for each sample
++        rewards = []
++        for i, (frames, caption) in enumerate(zip(video_frames_list, captions)):
++            score = self.compute_single_score(frames, caption)
++            rewards.append(torch.tensor(score, device=self.get_device()))
++        
++        rewards = torch.stack(rewards)
++        
++        # Normalize if configured
++        if self.config.normalize:
++            rewards = zscore_normalize(rewards)
++        
++        # Move to CPU for return
++        rewards = rewards.cpu()
++        
++        elapsed = time.time() - start_time
++        logger.info(f"[{self.config.name}] compute time: {elapsed:.2f}s")
++        
++        return make_reward_batch(self.REWARD_KEY, rewards, batch_size)
++    
++    def move_model_to_device(self, model: torch.nn.Module) -> None:
++        """Move a model to the compute device."""
++        model.to(self.get_device())
++    
++    def move_model_to_cpu(self, model: torch.nn.Module) -> None:
++        """Move a model back to CPU to free GPU memory."""
++        model.to('cpu')
+diff --git a/recipe/dancegrpo/reward_models/composite.py b/recipe/dancegrpo/reward_models/composite.py
+new file mode 100644
+index 00000000..b82b33d6
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/composite.py
+@@ -0,0 +1,384 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Composite Reward Manager - Manages multiple reward models and aggregates their scores.
++
++This module provides a unified interface for running multiple reward models
++in parallel and combining their results with configurable weights.
++"""
++
++from dataclasses import dataclass, field
++from typing import Dict, List, Optional, Callable
++import logging
++import time
++import threading
++from concurrent.futures import ThreadPoolExecutor, as_completed
++
++import torch
++import numpy as np
++from tensordict import TensorDict
++
++from verl import DataProto
++
++from .base import BaseRewardModel, RewardConfig, zscore_normalize, make_reward_batch
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++@dataclass
++class CompositeRewardConfig:
++    """
++    Configuration for composite reward computation.
++    
++    Attributes:
++        models: List of individual reward model configurations
++        aggregation: How to combine rewards ("weighted_sum", "mean", "max", "min")
++        normalize_final: Whether to normalize the final aggregated reward
++        parallel_compute: Whether to compute rewards in parallel
++    """
++    models: List[RewardConfig] = field(default_factory=list)
++    aggregation: str = "weighted_sum"
++    normalize_final: bool = False
++    parallel_compute: bool = True
++    
++    @classmethod
++    def from_dict(cls, d: Dict) -> "CompositeRewardConfig":
++        """Create from a dictionary (e.g., from YAML config)."""
++        models = [
++            RewardConfig.from_dict(m) if isinstance(m, dict) else m
++            for m in d.get("models", [])
++        ]
++        return cls(
++            models=models,
++            aggregation=d.get("aggregation", "weighted_sum"),
++            normalize_final=d.get("normalize_final", False),
++            parallel_compute=d.get("parallel_compute", True),
++        )
++
++
++class CompositeRewardManager:
++    """
++    Manages multiple reward models and aggregates their results.
++    
++    This class provides:
++    - Unified initialization of multiple reward models
++    - Parallel or sequential reward computation
++    - Configurable reward aggregation strategies
++    - Proper handling of dummy results from inactive workers
++    
++    Example usage:
++        config = CompositeRewardConfig(
++            models=[
++                RewardConfig(name="aesthetic", weight=1.0, dp_fraction=0.25),
++                RewardConfig(name="raft", weight=1.0, dp_fraction=0.5),
++            ],
++            aggregation="weighted_sum"
++        )
++        manager = CompositeRewardManager(config, rank=0, world_size=8)
++        manager.init_all_models()
++        
++        result = manager.compute_and_aggregate(data)
++    """
++    
++    def __init__(
++        self, 
++        config: CompositeRewardConfig, 
++        rank: int, 
++        world_size: int
++    ):
++        """
++        Initialize the composite reward manager.
++        
++        Args:
++            config: Configuration for composite rewards
++            rank: Current process rank
++            world_size: Total number of processes
++        """
++        self.config = config
++        self.rank = rank
++        self.world_size = world_size
++        self.models: Dict[str, BaseRewardModel] = {}
++        self._executor: Optional[ThreadPoolExecutor] = None
++        
++        # Create reward model instances
++        for model_config in config.models:
++            if not model_config.enabled:
++                logger.info(f"Skipping disabled model: {model_config.name}")
++                continue
++                
++            try:
++                model = RewardRegistry.create(
++                    model_config.name,
++                    model_config,
++                    rank,
++                    world_size
++                )
++                self.models[model_config.name] = model
++                logger.info(f"Created reward model: {model_config.name}")
++            except Exception as e:
++                logger.error(f"Failed to create model {model_config.name}: {e}")
++                raise
++    
++    def init_all_models(self) -> None:
++        """Initialize all registered reward models."""
++        for name, model in self.models.items():
++            if model.is_active:
++                logger.info(f"Initializing model: {name}")
++                model.init_model()
++            else:
++                logger.info(f"Skipping init for inactive model: {name}")
++    
++    def compute_rewards(self, data: DataProto) -> Dict[str, DataProto]:
++        """
++        Compute rewards from all models.
++        
++        Args:
++            data: Input data with video frames and captions
++            
++        Returns:
++            Dictionary mapping model names to their reward DataProtos
++        """
++        if self.config.parallel_compute and len(self.models) > 1:
++            return self._compute_parallel(data)
++        return self._compute_sequential(data)
++    
++    def _compute_sequential(self, data: DataProto) -> Dict[str, DataProto]:
++        """Compute rewards sequentially."""
++        results = {}
++        for name, model in self.models.items():
++            start = time.time()
++            results[name] = model.compute_batch_score(data)
++            logger.info(f"Model {name} took {time.time() - start:.2f}s")
++        return results
++    
++    def _compute_parallel(self, data: DataProto) -> Dict[str, DataProto]:
++        """Compute rewards in parallel using threads."""
++        results = {}
++        threads = {}
++        
++        def compute_one(name: str, model: BaseRewardModel) -> tuple:
++            return name, model.compute_batch_score(data)
++        
++        with ThreadPoolExecutor(max_workers=len(self.models)) as executor:
++            futures = {
++                executor.submit(compute_one, name, model): name
++                for name, model in self.models.items()
++            }
++            
++            for future in as_completed(futures):
++                name, result = future.result()
++                results[name] = result
++        
++        return results
++    
++    def aggregate_rewards(
++        self, 
++        rewards: Dict[str, DataProto],
++        batch_size: int
++    ) -> torch.Tensor:
++        """
++        Aggregate rewards from multiple models.
++        
++        Args:
++            rewards: Dictionary of reward DataProtos from each model
++            batch_size: Expected batch size
++            
++        Returns:
++            Aggregated reward tensor
++        """
++        method = self.config.aggregation
++        
++        # Build weight mapping
++        weight_map = {
++            cfg.name: cfg.weight 
++            for cfg in self.config.models 
++            if cfg.enabled
++        }
++        
++        if method == "weighted_sum":
++            return self._aggregate_weighted_sum(rewards, weight_map)
++        elif method == "mean":
++            return self._aggregate_mean(rewards)
++        elif method == "max":
++            return self._aggregate_max(rewards)
++        elif method == "min":
++            return self._aggregate_min(rewards)
++        else:
++            raise ValueError(f"Unknown aggregation method: {method}")
++    
++    def _aggregate_weighted_sum(
++        self, 
++        rewards: Dict[str, DataProto],
++        weight_map: Dict[str, float]
++    ) -> torch.Tensor:
++        """Compute weighted sum of rewards."""
++        total = None
++        
++        for name, reward_proto in rewards.items():
++            # Get the reward tensor (key might be model-specific)
++            reward_key = self.models[name].REWARD_KEY
++            reward_tensor = reward_proto.batch[reward_key]
++            
++            weight = weight_map.get(name, 1.0)
++            weighted = reward_tensor * weight
++            
++            if total is None:
++                total = weighted
++            else:
++                total = total + weighted
++        
++        return total
++    
++    def _aggregate_mean(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Compute mean of all rewards."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.mean(dim=0)
++    
++    def _aggregate_max(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Take maximum reward across models."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.max(dim=0).values
++    
++    def _aggregate_min(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Take minimum reward across models."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.min(dim=0).values
++    
++    def compute_and_aggregate(self, data: DataProto) -> DataProto:
++        """
++        Compute all rewards and return aggregated result.
++        
++        This is the main entry point for reward computation.
++        
++        Args:
++            data: Input DataProto with video frames and captions
++            
++        Returns:
++            DataProto with aggregated rewards and individual reward tensors
++        """
++        start_time = time.time()
++        
++        # Compute all individual rewards
++        individual_rewards = self.compute_rewards(data)
++        
++        # Determine batch size from first result
++        first_name = next(iter(individual_rewards))
++        first_key = self.models[first_name].REWARD_KEY
++        batch_size = individual_rewards[first_name].batch[first_key].shape[0]
++        
++        # Aggregate
++        aggregated = self.aggregate_rewards(individual_rewards, batch_size)
++        
++        # Optionally normalize final result
++        if self.config.normalize_final:
++            aggregated = zscore_normalize(aggregated)
++        
++        # Build result with all rewards
++        result_dict = {"rewards": aggregated}
++        for name, reward_proto in individual_rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            result_dict[reward_key] = reward_proto.batch[reward_key]
++        
++        batch = TensorDict(result_dict, batch_size=batch_size)
++        
++        elapsed = time.time() - start_time
++        logger.info(f"Total reward computation took {elapsed:.2f}s")
++        
++        return DataProto(batch=batch)
++    
++    def get_model(self, name: str) -> Optional[BaseRewardModel]:
++        """Get a specific reward model by name."""
++        return self.models.get(name)
++    
++    def list_models(self) -> List[str]:
++        """List all registered model names."""
++        return list(self.models.keys())
++    
++    def __len__(self) -> int:
++        """Return number of registered models."""
++        return len(self.models)
++
++
++def merge_worker_results(
++    data_list: List[DataProto], 
++    use_valid_tensor_only: bool = True
++) -> DataProto:
++    """
++    Merge results from multiple DP workers.
++    
++    This replaces the original merge_worker_results with improved logic
++    that uses explicit validity tracking instead of zero-checking.
++    
++    Args:
++        data_list: List of DataProto from different workers
++        use_valid_tensor_only: If True, skip tensors that are marked as dummy
++        
++    Returns:
++        Merged DataProto
++    """
++    if not data_list:
++        return DataProto()
++    if isinstance(data_list, DataProto):
++        return data_list
++    if len(data_list) == 1:
++        return data_list[0]
++    
++    # Collect all keys
++    all_batch_keys = set()
++    all_non_tensor_keys = set()
++    
++    for dp in data_list:
++        if dp.batch is not None:
++            all_batch_keys.update(dp.batch.keys())
++        if dp.non_tensor_batch is not None:
++            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
++    
++    # Merge batch tensors
++    batch_dict = {}
++    for key in all_batch_keys:
++        tensors = []
++        for dp in data_list:
++            if dp.batch is not None and key in dp.batch:
++                tensor = dp.batch[key]
++                # Check for validity using meta info or tensor properties
++                is_valid = True
++                if use_valid_tensor_only:
++                    # Use meta info if available, otherwise check if any non-zero
++                    if hasattr(dp, 'meta_info') and dp.meta_info:
++                        is_valid = dp.meta_info.get(f'{key}_valid', True)
++                    # Fallback: check if tensor has meaningful values
++                    # This is a heuristic - better to use explicit validity flags
++                
++                if is_valid:
++                    tensors.append(tensor)
++        
++        if tensors:
++            batch_dict[key] = torch.cat(tensors, dim=0)
++    
++    # Merge non-tensor batches
++    non_tensor_dict = {}
++    for key in all_non_tensor_keys:
++        arrays = []
++        for dp in data_list:
++            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
++                arrays.append(dp.non_tensor_batch[key])
++        
++        if arrays:
++            non_tensor_dict[key] = np.concatenate(arrays, axis=0)
++    
++    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
+diff --git a/recipe/dancegrpo/reward_models/dynamic_joint.py b/recipe/dancegrpo/reward_models/dynamic_joint.py
+new file mode 100644
+index 00000000..a438ed7f
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/dynamic_joint.py
+@@ -0,0 +1,408 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Dynamic Joint Reward Runner
++
++This module provides a flexible joint reward runner that can dynamically
++load and manage any number of reward models based on configuration.
++Supports configurable MPS allocation for GPU resource management.
++"""
++
++import logging
++import threading
++import time
++from dataclasses import dataclass, field
++from typing import Any, Dict, List, Optional, Type
++from concurrent.futures import ThreadPoolExecutor, as_completed
++
++import torch
++import numpy as np
++from tensordict import TensorDict
++
++from verl import DataProto
++
++from .base import BaseRewardModel, RewardConfig, MPSConfig, zscore_normalize, make_reward_batch
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++@dataclass
++class JointRewardConfig:
++    """
++    Configuration for dynamic joint reward computation.
++    
++    Attributes:
++        models: List of reward model configurations
++        aggregation: How to aggregate rewards ("weighted_sum", "mean", "max")
++        normalize_individual: Whether to normalize each model's output
++        normalize_final: Whether to normalize the final aggregated output
++        parallel_compute: Whether to compute rewards in parallel threads
++        mps: MPS configuration for GPU allocation
++    """
++    models: List[RewardConfig] = field(default_factory=list)
++    aggregation: str = "weighted_sum"
++    normalize_individual: bool = True
++    normalize_final: bool = False
++    parallel_compute: bool = True
++    mps: MPSConfig = field(default_factory=MPSConfig)
++    
++    @classmethod
++    def from_dict(cls, d: Dict[str, Any]) -> "JointRewardConfig":
++        """Create from a dictionary (e.g., from YAML config)."""
++        if d is None:
++            return cls()
++        
++        # Parse MPS config
++        mps = MPSConfig.from_dict(d.get("mps", {}))
++        
++        # Parse model configs with MPS inheritance
++        models = []
++        for model_dict in d.get("models", []):
++            config = RewardConfig.from_dict(model_dict) if isinstance(model_dict, dict) else model_dict
++            # Apply MPS percentage from global config if not set on model
++            if config.mps_percentage == 0 and mps.enabled:
++                config.mps_percentage = mps.get_percentage_for_model(config.name)
++            models.append(config)
++        
++        return cls(
++            models=models,
++            aggregation=d.get("aggregation", "weighted_sum"),
++            normalize_individual=d.get("normalize_individual", True),
++            normalize_final=d.get("normalize_final", False),
++            parallel_compute=d.get("parallel_compute", True),
++            mps=mps,
++        )
++
++
++class DynamicJointRewardRunner:
++    """
++    A flexible reward runner that can handle any number of reward models.
++    
++    Unlike the static _JointRewardRunner, this class:
++    - Loads models dynamically from configuration
++    - Supports arbitrary number of reward models
++    - Allows MPS configuration per model
++    - Provides configurable aggregation strategies
++    
++    Usage:
++        config = JointRewardConfig.from_dict(yaml_config["reward_model"]["joint"])
++        runner = DynamicJointRewardRunner(config, rank=0, world_size=8)
++        runner.init_all_models()
++        
++        result = runner.compute(batch_data)
++    """
++    
++    def __init__(
++        self, 
++        config: JointRewardConfig, 
++        rank: int, 
++        world_size: int
++    ):
++        """
++        Initialize the dynamic joint reward runner.
++        
++        Args:
++            config: Configuration for joint rewards
++            rank: Current process rank
++            world_size: Total number of processes
++        """
++        self.config = config
++        self.rank = rank
++        self.world_size = world_size
++        self.models: Dict[str, BaseRewardModel] = {}
++        
++        # Threading infrastructure for parallel computation
++        self._thread_inputs: Dict[str, Any] = {}
++        self._reward_results: Dict[str, Any] = {}
++        self._ready_events: Dict[str, threading.Event] = {}
++        self._done_events: Dict[str, threading.Event] = {}
++        self._threads_started = False
++        
++        # Create model instances from config
++        self._create_models()
++    
++    def _create_models(self) -> None:
++        """Create reward model instances from configuration."""
++        for model_config in self.config.models:
++            if not model_config.enabled:
++                logger.info(f"Skipping disabled model: {model_config.name}")
++                continue
++            
++            try:
++                model = RewardRegistry.create(
++                    model_config.name,
++                    model_config,
++                    self.rank,
++                    self.world_size
++                )
++                self.models[model_config.name] = model
++                logger.info(
++                    f"Created reward model: {model_config.name} "
++                    f"(weight={model_config.weight}, dp_fraction={model_config.dp_fraction}, "
++                    f"mps={model_config.mps_percentage}%)"
++                )
++            except Exception as e:
++                logger.error(f"Failed to create model {model_config.name}: {e}")
++                raise
++    
++    def init_all_models(self) -> None:
++        """Initialize all registered reward models."""
++        for name, model in self.models.items():
++            if model.is_active:
++                logger.info(f"Initializing model: {name}")
++                model.init_model()
++            else:
++                logger.info(f"Skipping init for inactive model: {name}")
++        
++        # Start background threads if using parallel computation
++        if self.config.parallel_compute and len(self.models) > 1:
++            self._start_threads()
++    
++    def _start_threads(self) -> None:
++        """Start background threads for parallel reward computation."""
++        if self._threads_started:
++            return
++        
++        for name in self.models:
++            self._thread_inputs[name] = None
++            self._reward_results[name] = None
++            self._ready_events[name] = threading.Event()
++            self._done_events[name] = threading.Event()
++            
++            t = threading.Thread(
++                target=self._thread_loop, 
++                args=(name,), 
++                daemon=True
++            )
++            t.start()
++        
++        self._threads_started = True
++        logger.info(f"Started {len(self.models)} background threads for reward computation")
++    
++    def _thread_loop(self, name: str) -> None:
++        """Background thread loop for a single reward model."""
++        model = self.models[name]
++        while True:
++            self._ready_events[name].wait()
++            self._ready_events[name].clear()
++            
++            try:
++                result = model.compute_batch_score(self._thread_inputs[name])
++                self._reward_results[name] = result
++            except Exception as e:
++                logger.error(f"Error computing {name} reward: {e}")
++                self._reward_results[name] = None
++            
++            self._done_events[name].set()
++    
++    def compute(self, batch: DataProto) -> Dict[str, DataProto]:
++        """
++        Compute rewards from all models.
++        
++        Args:
++            batch: Input DataProto with video frames and captions
++            
++        Returns:
++            Dictionary mapping model names to their reward DataProtos
++        """
++        if self.config.parallel_compute and self._threads_started:
++            return self._compute_parallel_threaded(batch)
++        return self._compute_sequential(batch)
++    
++    def _compute_sequential(self, batch: DataProto) -> Dict[str, DataProto]:
++        """Compute rewards sequentially."""
++        results = {}
++        for name, model in self.models.items():
++            start = time.time()
++            results[name] = model.compute_batch_score(batch)
++            logger.debug(f"Model {name} took {time.time() - start:.2f}s")
++        return results
++    
++    def _compute_parallel_threaded(self, batch: DataProto) -> Dict[str, DataProto]:
++        """Compute rewards in parallel using pre-started threads."""
++        # Dispatch work to all threads
++        for name in self.models:
++            self._thread_inputs[name] = batch
++            self._done_events[name].clear()
++            self._ready_events[name].set()
++        
++        # Wait for all threads to complete
++        for name in self.models:
++            self._done_events[name].wait()
++        
++        # Collect results
++        return {name: self._reward_results[name] for name in self.models}
++    
++    def compute_and_aggregate(self, batch: DataProto) -> DataProto:
++        """
++        Compute all rewards and return aggregated result.
++        
++        Args:
++            batch: Input DataProto with video frames and captions
++            
++        Returns:
++            DataProto with aggregated rewards and individual reward tensors
++        """
++        start_time = time.time()
++        
++        # Compute all individual rewards
++        individual_rewards = self.compute(batch)
++        
++        # Filter out None results (from errors)
++        valid_rewards = {k: v for k, v in individual_rewards.items() if v is not None}
++        
++        if not valid_rewards:
++            logger.error("No valid rewards computed!")
++            raise RuntimeError("All reward computations failed")
++        
++        # Determine batch size from first result
++        first_name = next(iter(valid_rewards))
++        first_key = self.models[first_name].REWARD_KEY
++        batch_size = valid_rewards[first_name].batch[first_key].shape[0]
++        
++        # Aggregate rewards
++        aggregated = self._aggregate_rewards(valid_rewards, batch_size)
++        
++        # Apply final normalization if configured
++        if self.config.normalize_final:
++            aggregated = zscore_normalize(aggregated)
++        
++        # Build result with all rewards
++        result_dict = {"rewards": aggregated}
++        for name, reward_proto in valid_rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            result_dict[reward_key] = reward_proto.batch[reward_key]
++        
++        batch_result = TensorDict(result_dict, batch_size=batch_size)
++        
++        elapsed = time.time() - start_time
++        logger.info(f"Total joint reward computation took {elapsed:.2f}s")
++        
++        return DataProto(batch=batch_result)
++    
++    def _aggregate_rewards(
++        self, 
++        rewards: Dict[str, DataProto], 
++        batch_size: int
++    ) -> torch.Tensor:
++        """Aggregate rewards from multiple models."""
++        method = self.config.aggregation
++        
++        if method == "weighted_sum":
++            return self._aggregate_weighted_sum(rewards)
++        elif method == "mean":
++            return self._aggregate_mean(rewards)
++        elif method == "max":
++            return self._aggregate_max(rewards)
++        elif method == "min":
++            return self._aggregate_min(rewards)
++        else:
++            raise ValueError(f"Unknown aggregation method: {method}")
++    
++    def _get_weight(self, model_name: str) -> float:
++        """Get the weight for a specific model."""
++        for cfg in self.config.models:
++            if cfg.name == model_name:
++                return cfg.weight
++        return 1.0
++    
++    def _aggregate_weighted_sum(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Compute weighted sum of rewards."""
++        total = None
++        total_weight = 0.0
++        
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            reward_tensor = reward_proto.batch[reward_key]
++            weight = self._get_weight(name)
++            total_weight += weight
++            
++            weighted = reward_tensor * weight
++            if total is None:
++                total = weighted
++            else:
++                total = total + weighted
++        
++        # Optionally normalize by total weight
++        # return total / total_weight if total_weight > 0 else total
++        return total
++    
++    def _aggregate_mean(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Compute mean of all rewards."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.mean(dim=0)
++    
++    def _aggregate_max(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Take maximum reward across models."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.max(dim=0).values
++    
++    def _aggregate_min(self, rewards: Dict[str, DataProto]) -> torch.Tensor:
++        """Take minimum reward across models."""
++        tensors = []
++        for name, reward_proto in rewards.items():
++            reward_key = self.models[name].REWARD_KEY
++            tensors.append(reward_proto.batch[reward_key])
++        
++        stacked = torch.stack(tensors, dim=0)
++        return stacked.min(dim=0).values
++    
++    def get_model(self, name: str) -> Optional[BaseRewardModel]:
++        """Get a specific reward model by name."""
++        return self.models.get(name)
++    
++    def list_models(self) -> List[str]:
++        """List all registered model names."""
++        return list(self.models.keys())
++    
++    def get_metrics(self, rewards: Dict[str, DataProto]) -> Dict[str, float]:
++        """
++        Get metrics for logging from reward results.
++        
++        Args:
++            rewards: Dictionary of rewards from compute()
++            
++        Returns:
++            Dictionary of metric name -> value
++        """
++        metrics = {}
++        for name, reward_proto in rewards.items():
++            if reward_proto is not None:
++                reward_key = self.models[name].REWARD_KEY
++                metric_key = f"train/rewards_{name}"
++                metrics[metric_key] = reward_proto.batch[reward_key].mean().item()
++        return metrics
++    
++    def __len__(self) -> int:
++        """Return number of registered models."""
++        return len(self.models)
++
++
++def create_joint_runner_from_config(
++    config_dict: Dict[str, Any],
++    rank: int,
++    world_size: int
++) -> DynamicJointRewardRunner:
++    """
++    Factory function to create a DynamicJointRewardRunner from config dict.
++    
++    Args:
++        config_dict: Configuration dictionary (from YAML)
++        rank: Current process rank
++        world_size: Total number of processes
++        
++    Returns:
++        Configured DynamicJointRewardRunner instance
++    """
++    joint_config = JointRewardConfig.from_dict(config_dict)
++    return DynamicJointRewardRunner(joint_config, rank, world_size)
+diff --git a/recipe/dancegrpo/reward_models/hps.py b/recipe/dancegrpo/reward_models/hps.py
+new file mode 100644
+index 00000000..28818f75
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/hps.py
+@@ -0,0 +1,146 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++HPS (Human Preference Score) Reward Model - Evaluates image quality based on human preferences.
++
++This model uses HPS v2 which combines CLIP features with a trained preference predictor
++to score images based on learned human aesthetic preferences.
++"""
++
++import logging
++from typing import Optional
++
++import numpy as np
++import torch
++import torch.nn.functional as F
++from PIL import Image
++
++from .base import BaseRewardModel, RewardConfig
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++@RewardRegistry.register("hps")
++class HPSRewardModel(BaseRewardModel):
++    """
++    Human Preference Score (HPS) v2 reward model.
++    
++    Uses a CLIP-based model fine-tuned on human preference data to score
++    how well an image matches text and human aesthetic preferences.
++    
++    Config extra_config keys:
++        - model_path: Path to HPS model checkpoint
++        - model_type: Model architecture type (default: "ViT-H-14")
++    """
++    
++    REWARD_KEY = "hps_rewards"
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.hps_model: Optional[torch.nn.Module] = None
++        self.preprocess = None
++        self.tokenizer = None
++        self.model_type: str = "ViT-H-14"
++    
++    def init_model(self) -> None:
++        """Initialize the HPS model."""
++        if not self.is_active:
++            logger.info(f"[hps] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        model_path = extra.get("model_path") or self.config.model_path
++        self.model_type = extra.get("model_type", "ViT-H-14")
++        
++        if not model_path:
++            raise ValueError("HPS model requires 'model_path' in config")
++        
++        try:
++            from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
++            
++            # Create model
++            model, _, preprocess_val = create_model_and_transforms(
++                self.model_type,
++                model_path,
++                precision='amp',
++                jit=False,
++                force_quick_gelu=False,
++                force_custom_text=False,
++                force_patch_dropout=False,
++                force_image_size=None,
++                pretrained_image=False,
++                image_mean=None,
++                image_std=None,
++                light_augmentation=True,
++                aug_cfg={},
++                output_dict=True,
++                with_score_predictor=False,
++                with_region_predictor=False
++            )
++            
++            # Load checkpoint
++            checkpoint = torch.load(model_path, map_location="cpu")
++            model.load_state_dict(checkpoint['state_dict'])
++            model.eval()
++            
++            self.hps_model = model
++            self.preprocess = preprocess_val
++            self.tokenizer = get_tokenizer(self.model_type)
++            
++            num_params = sum(p.numel() for p in model.parameters())
++            logger.info(f"HPS model initialized: {num_params:,} params")
++            
++        except Exception as e:
++            logger.error(f"Failed to load HPS model: {e}")
++            raise
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute HPS score for a video frame.
++        
++        Uses the first frame of the video for scoring.
++        
++        Args:
++            video_frames: Video tensor, shape (T, C, H, W)
++            caption: Text caption to evaluate alignment with
++            
++        Returns:
++            HPS score (higher = better alignment with human preferences)
++        """
++        # Take first frame
++        frame = video_frames[0]  # (C, H, W)
++        
++        # Convert to PIL Image
++        frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
++        frame_np = (frame_np * 255).astype(np.uint8)
++        frame_pil = Image.fromarray(frame_np)
++        
++        # Preprocess
++        image = self.preprocess(frame_pil).unsqueeze(0)
++        text = self.tokenizer([caption])
++        
++        # Move to device
++        image = image.to(self.get_device())
++        text = text.to(self.get_device())
++        self.hps_model.to(self.get_device())
++        
++        try:
++            with torch.no_grad():
++                with torch.amp.autocast('cuda'):
++                    outputs = self.hps_model(image, text)
++                    image_features = outputs["image_features"]
++                    text_features = outputs["text_features"]
++                    
++                    # Compute similarity
++                    logits = image_features @ text_features.T
++                    score = torch.diagonal(logits).item()
++            
++            logger.debug(f"HPS score: {score:.4f}")
++            return score
++            
++        finally:
++            self.hps_model.to("cpu")
+diff --git a/recipe/dancegrpo/reward_models/qwen.py b/recipe/dancegrpo/reward_models/qwen.py
+new file mode 100644
+index 00000000..8984f7d5
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/qwen.py
+@@ -0,0 +1,254 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Qwen Reward Model - Uses Qwen VL model for video quality evaluation.
++
++This model uses a large vision-language model (Qwen) to evaluate video quality
++through a structured prompt that asks the model to rate various quality dimensions.
++"""
++
++import logging
++import re
++import time
++from typing import Any, Dict, List, Optional
++
++import numpy as np
++import torch
++from tensordict import TensorDict
++
++from verl import DataProto
++from verl.single_controller.base.decorator import Dispatch, register
++from verl.utils.debug import WorkerProfiler
++
++from .base import BaseRewardModel, RewardConfig, make_reward_batch
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++# Quality evaluation prompt (Chinese)
++QUALITY_EVALUATION_PROMPT = """
++你是一个专业的视频质量评估专家。请从以下维度对这段视频进行评分：
++
++**评估维度：**
++- dim1（视觉伪影）：检查画面是否存在闪烁、马赛克、条纹等伪影
++- dim2（局部变形）：检查物体和人物是否有不自然的变形或拉伸
++- dim3（噪声质量）：评估画面噪点和颗粒感
++- dim4（清晰度）：评估画面整体清晰度和锐度
++- dim5（色彩准确性）：评估色彩是否自然、准确
++
++评分规则：
++- 每个维度评分在 0 ~ 100 范围内，越好越高分。
++- 合计为五项得分的算术平均，保留整数。
++- 对于某项严重失真或效果极差（如严重模糊、强伪影等），请大胆给出低分（例如低于30分）。
++- 每个视频的打分应充分拉开差距，避免视频之间出现"同分"或"几乎同分"情况。
++- 请确保不同维度之间的评分不互相矛盾，确保评分具有可比性与区分度。
++
++输出格式（严格遵守）：
++dim1:XX分,dim2:XX分,dim3:XX分,dim4:XX分,dim5:XX分,合计:XX分
++
++风格要求：
++- 禁止输出解释性文字或分析过程。
++- 禁止使用"我认为"、"可能"、"大致"等模糊词语。
++- 输出必须严格按照上述格式，一次性返回评估结果。
++
++请严格按照输出格式要求，输出且只输出输出格式的内容。请依照以上标准、逻辑和格式，对视频进行结构化质量评估。
++"""
++
++
++@RewardRegistry.register("qwen")
++class QwenRewardModel(BaseRewardModel):
++    """
++    Qwen Vision-Language Model reward for video quality evaluation.
++    
++    Uses Qwen VL model to evaluate video quality through a structured prompt
++    that rates multiple quality dimensions and produces an overall score.
++    
++    Config extra_config keys:
++        - model_path: Path to Qwen VL model
++        - max_tokens: Maximum output tokens (default: 256)
++        - temperature: Sampling temperature (default: 0.1)
++        - max_pixels: Maximum pixels for video processing (default: 360*420)
++        - fps: Frames per second for video sampling (default: 1.0)
++    """
++    
++    REWARD_KEY = "rewards"
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.reward_rollout = None
++        self.sampling_params = None
++        self.max_pixels: int = 360 * 420
++        self.fps: float = 1.0
++    
++    def init_model(self) -> None:
++        """Initialize the Qwen model via vLLM."""
++        if not self.is_active:
++            logger.info(f"[qwen] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        model_path = extra.get("model_path") or self.config.model_path
++        max_tokens = extra.get("max_tokens", 256)
++        temperature = extra.get("temperature", 0.1)
++        self.max_pixels = extra.get("max_pixels", 360 * 420)
++        self.fps = extra.get("fps", 1.0)
++        
++        if not model_path:
++            raise ValueError("Qwen model requires 'model_path' in config")
++        
++        try:
++            self._build_rollout(model_path, max_tokens, temperature)
++            logger.info(f"Qwen reward model initialized from {model_path}")
++            
++        except Exception as e:
++            logger.error(f"Failed to load Qwen model: {e}")
++            raise
++    
++    def _build_rollout(
++        self, 
++        model_path: str, 
++        max_tokens: int, 
++        temperature: float
++    ) -> None:
++        """Build the vLLM inference engine."""
++        from vllm import LLM, SamplingParams
++        
++        self.reward_rollout = LLM(
++            model=model_path,
++            trust_remote_code=True,
++            tensor_parallel_size=1,
++            gpu_memory_utilization=0.5,
++        )
++        
++        self.sampling_params = SamplingParams(
++            max_tokens=max_tokens,
++            temperature=temperature,
++        )
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute quality score for a single video.
++        
++        Note: This method is not used directly for Qwen model.
++        Instead, compute_batch_score handles batched inference.
++        """
++        raise NotImplementedError(
++            "Qwen model uses batch inference. Use compute_batch_score instead."
++        )
++    
++    def compute_batch_score(self, data: DataProto) -> DataProto:
++        """
++        Compute quality scores for a batch of videos using Qwen.
++        
++        Overrides base class to use vLLM batch inference.
++        """
++        if not self.is_active:
++            batch_size = data.batch.batch_size[0] // self.dp_size
++            dummy_rewards = torch.zeros(batch_size, device='cpu')
++            return make_reward_batch(self.REWARD_KEY, dummy_rewards, batch_size)
++        
++        start_time = time.time()
++        
++        # Get video IDs from data
++        video_ids = data.non_tensor_batch.get('video_ids', [])
++        batch_size = len(video_ids)
++        
++        # Generate prompts
++        prompts = self._generate_batch_prompts(video_ids)
++        
++        # Run inference
++        all_rewards = []
++        for prompt in prompts:
++            output = self.reward_rollout.generate(prompt, sampling_params=self.sampling_params)
++            score = self._parse_output(output[0].outputs[0].text)
++            all_rewards.append(score)
++        
++        rewards = torch.tensor(all_rewards, dtype=torch.float32)
++        
++        elapsed = time.time() - start_time
++        logger.info(f"[qwen] Batch compute time: {elapsed:.2f}s")
++        
++        return make_reward_batch(self.REWARD_KEY, rewards, batch_size)
++    
++    def _generate_batch_prompts(self, video_ids: List[str]) -> List[Dict]:
++        """Generate prompts for a batch of videos."""
++        prompt_text = QUALITY_EVALUATION_PROMPT
++        formatted_prompt = (
++            f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
++            f"<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>"
++            f"{prompt_text}<|im_end|>\n"
++            f"<|im_start|>assistant\n"
++        )
++        
++        messages = []
++        for video_id in video_ids:
++            message = [{
++                "prompt": formatted_prompt,
++                "multi_modal_data": {"video": [video_id]},
++            }]
++            messages.append(message)
++        
++        return messages
++    
++    def _parse_output(self, output_text: str) -> float:
++        """
++        Parse the model output to extract the overall score.
++        
++        Returns a score in [0, 100] range, or 50.0 as default.
++        """
++        # Score extraction patterns
++        score_patterns = [
++            r'合计[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分',
++            r'综合得分[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分',
++            r'总分[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分',
++            r'dim5[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分.*?合计[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分',
++            r'(\\d+(?:\\.\\d+)?)\\s*分',
++            r'(\\d+(?:\\.\\d+)?)/100',
++        ]
++        
++        score = 50.0  # Default
++        
++        for pattern in score_patterns:
++            match = re.search(pattern, output_text)
++            if match:
++                # For patterns with multiple groups, take the last one
++                if len(match.groups()) > 1:
++                    found_score = float(match.group(2))
++                else:
++                    found_score = float(match.group(1))
++                
++                # Clamp to valid range
++                score = min(max(found_score, 0), 100)
++                logger.debug(f"Extracted score: {score} from pattern: {pattern}")
++                break
++        
++        if score == 50.0:
++            logger.warning(f"No score found, using default. Output: {output_text[:200]}...")
++        
++        return score
++    
++    def parse_dimension_scores(self, output_text: str) -> Dict[str, float]:
++        """
++        Parse individual dimension scores from model output.
++        
++        Returns dict with keys like 'visual_artifacts', 'local_deformation', etc.
++        """
++        dim_patterns = [
++            (r'dim1[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分', 'visual_artifacts'),
++            (r'dim2[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分', 'local_deformation'),
++            (r'dim3[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分', 'noise_quality'),
++            (r'dim4[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分', 'clarity_sharpness'),
++            (r'dim5[：:]\\s*(\\d+(?:\\.\\d+)?)\\s*分', 'color_accuracy'),
++        ]
++        
++        scores = {}
++        for pattern, dim_name in dim_patterns:
++            match = re.search(pattern, output_text)
++            if match:
++                scores[dim_name] = float(match.group(1))
++        
++        return scores
+diff --git a/recipe/dancegrpo/reward_models/raft.py b/recipe/dancegrpo/reward_models/raft.py
+new file mode 100644
+index 00000000..b39c4cd2
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/raft.py
+@@ -0,0 +1,165 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++RAFT Reward Model - Evaluates optical flow quality using RAFT.
++
++This model computes optical flow between consecutive frames and uses
++the flow magnitude as a reward signal for video temporal coherence.
++"""
++
++import argparse
++import logging
++from collections import OrderedDict
++from typing import Optional
++
++import numpy as np
++import torch
++
++from .base import BaseRewardModel, RewardConfig
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++def dict_to_namespace(d: dict) -> argparse.Namespace:
++    """Convert a dictionary to an argparse.Namespace."""
++    return argparse.Namespace(**d)
++
++
++@RewardRegistry.register("raft")
++class RAFTRewardModel(BaseRewardModel):
++    """
++    RAFT optical flow reward model.
++    
++    Computes optical flow between consecutive video frames using RAFT
++    and returns the mean flow magnitude as a reward signal.
++    Higher flow = more motion = potentially more dynamic video.
++    
++    Config extra_config keys:
++        - model_path: Path to RAFT model weights (default from config)
++        - stride: Frame stride for flow computation (default: 1)
++        - iters: Number of RAFT iterations (default: 20)
++    """
++    
++    REWARD_KEY = "raft_rewards"
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.raft_model: Optional[torch.nn.Module] = None
++        self.stride: int = 1
++        self.iters: int = 20
++    
++    def init_model(self) -> None:
++        """Initialize the RAFT model."""
++        if not self.is_active:
++            logger.info(f"[raft] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        model_path = extra.get("model_path") or self.config.model_path
++        self.stride = extra.get("stride", 1)
++        self.iters = extra.get("iters", 20)
++        
++        if not model_path:
++            raise ValueError("RAFT model requires 'model_path' in config")
++        
++        # Configure RAFT arguments
++        args_dict = {
++            "small": False,
++            "mixed_precision": False,
++            "alternate_corr": False,
++        }
++        args = dict_to_namespace(args_dict)
++        
++        # Load RAFT model
++        try:
++            from verl.models.raft.raft import RAFT
++            model = RAFT(args)
++            
++            # Load state dict, handling 'module.' prefix
++            state_dict = torch.load(model_path, map_location="cpu")
++            new_state_dict = OrderedDict()
++            
++            for k, v in state_dict.items():
++                name = k[7:] if k.startswith("module.") else k
++                new_state_dict[name] = v
++            
++            model.load_state_dict(new_state_dict)
++            model.eval()
++            model.args.mixed_precision = False
++            
++            self.raft_model = model
++            
++            num_params = sum(p.numel() for p in model.parameters())
++            logger.info(f"RAFT model initialized: {num_params:,} params")
++            
++        except Exception as e:
++            logger.error(f"Failed to load RAFT model: {e}")
++            raise
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute optical flow score for a video.
++        
++        Args:
++            video_frames: Video tensor, shape (T, C, H, W)
++            caption: Text caption (unused)
++            
++        Returns:
++            Mean optical flow magnitude
++        """
++        # Apply stride
++        frames = video_frames[::self.stride]
++        
++        if len(frames) < 2:
++            logger.warning("Not enough frames for optical flow computation")
++            return 0.0
++        
++        # Move model and frames to device
++        self.raft_model.to(self.get_device())
++        frames = frames.to(self.get_device())
++        
++        try:
++            flow_score = self._compute_flow(frames)
++            logger.debug(f"RAFT flow score: {flow_score:.4f}")
++            return flow_score
++            
++        finally:
++            self.raft_model.to("cpu")
++    
++    def _compute_flow(self, frames: torch.Tensor) -> float:
++        """
++        Compute mean optical flow magnitude across frame pairs.
++        
++        Args:
++            frames: Video frames tensor (T, C, H, W)
++            
++        Returns:
++            Mean flow magnitude
++        """
++        from verl.models.utils.utils import InputPadder
++        
++        optical_flows = []
++        
++        with torch.no_grad():
++            for i in range(len(frames) - 1):
++                # Prepare frame pair
++                image1 = frames[i].float().unsqueeze(0)
++                image2 = frames[i + 1].float().unsqueeze(0)
++                
++                # Pad images to be divisible by 8
++                padder = InputPadder(image1.shape)
++                image1, image2 = padder.pad(image1, image2)
++                
++                # Compute flow
++                _, flow_up = self.raft_model(image1, image2, iters=self.iters, test_mode=True)
++                
++                # Compute flow magnitude
++                flow_magnitude = torch.norm(flow_up.squeeze(0), dim=0)
++                mean_flow = flow_magnitude.mean().item()
++                optical_flows.append(mean_flow)
++        
++        return float(np.mean(optical_flows)) if optical_flows else 0.0
+diff --git a/recipe/dancegrpo/reward_models/registry.py b/recipe/dancegrpo/reward_models/registry.py
+new file mode 100644
+index 00000000..37d14fcd
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/registry.py
+@@ -0,0 +1,102 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Reward Model Registry - A registry pattern for managing reward models.
++
++Usage:
++    @RewardRegistry.register("my_reward")
++    class MyRewardModel(BaseRewardModel):
++        ...
++    
++    # Create instance
++    model = RewardRegistry.create("my_reward", config, rank, world_size)
++"""
++
++from typing import Dict, Type, TYPE_CHECKING
++
++if TYPE_CHECKING:
++    from .base import BaseRewardModel, RewardConfig
++
++
++class RewardRegistry:
++    """
++    Central registry for all reward models.
++    
++    Provides a decorator-based registration mechanism and factory method
++    for creating reward model instances.
++    """
++    
++    _registry: Dict[str, Type["BaseRewardModel"]] = {}
++    
++    @classmethod
++    def register(cls, name: str):
++        """
++        Decorator to register a reward model class.
++        
++        Args:
++            name: Unique identifier for the reward model
++            
++        Example:
++            @RewardRegistry.register("aesthetic")
++            class AestheticRewardModel(BaseRewardModel):
++                pass
++        """
++        def decorator(model_cls: Type["BaseRewardModel"]) -> Type["BaseRewardModel"]:
++            if name in cls._registry:
++                raise ValueError(f"Reward model '{name}' is already registered")
++            cls._registry[name] = model_cls
++            return model_cls
++        return decorator
++    
++    @classmethod
++    def get(cls, name: str) -> Type["BaseRewardModel"]:
++        """
++        Get a reward model class by name.
++        
++        Args:
++            name: The registered name of the reward model
++            
++        Returns:
++            The reward model class
++            
++        Raises:
++            ValueError: If the name is not registered
++        """
++        if name not in cls._registry:
++            available = list(cls._registry.keys())
++            raise ValueError(
++                f"Unknown reward model: '{name}'. Available models: {available}"
++            )
++        return cls._registry[name]
++    
++    @classmethod
++    def create(
++        cls, 
++        name: str, 
++        config: "RewardConfig", 
++        rank: int, 
++        world_size: int
++    ) -> "BaseRewardModel":
++        """
++        Factory method to create a reward model instance.
++        
++        Args:
++            name: The registered name of the reward model
++            config: Configuration for the reward model
++            rank: Current process rank
++            world_size: Total number of processes
++            
++        Returns:
++            An instance of the requested reward model
++        """
++        model_cls = cls.get(name)
++        return model_cls(config, rank, world_size)
++    
++    @classmethod
++    def list_available(cls) -> list:
++        """List all registered reward model names."""
++        return list(cls._registry.keys())
++    
++    @classmethod
++    def is_registered(cls, name: str) -> bool:
++        """Check if a reward model name is registered."""
++        return name in cls._registry
+diff --git a/recipe/dancegrpo/reward_models/videoclip.py b/recipe/dancegrpo/reward_models/videoclip.py
+new file mode 100644
+index 00000000..98c1dd4c
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/videoclip.py
+@@ -0,0 +1,179 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++VideoCLIP Reward Model - Evaluates video-text alignment using VideoCLIP-XL.
++
++This model computes the similarity between video features and text features
++using the VideoCLIP-XL model to measure how well the video matches its caption.
++"""
++
++import logging
++from typing import Optional
++
++import cv2
++import numpy as np
++import torch
++import torch.nn.functional as F
++
++from .base import BaseRewardModel, RewardConfig
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++
++@RewardRegistry.register("videoclip")
++class VideoCLIPRewardModel(BaseRewardModel):
++    """
++    VideoCLIP-XL video-text alignment reward model.
++    
++    Computes cosine similarity between video and text embeddings
++    to measure how well a generated video matches its caption.
++    
++    Config extra_config keys:
++        - model_path: Path to VideoCLIP-XL model weights
++        - num_frames: Number of frames to sample from video (default: 8)
++        - target_size: Target frame size for preprocessing (default: 224)
++    """
++    
++    REWARD_KEY = "videoclip_rewards"
++    
++    # Normalization constants
++    V_MEAN = np.array([0.485, 0.456, 0.406]).reshape(1, 1, 3)
++    V_STD = np.array([0.229, 0.224, 0.225]).reshape(1, 1, 3)
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.videoclip_model: Optional[torch.nn.Module] = None
++        self.num_frames: int = 8
++        self.target_size: int = 224
++    
++    def init_model(self) -> None:
++        """Initialize the VideoCLIP-XL model."""
++        if not self.is_active:
++            logger.info(f"[videoclip] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        model_path = extra.get("model_path") or self.config.model_path
++        self.num_frames = extra.get("num_frames", 8)
++        self.target_size = extra.get("target_size", 224)
++        
++        if not model_path:
++            raise ValueError("VideoCLIP model requires 'model_path' in config")
++        
++        try:
++            from verl.models.VideoCLIP_XL.modeling import VideoCLIP_XL
++            
++            model = VideoCLIP_XL()
++            state_dict = torch.load(model_path, map_location="cpu")
++            model.load_state_dict(state_dict)
++            model.eval()
++            
++            self.videoclip_model = model
++            
++            num_params = sum(p.numel() for p in model.parameters())
++            logger.info(f"VideoCLIP-XL model initialized: {num_params:,} params")
++            
++        except Exception as e:
++            logger.error(f"Failed to load VideoCLIP model: {e}")
++            raise
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute video-text similarity score.
++        
++        Args:
++            video_frames: Video tensor, shape (T, C, H, W) or (C, T, H, W)
++            caption: Text caption to match against
++            
++        Returns:
++            Cosine similarity score (scaled by 100)
++        """
++        from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
++        
++        self.videoclip_model.to(self.get_device())
++        self.videoclip_model.eval()
++        
++        try:
++            with torch.no_grad():
++                # Preprocess video
++                video_input = self._preprocess_video(video_frames)
++                video_input = video_input.to(self.get_device())
++                
++                # Get video features
++                video_features = self.videoclip_model.vision_model.get_vid_features(video_input)
++                video_features = video_features.float()
++                video_features = F.normalize(video_features, dim=-1)
++                
++                # Get text features
++                text_input = text_encoder.tokenize([caption], truncate=True)
++                text_input = text_input.to(self.get_device())
++                text_features = self.videoclip_model.text_model.encode_text(text_input)
++                text_features = text_features.float()
++                text_features = F.normalize(text_features, dim=-1)
++                
++                # Compute similarity
++                similarity = (video_features @ text_features.T) * 100
++                score = similarity.view(-1).item()
++                
++            logger.debug(f"VideoCLIP similarity score: {score:.4f}")
++            return score
++            
++        finally:
++            self.videoclip_model.to("cpu")
++    
++    def _preprocess_video(self, frames: torch.Tensor) -> torch.Tensor:
++        """
++        Preprocess video frames for VideoCLIP.
++        
++        Args:
++            frames: Video tensor, shape (T, C, H, W) or (C, T, H, W)
++            
++        Returns:
++            Preprocessed tensor, shape (1, T, C, H, W)
++        """
++        # Handle different input formats
++        if frames.dim() == 4:
++            # Check if (T, C, H, W) or (C, T, H, W)
++            if frames.shape[0] == 3:  # (C, T, H, W)
++                frames = frames.permute(1, 0, 2, 3)  # -> (T, C, H, W)
++        
++        # Convert to numpy: (T, H, W, C)
++        frames_np = frames.permute(0, 2, 3, 1).cpu().numpy()
++        
++        # Sample frames evenly
++        total_frames = frames_np.shape[0]
++        step = max(1, total_frames // self.num_frames)
++        sampled = frames_np[::step][:self.num_frames]
++        
++        # Process each frame
++        vid_tube = []
++        for fr in sampled:
++            # BGR to RGB (if needed)
++            if fr.shape[-1] == 3:
++                fr = fr[:, :, ::-1]
++            
++            # Resize
++            fr = cv2.resize(fr, (self.target_size, self.target_size))
++            
++            # Normalize
++            fr = self._normalize(fr)
++            
++            # Add dimensions: (1, 1, H, W, C)
++            fr = np.expand_dims(fr, axis=(0, 1))
++            vid_tube.append(fr)
++        
++        # Concatenate: (1, T, H, W, C)
++        vid_tube = np.concatenate(vid_tube, axis=1)
++        
++        # Transpose to (1, T, C, H, W)
++        vid_tube = np.transpose(vid_tube, (0, 1, 4, 2, 3))
++        
++        return torch.from_numpy(vid_tube).float()
++    
++    def _normalize(self, data: np.ndarray) -> np.ndarray:
++        """Apply ImageNet normalization."""
++        return (data / 255.0 - self.V_MEAN) / self.V_STD
+diff --git a/recipe/dancegrpo/reward_models/videophy.py b/recipe/dancegrpo/reward_models/videophy.py
+new file mode 100644
+index 00000000..2ee3b337
+--- /dev/null
++++ b/recipe/dancegrpo/reward_models/videophy.py
+@@ -0,0 +1,328 @@
++# Copyright 2024 Dance-GRPO Team
++"""
++Videophy Reward Model - Evaluates physical plausibility of videos.
++
++This model uses a pre-trained video understanding model to assess
++whether generated videos follow physical laws (e.g., gravity, momentum).
++"""
++
++import logging
++import re
++from typing import Any, Dict, List, Optional
++
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
++
++from .base import BaseRewardModel, RewardConfig
++from .registry import RewardRegistry
++
++logger = logging.getLogger(__name__)
++
++# Default prompt for physics evaluation
++PHYSICS_PROMPT = (
++    "The following is a conversation between a curious human and AI assistant. "
++    "The assistant gives helpful, detailed, and polite answers to the user's questions.\n"
++    "Human: <|video|>\n"
++    "Human: Does this video follow the physical laws?\n"
++    "AI: "
++)
++
++
++@RewardRegistry.register("videophy")
++class VideophyRewardModel(BaseRewardModel):
++    """
++    Video physics plausibility reward model.
++    
++    Uses MplugOwl-based model to assess whether videos follow physical laws.
++    The model outputs a probability of "Yes" vs "No" to the question
++    "Does this video follow the physical laws?"
++    
++    Config extra_config keys:
++        - model_path: Path to videophy model checkpoint
++        - max_length: Maximum sequence length (default: 256)
++        - target_size: Target frame size (default: 224)
++    """
++    
++    REWARD_KEY = "videophy_rewards"
++    
++    def __init__(self, config: RewardConfig, global_rank: int, world_size: int):
++        super().__init__(config, global_rank, world_size)
++        self.videophy_model: Optional[torch.nn.Module] = None
++        self.tokenizer = None
++        self.processor = None
++        self.max_length: int = 256
++        self.target_size: int = 224
++        
++        # Media token configuration
++        self.media_tokens = {"<image>": -1, "<|video|>": -2}
++        self.media_lengths = {"<image>": 65, "<|video|>": 65}  # 1 + 64
++    
++    def init_model(self) -> None:
++        """Initialize the Videophy model."""
++        if not self.is_active:
++            logger.info(f"[videophy] Rank {self.global_rank} inactive, skipping init")
++            return
++        
++        extra = self.config.extra_config or {}
++        model_path = extra.get("model_path") or self.config.model_path
++        self.max_length = extra.get("max_length", 256)
++        self.target_size = extra.get("target_size", 224)
++        
++        if not model_path:
++            raise ValueError("Videophy model requires 'model_path' in config")
++        
++        try:
++            from transformers.models.llama.tokenization_llama import LlamaTokenizer
++            from verl.models.Videophy.mplug_owl_video import (
++                MplugOwlConfig,
++                MplugOwlForConditionalGeneration,
++                MplugOwlImageProcessor,
++                MplugOwlProcessor,
++            )
++            
++            # Load tokenizer
++            self.tokenizer = LlamaTokenizer.from_pretrained(model_path)
++            
++            # Load model
++            logger.info("Loading Videophy model...")
++            self.videophy_model = MplugOwlForConditionalGeneration.from_pretrained(
++                model_path,
++                torch_dtype=torch.bfloat16,
++                config=MplugOwlConfig.from_pretrained(model_path)
++            )
++            self.videophy_model.eval()
++            logger.info("Videophy model loaded")
++            
++            # Load processor
++            image_processor = MplugOwlImageProcessor.from_pretrained(model_path)
++            self.processor = MplugOwlProcessor(image_processor, self.tokenizer)
++            
++            num_params = sum(p.numel() for p in self.videophy_model.parameters())
++            logger.info(f"Videophy model initialized: {num_params:,} params")
++            
++        except Exception as e:
++            logger.error(f"Failed to load Videophy model: {e}")
++            raise
++    
++    def compute_single_score(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> float:
++        """
++        Compute physics plausibility score for a video.
++        
++        Args:
++            video_frames: Video tensor, shape (T, C, H, W) or (C, T, H, W)
++            caption: Text caption (used for context but not primary scoring)
++            
++        Returns:
++            Probability that the video follows physical laws
++        """
++        self.videophy_model.to(self.get_device())
++        
++        try:
++            # Prepare inputs
++            inputs = self._prepare_inputs(video_frames, caption)
++            
++            # Get score
++            score = self._compute_physics_score(inputs)
++            
++            logger.debug(f"Videophy score: {score:.4f}")
++            return score
++            
++        finally:
++            self.videophy_model.to("cpu")
++    
++    def _prepare_inputs(
++        self, 
++        video_frames: torch.Tensor, 
++        caption: str
++    ) -> Dict[str, Any]:
++        """Prepare model inputs from video frames."""
++        # Handle input format
++        if video_frames.dim() == 4:
++            if video_frames.shape[0] == 3:  # (C, T, H, W)
++                video_frames = video_frames.permute(1, 0, 2, 3)  # -> (T, C, H, W)
++        
++        # Resize frames
++        video_resized = self._resize_frames(video_frames)
++        
++        # Extract text tokens
++        text_data = self._tokenize_conversation(0)
++        
++        # Build batch
++        batch = {
++            "video": video_resized.unsqueeze(0),  # (1, T, C, H, W)
++            "text": text_data,
++            "caption": caption,
++        }
++        
++        return self._collate_batch([batch])
++    
++    def _resize_frames(self, frames: torch.Tensor) -> torch.Tensor:
++        """Resize video frames to target size with center crop."""
++        T, C, H, W = frames.shape
++        target_H = target_W = self.target_size
++        
++        # Flatten time into batch
++        frames = frames.reshape(T, C, H, W)
++        
++        # Resize keeping aspect ratio
++        scale = max(target_H / H, target_W / W)
++        new_H = int(round(H * scale))
++        new_W = int(round(W * scale))
++        
++        resized = F.interpolate(frames, size=(new_H, new_W), mode='bilinear', align_corners=False)
++        
++        # Center crop
++        top = (new_H - target_H) // 2
++        left = (new_W - target_W) // 2
++        cropped = resized[:, :, top:top+target_H, left:left+target_W]
++        
++        return cropped  # (T, C, H, W)
++    
++    def _tokenize_conversation(self, index: int) -> Dict[str, torch.Tensor]:
++        """Tokenize the physics evaluation conversation."""
++        max_length = self.max_length
++        conversation = PHYSICS_PROMPT
++        
++        # Initialize
++        if self.tokenizer.bos_token_id > 0:
++            enc_chunk = [self.tokenizer.bos_token_id]
++        else:
++            enc_chunk = []
++        
++        label_chunk = []
++        enc_length = 0
++        
++        # Parse conversation with media tokens
++        pattern = "|".join(
++            map(re.escape, list(self.media_tokens.keys()) + ["AI: ", "\nHuman: "])
++        )
++        chunk_strs = re.split(f"({pattern})", conversation)
++        chunk_strs = [x for x in chunk_strs if len(x) > 0]
++        
++        for idx, chunk_str in enumerate(chunk_strs):
++            if enc_length >= max_length + 1:
++                break
++            
++            if idx == 0:
++                tokens = self.tokenizer(chunk_str, add_special_tokens=False)["input_ids"]
++                enc_chunk.extend(tokens)
++                enc_length = len(enc_chunk)
++                label_chunk = [0] * enc_length
++            else:
++                if chunk_str in self.media_tokens:
++                    media_len = self.media_lengths[chunk_str]
++                    if enc_length + media_len > max_length + 1:
++                        break
++                    enc_chunk.extend([self.media_tokens[chunk_str]] * media_len)
++                    enc_length += media_len
++                    label_chunk.extend([0] * media_len)
++                elif idx > 0 and chunk_strs[idx - 1] == "AI: ":
++                    tokens = self.tokenizer(chunk_str, add_special_tokens=False)["input_ids"]
++                    if enc_length + len(tokens) >= max_length:
++                        tokens = tokens[:max_length - enc_length]
++                    tokens.append(self.tokenizer.eos_token_id)
++                    enc_chunk.extend(tokens)
++                    enc_length += len(tokens)
++                    label_chunk.extend([1] * len(tokens))
++                else:
++                    tokens = self.tokenizer(chunk_str, add_special_tokens=False)["input_ids"]
++                    if enc_length + len(tokens) >= max_length + 1:
++                        tokens = tokens[:max_length + 1 - enc_length]
++                    enc_chunk.extend(tokens)
++                    enc_length += len(tokens)
++                    label_chunk.extend([0] * len(tokens))
++        
++        # Pad to max_length
++        if enc_length < max_length + 1:
++            padding_length = max_length + 1 - enc_length
++            enc_chunk.extend([self.tokenizer.pad_token_id] * padding_length)
++            label_chunk.extend([0] * padding_length)
++        
++        # Create masks
++        non_padding_mask = [1 if i < enc_length - 1 else 0 for i in range(max_length)]
++        
++        # Non-media mask
++        enc_tensor = torch.tensor(enc_chunk)
++        non_media_mask = (enc_tensor >= 0).long()[1:max_length + 1]
++        
++        return {
++            "input_ids": torch.tensor(enc_chunk).long(),
++            "non_padding_mask": torch.tensor(non_padding_mask).long(),
++            "non_media_mask": non_media_mask,
++            "prompt_mask": torch.tensor(label_chunk[1:]).long(),
++        }
++    
++    def _collate_batch(self, batch: List[Dict]) -> Dict[str, Any]:
++        """Collate a batch of inputs."""
++        video = torch.cat([b["video"] for b in batch], dim=0)
++        
++        return {
++            "pixel_values": None,
++            "video_pixel_values": video,
++            "input_ids": torch.stack([b["text"]["input_ids"] for b in batch]).long(),
++            "labels": torch.stack([b["text"]["input_ids"] for b in batch]).long().clone(),
++            "num_images": torch.zeros(len(batch)).long(),
++            "num_videos": torch.ones(len(batch)).long(),
++            "non_padding_mask": torch.stack([b["text"]["non_padding_mask"] for b in batch]).long(),
++            "non_media_mask": torch.stack([b["text"]["non_media_mask"] for b in batch]).long(),
++            "prompt_mask": torch.stack([b["text"]["prompt_mask"] for b in batch]).long(),
++        }
++    
++    def _compute_physics_score(self, inputs: Dict[str, Any]) -> float:
++        """Compute the physics plausibility score."""
++        # Move inputs to device
++        for k, v in inputs.items():
++            if torch.is_tensor(v):
++                if v.dtype == torch.float:
++                    v = v.bfloat16()
++                inputs[k] = v.to(self.get_device())
++        
++        with torch.no_grad():
++            outputs = self.videophy_model(
++                pixel_values=inputs["pixel_values"],
++                video_pixel_values=inputs["video_pixel_values"],
++                labels=None,
++                num_images=inputs["num_images"],
++                num_videos=inputs["num_videos"],
++                input_ids=inputs["input_ids"],
++                non_padding_mask=inputs["non_padding_mask"],
++                non_media_mask=inputs["non_media_mask"],
++                prompt_mask=inputs["prompt_mask"],
++            )
++            
++            logits = outputs["logits"]
++            score = self._extract_entailment_score(logits, inputs["input_ids"])
++        
++        return score
++    
++    def _extract_entailment_score(
++        self, 
++        logits: torch.Tensor, 
++        input_ids: torch.Tensor
++    ) -> float:
++        """Extract Yes/No probability from logits."""
++        softmax = nn.Softmax(dim=2)
++        logits = softmax(logits)
++        
++        token_id_yes = self.tokenizer.encode("Yes", add_special_tokens=False)[0]
++        token_id_no = self.tokenizer.encode("No", add_special_tokens=False)[0]
++        
++        # Find the position just before padding
++        for i in range(len(input_ids[0])):
++            if input_ids[0][i] == self.tokenizer.pad_token_id:
++                i = i - 1
++                break
++            elif i == len(input_ids[0]) - 1:
++                break
++        
++        # Compute probability of "Yes"
++        prob_yes = logits[0][i][token_id_yes]
++        prob_no = logits[0][i][token_id_no]
++        score = (prob_yes / (prob_yes + prob_no)).item()
++        
++        return score
+-- 
+2.50.1 (Apple Git-155)
+
