@@ -169,10 +169,13 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             with open_dict(self.config.actor):
                 self.config.actor.use_remove_padding = use_remove_padding
                 self.config.actor.use_fused_kernels = use_fused_kernels
-            # compile actor DiT forward; ratio=1 holds because compute_log_prob
-            # and update both go through the same compiled forward
-            self.actor_module_fsdp = torch.compile(
-                self.actor_module_fsdp,
+            # compile actor DiT forward in-place; keep self.actor_module_fsdp as
+            # the original FSDP instance so downstream isinstance(..., FSDP)
+            # checks (e.g. verl.utils.fsdp_utils.load_fsdp_model_to_gpu) still pass.
+            # ratio=1 holds because compute_log_prob and update go through the
+            # same compiled forward.
+            self.actor_module_fsdp.forward = torch.compile(
+                self.actor_module_fsdp.forward,
                 mode="max-autotune-no-cudagraphs",
             )
             self.actor = DataParallelPPOActor(config=self.config.actor, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer)
