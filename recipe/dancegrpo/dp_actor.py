@@ -1,47 +1,21 @@
-import itertools
 import logging
 import math
 import os
-from collections import defaultdict
 
 import numpy as np
 import torch
 
-from recipe.spin.core_algos import compute_online_dpo_loss, get_batch_logps
 from verl import DataProto
 from verl.utils.debug import GPUMemoryLogger
-from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
-from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
-from verl.utils.ulysses import gather_outpus_and_unpad
-from verl.workers.actor import DataParallelPPOActor
+from verl.utils.device import get_device_id
 from verl.utils.py_functional import append_to_dict
+from verl.workers.actor import DataParallelPPOActor
 
-# from tensorwatch import TensorWatch,watch_module_forward_backward
 __all__ = ["DiffusionDataParallelPPOActor"]
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-def fprint(*args, **kwargs):
-    text = " ".join(str(a) for a in args)
-    with open("output.log", "a", encoding="utf-8") as f:
-        f.write(text + "\n")
-
-# hook 函数：保存输入数据和模块名
-def save_input_hook(name):
-    def hook(module, input, output):
-        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-        file_name = f"output/{rank}_{name}_input.pt"
-        for param_name, param in module.named_parameters(recurse=False):
-            print(f"  Param: {name}, Shape: {param.shape},{param.float().norm().item()}")
-
-        # print(f"[HOOK] Saving {name} input to {file_name}")
-        torch.save({
-            "name": name,
-            "input": input,
-            "output": output
-        }, file_name)
-    return hook
 
 def _normalize_wan22_timestep(t, sigma):
     if sigma is not None:
@@ -58,6 +32,7 @@ def _normalize_wan22_timestep(t, sigma):
         t_val = t_val / 1000.0
     return t_val
 
+
 def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
     if isinstance(guide_scale, (list, tuple)) and len(guide_scale) >= 2:
         t_val = _normalize_wan22_timestep(t, sigma)
@@ -66,231 +41,257 @@ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
         return guide_scale[1] if t_val >= boundary else guide_scale[0]
     return guide_scale
 
-def register_all_hooks(model):
-    for name, module in model.named_modules():
-        print(f"[REGISTER] Hooking module: {name}")
-        module.register_forward_hook(save_input_hook(name))
 
 class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+    @staticmethod
+    def _build_perms(timesteps: torch.Tensor, shuffle: bool = True) -> torch.Tensor:
+        seq_len = len(timesteps[0])
+        if shuffle:
+            return torch.stack([torch.randperm(seq_len) for _ in range(timesteps.shape[0])])
+        return torch.stack([torch.arange(seq_len) for _ in range(timesteps.shape[0])])
+
+    @staticmethod
+    def _broadcast_perms(perms: torch.Tensor) -> None:
+        from verl.utils.ulysses import (
+            get_ulysses_sequence_parallel_group,
+            get_ulysses_sequence_parallel_world_size,
+        )
+
+        if get_ulysses_sequence_parallel_world_size() > 1:
+            sp_size = get_ulysses_sequence_parallel_world_size()
+            src_rank = (torch.distributed.get_rank() // sp_size) * sp_size
+            torch.distributed.broadcast(perms, src=src_rank, group=get_ulysses_sequence_parallel_group())
+            torch.distributed.barrier()
+
+    @staticmethod
+    def _reorder_batch_by_perms(data: DataProto, perms: torch.Tensor, keys) -> None:
+        batch_idx = torch.arange(data.batch.batch_size[0])[:, None]
+        for key in keys:
+            data.batch[key] = data.batch[key][batch_idx, perms]
+
+    @staticmethod
+    def _prepare_contexts(td, device):
+        ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
+        ctxs_cpu = [td["contexts"][i][:int(ctx_lens[i])] for i in range(len(ctx_lens))]
+        nctx_cpu = [td["null_context"][i] for i in range(len(ctx_lens))]
+        ctxs = [c.to(device) for c in ctxs_cpu]
+        nctxs = [c.to(device) for c in nctx_cpu]
+        return ctxs, nctxs
+
+    @staticmethod
+    def _calc_seq_len(latents: torch.Tensor) -> int:
+        latent_shape = latents.shape
+        return math.ceil((latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2])
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
     def update_policy(self, data: DataProto):
-        #这里显存就开始增加了
-        # free, total = torch.cuda.mem_get_info()
-        # print("begin forward")
-        # print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
-        # print(f"总显存:   {total / (1024 ** 3):.2f} GB")
-        # print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
-        # data = data.to(get_device_id())
         # make sure we are in training mode
-        # print(data.batch['timesteps'].device)
-
         self.actor_module.train()
- 
-        # torch.cuda.memory._record_memory_history(max_entries=100000)
-        
-        perms = torch.stack([
-            torch.randperm(len(data.batch["timesteps"][0])) 
-            for _ in range(data.batch.batch_size[0])
-        ])
 
-        from verl.utils.ulysses import get_ulysses_sequence_parallel_group, get_ulysses_sequence_parallel_world_size
-        if get_ulysses_sequence_parallel_world_size() > 1:
-            src_rank = (torch.distributed.get_rank() // get_ulysses_sequence_parallel_world_size()) * get_ulysses_sequence_parallel_world_size()
-            torch.distributed.broadcast(perms, src=src_rank,group=get_ulysses_sequence_parallel_group())
-            torch.distributed.barrier()
+        # GRPO-Guard options (Flow-GRPO RatioNorm)
+        guard_cfg = self.config.get("grpo_guard", {})
+        guard_enable = guard_cfg.get("enable", False)
+        ratio_norm = guard_cfg.get("ratio_norm", guard_enable)
+        ratio_norm_eps = guard_cfg.get("ratio_norm_eps", 1e-6)
 
-        # exit(0)
-        for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-            data.batch[key] = data.batch[key][
-                torch.arange(data.batch.batch_size[0])[:, None],
-                perms,
-            ]
-            
-        # B = data.batch.batch_size[0]  # = 12
-        # # 定义你想要的输出顺序：[1,2,3,1,2,3,1,2,3,1,2,3] 对应原始索引
-        # # 原始数据： [1,1,1,1,  2,2,2,2,  3,3,3,3]
-        # # 索引位置：[0,1,2,3,  4,5,6,7,  8,9,10,11]
-        # # 目标顺序：取第0个1, 第0个2, 第0个3 → 然后第1个1,2,3 → ...
-        # # 所以目标索引是：[0,4,8, 1,5,9, 2,6,10, 3,7,11]
+        flow_cfg = self.config.get("flow_grpo", {})
+        shuffle_timesteps = flow_cfg.get("shuffle_timesteps", True)
+        if "timestep_indices" in data.batch and shuffle_timesteps:
+            shuffle_timesteps = False
 
-        # # 自动生成这个 permutation
-        # K = 3  # 有3种不同的值
-        # T = 8  # 每个值重复4次
-        # assert B == K * T
+        perms = self._build_perms(data.batch["timesteps"], shuffle=shuffle_timesteps)
+        self._broadcast_perms(perms)
 
-        # # 构造 permutation: [0,4,8,1,5,9,2,6,10,3,7,11]
-        # perm = torch.tensor([i * T + j for j in range(T) for i in range(K)])  # 注意：i 是组号，j 是组内位置
+        permute_keys = ["timesteps", "latents", "next_latents", "log_probs"]
+        if ratio_norm:
+            permute_keys.append("prev_sample_mean")
+        if "timestep_indices" in data.batch:
+            permute_keys.append("timestep_indices")
+        self._reorder_batch_by_perms(data, perms, permute_keys)
 
-        # # 应用到所有 key
-        # for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-        #     if key in data.batch:
-        #         data.batch[key] = data.batch[key][perm]  # 直接按 batch 维度重排
-
-        # print(data.batch["timesteps"].shape,type(data.batch["timesteps"]),data.batch["timesteps"][0].shape,type(data.batch["timesteps"][0]),len(data.batch["timesteps"][0].shape[1]))
         train_timesteps = int(len(data.batch["timesteps"][0]) * self.config.timestep_fraction)
         grad_norm = None
-        
-        # num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
 
-        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages","context_orig_lengths","null_context"]
+        select_keys = [
+            "timesteps",
+            "latents",
+            "next_latents",
+            "log_probs",
+            "contexts",
+            "sigma_schedule",
+            "advantages",
+            "context_orig_lengths",
+            "null_context",
+        ]
+        if ratio_norm:
+            select_keys.append("prev_sample_mean")
+        if "timestep_indices" in data.batch:
+            select_keys.append("timestep_indices")
         non_tensor_select_keys = ["caption"]
 
-        # Split to make minibatch iterator for updating the actor
-        # See PPO paper for details. https://arxiv.org/abs/1707.06347
-        
-        # from tensordict import TensorDict
-
-        # batch = TensorDict()
-        # for k, v in data.batch.items():
-        #     if isinstance(v, torch.Tensor):
-        #         batch[k] = v.unsqueeze(1)  # 添加一维，保持 [B, 1, ...] 结构
-        # batch.batch_size=data.batch.batch_size
-
         self.gradient_accumulation = (
-                self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
-            )
-        
-        print(self.gradient_accumulation)
-        print("="*100)
+            self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
+        )
 
-        # data=data.to("cpu")
+        print("gradient_accumulation", self.gradient_accumulation)
+        print("=" * 100)
+
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
-        
-        device = torch.device(f"cuda:{get_device_id()}")
 
+        device = torch.device(f"cuda:{get_device_id()}")
         move_keys = ["latents", "next_latents", "timesteps", "log_probs", "advantages", "sigma_schedule"]
-        perms=perms.to(device)
-        # log_file = f"/gemini/space/wuxuaner/Dancegrpo/recipe/dancegrpo/log/rank{get_device_id()}"
+        if ratio_norm:
+            move_keys.append("prev_sample_mean")
+        if "timestep_indices" in data.batch:
+            move_keys.append("timestep_indices")
+        perms = perms.to(device)
+
         metrics = {}
-        # os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-        for batch_idx, data in enumerate(dataloader):
-            td = data.batch
-            ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
-            # 裁剪后的 CPU 列表（短生命周期）
-            ctxs_cpu  = [td["contexts"][i][:int(ctx_lens[i])]   for i in range(len(data))]
-            nctx_cpu  = [td["null_context"][i]                  for i in range(len(data))]
-            
-            td = data.pop(batch_keys=move_keys).to(device)
-            # for k in move_keys:
-                # print(k,device)
-                # td[k] = td[k].to(device)
-                # print("after",k,td[k].device)
-                
-            ctxs  = [c.to(device) for c in ctxs_cpu]
-            nctxs = [c.to(device) for c in nctx_cpu]
-            del ctxs_cpu, nctx_cpu
-            # mini_batch = data
-            # # split batch into micro_batches
-            # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
+        for batch_idx, mini_batch in enumerate(dataloader):
+            td = mini_batch.batch
+            ctxs, nctxs = self._prepare_contexts(td, device)
+            batch_on_device = mini_batch.pop(batch_keys=move_keys).to(device)
+
             self.actor_optimizer.zero_grad()
-            # batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
-            # batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
-            # for i in range(len(data)):
-            #     orig_lengths =int(data.batch['context_orig_lengths'][i])
-            #     assert batch_contexts[i].shape[0] >= orig_lengths, \
-            #         f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
-            #     batch_contexts[i] = batch_contexts[i][:orig_lengths]
-                
+
             for step_idx in range(train_timesteps):
                 clip_range = self.config.clip_range
                 adv_clip_max = self.config.adv_clip_max
-                latent_t  = td.batch["latents"][:, step_idx]
-                nlatent_t = td.batch["next_latents"][:, step_idx]
-                t_t       = td.batch["timesteps"][:, step_idx]
-                sigma_0   = td.batch["sigma_schedule"][0]  # 若每样本不同 schedule，这里改成按样本取
-        
-                latent_shape = td.batch["latents"][:, step_idx].shape
-                seq_len = math.ceil(
-                    (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
-                )
-                
-                new_log_probs = self.grpo_wan_one_step(
-                    latent_t,
-                    nlatent_t,
-                    ctxs, 
-                    nctxs,
-                    seq_len,
-                    self.actor_module,
-                    t_t,
-                    perms[batch_idx][step_idx],
-                    sigma_0, 
-                )
-                
+
+                latent_t = batch_on_device.batch["latents"][:, step_idx]
+                nlatent_t = batch_on_device.batch["next_latents"][:, step_idx]
+                t_t = batch_on_device.batch["timesteps"][:, step_idx]
+                sigma_0 = batch_on_device.batch["sigma_schedule"][0]
+
+                seq_len = self._calc_seq_len(latent_t)
+
+                if "timestep_indices" in batch_on_device.batch:
+                    step_indices = batch_on_device.batch["timestep_indices"][0, step_idx]
+                else:
+                    step_indices = perms[batch_idx][step_idx]
+
+                if ratio_norm:
+                    (
+                        new_log_probs,
+                        prev_sample_mean,
+                        std_dev_t,
+                        sqrt_dt,
+                    ) = self.grpo_wan_one_step(
+                        latent_t,
+                        nlatent_t,
+                        ctxs,
+                        nctxs,
+                        seq_len,
+                        self.actor_module,
+                        t_t,
+                        step_indices,
+                        sigma_0,
+                        return_stats=True,
+                    )
+                else:
+                    new_log_probs = self.grpo_wan_one_step(
+                        latent_t,
+                        nlatent_t,
+                        ctxs,
+                        nctxs,
+                        seq_len,
+                        self.actor_module,
+                        t_t,
+                        step_indices,
+                        sigma_0,
+                    )
+
                 advantages = torch.clamp(
-                    td.batch["advantages"],
+                    batch_on_device.batch["advantages"],
                     -adv_clip_max,
                     adv_clip_max,
                 )
 
-                ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
+                # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
+                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx].flatten()
+
+                # 2. new_log_probs 本身就是当前时间步的 log_prob (形状: Batch)
+                new_log_probs_step = new_log_probs.flatten()
+
+                print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
+
+                if ratio_norm:
+                    prev_sample_mean_step = prev_sample_mean
+                    prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+                    
+                    # 计算 ratio_mean_bias，先对空间维度规约，得到 [batch_size] 或标量
+                    diff_squared = (prev_sample_mean_step - prev_sample_mean_old).pow(2)
+                    # 对所有非batch维度规约
+                    ratio_mean_bias = diff_squared.flatten(start_dim=1).mean(dim=1) if diff_squared.ndim > 1 else diff_squared.mean()
+                    # 确保 flatten 到一维
+                    ratio_mean_bias = ratio_mean_bias.flatten()
+                    
+                    # sqrt_dt 和 std_dev_t 都是标量，不需要索引
+                    sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
+                    std_dev_t_scalar = std_dev_t.mean() if std_dev_t.ndim > 0 else std_dev_t
+                    
+                    sigma_t = std_dev_t_scalar / (sqrt_dt_scalar + ratio_norm_eps)
+                    scale = sqrt_dt_scalar * sigma_t
+                    
+                    # ratio_mean_bias 除以 scale^2，结果仍是 [batch_size]
+                    ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+                    
+                    print(f"Step {step_idx}: ratio_mean_bias {ratio_mean_bias.shape}, scale {scale}")
+                    
+                    # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale)
+                else:
+                    ratio = torch.exp(new_log_probs_step - old_log_probs_step)
+
                 clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
                 clip_count = clipped_mask.sum().detach().item()
-                clip_fraction = clipped_mask.float().mean().detach().item()                     
-                
-                # print("ratio",ratio)
-                # print("="*100)
+                clip_fraction = clipped_mask.float().mean().detach().item()
 
-                # ratio = torch.exp(new_log_probs - current_log_probs)
-
-                
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
                     ratio,
                     1.0 - clip_range,
                     1.0 + clip_range,
                 )
-                # temp = torch.maximum(unclipped_loss, clipped_loss)
-                
-                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
-                data = {
+
+                policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                if ratio_norm:
+                    policy_loss = policy_loss / (sqrt_dt_scalar**2)
+
+                loss = policy_loss / (self.gradient_accumulation * train_timesteps)
+
+                data_dict = {
                     "actor/clip_count": clip_count,
                     "actor/clip_fraction": clip_fraction,
                     "actor/loss": loss.detach().item(),
-                    # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
-                    # "actor/preference_mean": preference.mean().detach().item(),
                 }
-                append_to_dict(metrics, data)
-                # exit(0)
+                if ratio_norm:
+                    data_dict["actor/ratio_mean_bias"] = ratio_mean_bias.detach().mean().item()
+                    data_dict["actor/ratio_scale"] = scale if isinstance(scale, float) else scale.item()
+                    data_dict["actor/sqrt_dt"] = sqrt_dt_scalar if isinstance(sqrt_dt_scalar, float) else sqrt_dt_scalar.item()
+                append_to_dict(metrics, data_dict)
+
                 loss.backward()
 
                 avg_loss = loss.detach()
-
                 torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
-                
-                # # 查看显存占用
-                # import gc
-                # # 遍历当前存活的所有 Tensor
-                # for obj in gc.get_objects():
-                #     try:
-                #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                #             print(f"Tensor shape: {tuple(obj.shape)}, dtype: {obj.dtype}, device: {obj.device}, size: {obj.numel() * obj.element_size() / 1024**2:.2f} MB")
-                #     except Exception as e:
-                #         pass
 
-                # print("batch_idx",batch_idx)
-                # print("+"*100)
-                # print(f"Allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
-                # print(f"Reserved:  {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
-                # print(f"Max Allocated: {torch.cuda.max_memory_allocated(0) / 1024**3:.2f} GB")
-                # with open
-                # if batch_idx==3:
-                #     exit(0)
             if (batch_idx + 1) % self.gradient_accumulation == 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.actor_module.parameters(), self.config.max_grad_norm
+                )
                 self.actor_optimizer.step()
                 self.actor_optimizer.zero_grad()
-                data = {"actor/grad_norm": grad_norm.detach().item()}
-                append_to_dict(metrics, data)
-                
+                data_dict = {"actor/grad_norm": grad_norm.detach().item()}
+                append_to_dict(metrics, data_dict)
+
             del ctxs, nctxs
-            for k in move_keys:
-                if k in td: 
-                    del td[k]
-            del td, data
+            for key in move_keys:
+                if key in batch_on_device:
+                    del batch_on_device[key]
+            del batch_on_device, mini_batch
             torch.cuda.empty_cache()
-                
-            
+
         return metrics
 
     def grpo_wan_one_step(
@@ -305,121 +306,130 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         i,
         sigma_schedule,
         guide_scale=5.0,
+        return_stats: bool = False,
     ):
         """GRPO的单步训练，支持FP16优化"""
-        B = len(context) if isinstance(context, list) else context.shape[0]
         transformer.train()
-        
+
         # 确保latents维度正确：(16, 7, 64, 64)
         if latents.dim() == 5:
             latents = latents.squeeze(0)
-        
+
         if pre_latents.dim() == 5:
             pre_latents = pre_latents.squeeze(0)
-        
+
         if latents.shape[0] != 16:
             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
-        
+
         boundary = getattr(self.config, "wan22_boundary", 0.9)
         sigma = sigma_schedule[i] if sigma_schedule is not None else None
         sample_guide_scale = _select_wan22_guide_scale(guide_scale, timesteps, sigma, boundary)
-        
+
         autocast_dtype = torch.bfloat16
         with torch.autocast("cuda", dtype=autocast_dtype):
             with torch.no_grad():
                 pred_uncond = transformer(
-                    x=[latents],  # [(16, 7, 64, 64)]
+                    x=[latents],
                     t=timesteps,
                     context=context_null,
-                    seq_len=seq_len
+                    seq_len=seq_len,
                 )
-            
-            #处理无条件预测输出
-            if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
-                model_output_uncond = pred_uncond['rgb'][0].detach()
+
+            # 处理无条件预测输出
+            if isinstance(pred_uncond, dict) and "rgb" in pred_uncond:
+                model_output_uncond = pred_uncond["rgb"][0].detach()
             elif isinstance(pred_uncond, list):
                 model_output_uncond = pred_uncond[0].detach()
             else:
                 model_output_uncond = pred_uncond.detach()
-            
+
             pred_cond = transformer(
                 x=[latents],
                 t=timesteps,
                 context=context,
-                seq_len=seq_len
+                seq_len=seq_len,
             )
-            
+
             # 处理条件预测输出
-            if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
-                model_output_cond = pred_cond['rgb'][0]
+            if isinstance(pred_cond, dict) and "rgb" in pred_cond:
+                model_output_cond = pred_cond["rgb"][0]
             elif isinstance(pred_cond, list):
                 model_output_cond = pred_cond[0]
             else:
                 model_output_cond = pred_cond
-                    
-                # del pred_uncond
-                # torch.cuda.empty_cache()
-            
+
             # CFG组合
             model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
-            # del model_output_cond, model_output_uncond
-            # model_output = model_output_cond
 
-        # 确保数据类型一致性
+        if return_stats:
+            _, _, log_prob, prev_sample_mean, std_dev_t, sqrt_dt = self.wan_step(
+                model_output,
+                latents.to(torch.float32),
+                self.config.eta,
+                sigma_schedule,
+                i,
+                prev_sample=pre_latents,
+                grpo=True,
+                sde_solver=True,
+                return_stats=True,
+            )
+            return log_prob, prev_sample_mean, std_dev_t, sqrt_dt
 
-        # computation_dtype = torch.float32
         _, _, log_prob = self.wan_step(
-            model_output, 
-            latents.to(torch.float32), 
-            self.config.eta, 
+            model_output,
+            latents.to(torch.float32),
+            self.config.eta,
             sigma_schedule,
-            i, 
-            prev_sample=pre_latents, 
-            grpo=True, 
-            sde_solver=True
+            i,
+            prev_sample=pre_latents,
+            grpo=True,
+            sde_solver=True,
         )
-        
+
         return log_prob
 
     def wan_step(
         self,
-        model_output: torch.Tensor,  # 模型预测的flow
-        latents: torch.Tensor,       # 当前时间步的潜在表示 (16, 7, 64, 64)
-        eta: float,                  # 控制随机性强度
-        sigmas: torch.Tensor,        # sigma调度序列 (类似FLUX)
-        index: int,                  # 当前时间步索引  
-        prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
-        grpo: bool,                  # True时会得到logprob
-        sde_solver: bool,            # 使用SDE求解器
+        model_output: torch.Tensor,
+        latents: torch.Tensor,
+        eta: float,
+        sigmas: torch.Tensor,
+        index: int,
+        prev_sample: torch.Tensor,
+        grpo: bool,
+        sde_solver: bool,
+        return_stats: bool = False,
     ):
         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
         sigma = sigmas[index]
-        dsigma = sigmas[index + 1] - sigma  # sigma差分
+        dsigma = sigmas[index + 1] - sigma
         prev_sample_mean = latents + dsigma * model_output
-        # 预测的原始样本
         pred_original_sample = latents - sigma * model_output
-        
-        delta_t = sigma - sigmas[index + 1]  # 时间差分
-        # std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
-        std_dev_t = eta * torch.sqrt(delta_t)  # 根据hunyuan改的
-        
-        if sde_solver:  # 使用SDE求解器（和FLUX相同）
-            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
-            log_term = -0.5 * eta**2 * score_estimate  # 对数项修正
-            prev_sample_mean = prev_sample_mean + log_term * dsigma  # 修正的均值
-        
+
+        delta_t = sigma - sigmas[index + 1]
+        std_dev_t = eta * torch.sqrt(delta_t)
+
+        if sde_solver:
+            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)
+            log_term = -0.5 * eta**2 * score_estimate
+            prev_sample_mean = prev_sample_mean + log_term * dsigma
+
         if grpo and prev_sample is None:
             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
         if grpo:
-            # 计算log概率
             log_prob = (
                 -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2)
                 / (2 * (std_dev_t**2))
             ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
-            # 在除batch维度外的所有维度上求平均
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+            if return_stats:
+                sqrt_dt = torch.sqrt(delta_t)
+                return prev_sample, pred_original_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
             return prev_sample, pred_original_sample, log_prob
-        else:
-            return prev_sample_mean, pred_original_sample
+
+        if return_stats:
+            sqrt_dt = torch.sqrt(delta_t)
+            return prev_sample_mean, pred_original_sample, prev_sample_mean, std_dev_t, sqrt_dt
+        return prev_sample_mean, pred_original_sample
