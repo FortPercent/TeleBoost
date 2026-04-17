@@ -18,7 +18,6 @@ Then, get full state_dict and bind the state_dict to the single GPU model. Then,
 """
 import contextlib
 import math
-import random
 import os
 
 import torch
@@ -64,21 +63,6 @@ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
             return guide_scale[0]
         return guide_scale[1] if t_val >= boundary else guide_scale[0]
     return guide_scale
-
-
-def _compute_flow_grpo_window(window_size: int, window_range: tuple[int, int], num_steps: int):
-    if window_size <= 0:
-        return None
-    start_min, start_max = window_range
-    start_max = min(start_max, num_steps)
-    if start_max - window_size < start_min:
-        start = start_min
-    else:
-        start = random.randint(start_min, start_max - window_size)
-    end = start + window_size
-    return (start, end)
-
-
 class DiffusionRollout(BaseRollout):
 
     def __init__(self, module: nn.Module, config):
@@ -114,14 +98,6 @@ class DiffusionRollout(BaseRollout):
         all_video_frames = []
         all_video_ids = []
 
-        flow_cfg = self.config.get("flow_grpo", {})
-        if not flow_cfg.get("enable", False):
-            window_size = 0
-        else:
-            window_size = int(flow_cfg.get("sde_window_size", 0) or 0)
-        window_range = tuple(flow_cfg.get("sde_window_range", (0, self.config.sampling_steps)))
-        flow_window = _compute_flow_grpo_window(window_size, window_range, self.config.sampling_steps)
-
         batch_indices = torch.chunk(torch.arange(B), B // self.config.rollout.ulysses_sequence_parallel_size)
         
         grpo_sample = True
@@ -141,7 +117,7 @@ class DiffusionRollout(BaseRollout):
             # ---- 打印信息 ----
 
             # with torch.no_grad(): 
-            wan_outputs = self.run_wan_sample_step(
+            _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
                 batch_input_latents,
                 progress_bar,
                 sigma_schedule[0],
@@ -150,21 +126,10 @@ class DiffusionRollout(BaseRollout):
                 batch_neg_context,
                 seq_len,
                 grpo_sample,
-                flow_window=flow_window,
             )
-
-            if len(wan_outputs) == 5:
-                _, final_latents, batch_latents, batch_log_probs, batch_prev_sample_mean = wan_outputs
-            else:
-                _, final_latents, batch_latents, batch_log_probs = wan_outputs
-                batch_prev_sample_mean = None
 
             all_latents.append(batch_latents.unsqueeze(0))
             all_log_probs.append(batch_log_probs.unsqueeze(0))
-            if batch_prev_sample_mean is not None:
-                if "all_prev_sample_mean" not in locals():
-                    all_prev_sample_mean = []
-                all_prev_sample_mean.append(batch_prev_sample_mean.unsqueeze(0))
            
             
             # autocast_dtype = torch.float32 #TODO
@@ -218,20 +183,12 @@ class DiffusionRollout(BaseRollout):
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
             all_video_frames = torch.cat(all_video_frames, dim=0)
-            if "all_prev_sample_mean" in locals():
-                all_prev_sample_mean = torch.cat(all_prev_sample_mean, dim=0)
         else:
             all_latents = all_latents[0]
             all_log_probs = all_log_probs[0]
             all_video_frames = all_video_frames[0]
-            if "all_prev_sample_mean" in locals():
-                all_prev_sample_mean = all_prev_sample_mean[0]
 
-        if flow_window is None:
-            timestep_value = [int(sigma * 1000) for sigma in sigma_schedule[0].squeeze()][:self.config.sampling_steps]
-        else:
-            window_indices = list(range(flow_window[0], flow_window[1]))
-            timestep_value = [int(sigma_schedule[0].squeeze()[i] * 1000) for i in window_indices]
+        timestep_value = [int(sigma * 1000) for sigma in sigma_schedule[0].squeeze()][:self.config.sampling_steps]
         
         timestep_values = [timestep_value[:] for _ in range(B)]
 
@@ -240,26 +197,20 @@ class DiffusionRollout(BaseRollout):
         latents=all_latents[:, :-1]
         next_latents=all_latents[:, 1:]
 
-        batch_dict = {
-            "context_orig_lengths":context_orig_lengths,
-            "contexts": context,
-            "null_context":neg_context,
-            "latents": latents,
-            "next_latents": next_latents,
-            "log_probs": all_log_probs,
-            "video_frames": all_video_frames,
-            "sigma_schedule": sigma_schedule,
-            'timesteps':timesteps[:, :-1]
-        }
-        if "all_prev_sample_mean" in locals():
-            batch_dict["prev_sample_mean"] = all_prev_sample_mean
-        if flow_window is not None:
-            window_indices = list(range(flow_window[0], flow_window[1]))
-            timestep_indices = torch.tensor(window_indices, device=get_device_id(), dtype=torch.long)
-            timestep_indices = timestep_indices.unsqueeze(0).repeat(B, 1)
-            batch_dict["timestep_indices"] = timestep_indices
-
-        batch = TensorDict(batch_dict, batch_size=B)
+        batch = TensorDict(
+            {
+                "context_orig_lengths":context_orig_lengths,
+                "contexts": context,
+                "null_context":neg_context,
+                "latents": latents,
+                "next_latents": next_latents,
+                "log_probs": all_log_probs,
+                "video_frames": all_video_frames,
+                "sigma_schedule": sigma_schedule,
+                'timesteps':timesteps[:, :-1]
+            },
+            batch_size=B
+        )
 
 
         non_tensor_batch = prompts.non_tensor_batch
@@ -276,28 +227,17 @@ class DiffusionRollout(BaseRollout):
         neg_context,
         seq_len,
         grpo_sample,
-        flow_window=None,
     ):
         """WAN采样步骤，支持(C,T,H,W)格式输入"""
         if grpo_sample:
-            all_latents = []
+            all_latents = latents
             
             all_log_probs = []
-            return_prev_sample_mean = bool(
-                self.config.actor.get("grpo_guard", {}).get("ratio_norm", False)
-            )
-            all_prev_sample_mean = [] if return_prev_sample_mean else None
             B = len(context) if isinstance(context, list) else context.shape[0]
             # 确保设备一致
             device = latents[0].device
             boundary = getattr(self.config, "wan22_boundary", 0.9)
             base_guide_scale = getattr(self.config, "guide_scale", 5.0)
-
-            if flow_window is None:
-                window_start = 0
-                window_end = self.config.sampling_steps
-            else:
-                window_start, window_end = flow_window
             
             for i in progress_bar:
                 # 使用sigma值计算timestep
@@ -381,58 +321,26 @@ class DiffusionRollout(BaseRollout):
                     torch.cuda.empty_cache()
 
                 # WAN的SDE采样步骤
-                in_window = window_start <= i < window_end
-                if i == window_start:
-                    all_latents.append(latents[0])
-
-                if in_window:
-                    if return_prev_sample_mean:
-                        next_latents, pred_original, log_prob, prev_sample_mean = self.wan_step(
-                            model_output, 
-                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
-                            sigma_schedule,  # 传入sigma_schedule
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True,  # 启用SDE求解器
-                            return_prev_sample_mean=True,
-                        )
-                        all_prev_sample_mean.append(prev_sample_mean)
-                    else:
-                        next_latents, pred_original, log_prob = self.wan_step(
-                            model_output, 
-                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
-                            sigma_schedule,  # 传入sigma_schedule
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True  # 启用SDE求解器
-                        )
-                    all_log_probs.append(log_prob)
-                    all_latents.append(next_latents.to(torch.float32))
-                else:
-                    next_latents, pred_original = self.wan_step(
-                        model_output,
-                        latents[0].to(torch.float32),
-                        0.0,
-                        sigma_schedule,
-                        i,
-                        prev_sample=None,
-                        grpo=False,
-                        sde_solver=True,
-                    )
+                next_latents, pred_original, log_prob = self.wan_step(
+                    model_output, 
+                    latents[0].to(torch.float32),  # (16, 7, 64, 64)
+                    self.config.actor.eta, 
+                    sigma_schedule,  # 传入sigma_schedule
+                    i, 
+                    prev_sample=None, 
+                    grpo=True, 
+                    sde_solver=True  # 启用SDE求解器
+                )
                 
                 latents=[next_latents.to(torch.float32)]
+                all_latents.append(latents[0])  # 存储 (16, 7, 64, 64)
+                all_log_probs.append(log_prob)  # 存储 log概率
+            
             final_latents = pred_original
 
             # 修正：WAN的all_latents维度是 (num_steps+1, 16, 7, 64, 64)
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
-            if return_prev_sample_mean:
-                all_prev_sample_mean = torch.stack(all_prev_sample_mean, dim=0)
-                return latents, final_latents, all_latents, all_log_probs, all_prev_sample_mean
             
             return latents, final_latents, all_latents, all_log_probs
 
@@ -446,7 +354,6 @@ class DiffusionRollout(BaseRollout):
         prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
         grpo: bool,                  # True时会得到logprob
         sde_solver: bool,            # 使用SDE求解器
-        return_prev_sample_mean: bool = False,
     ):
         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
         
@@ -479,10 +386,6 @@ class DiffusionRollout(BaseRollout):
 
             # 在除batch维度外的所有维度上求平均
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
-            if return_prev_sample_mean:
-                return prev_sample, pred_original_sample, log_prob, prev_sample_mean
             return prev_sample, pred_original_sample, log_prob
         else:
-            if return_prev_sample_mean:
-                return prev_sample_mean, pred_original_sample, prev_sample_mean
             return prev_sample_mean, pred_original_sample
