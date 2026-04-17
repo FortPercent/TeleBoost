@@ -325,12 +325,8 @@ class BaseRewardModel(ABC):
         """
         Compute reward scores for a batch of samples.
         
-        This method handles:
-        - Checking if this worker is active
-        - Splitting data for data parallelism
-        - Calling compute_single_score for each sample
-        - Normalizing results if configured
-        - Packaging results into DataProto
+        For SINGLE mode: Data is already split by Dispatch.DP_COMPUTE_PROTO,
+        so we process it directly without additional splitting.
         
         Args:
             data: Input DataProto with 'video_frames' and 'caption'
@@ -340,26 +336,95 @@ class BaseRewardModel(ABC):
         """
         start_time = time.time()
         
-        # Extract data
+        # Extract data - already split per worker by framework
         extracted = data.pop(
             batch_keys=['video_frames'],
             non_tensor_batch_keys=['caption'],
         )
         
-        # Handle inactive workers
+        batch_size = extracted.batch.batch_size[0]
+        
+        # Handle empty batch
+        if batch_size == 0:
+            logger.info(f"[{self.config.name}] Rank {self.global_rank} received empty batch")
+            dummy_rewards = torch.zeros(0, device='cpu')
+            return make_reward_batch(self.REWARD_KEY, dummy_rewards, 0)
+        
+        logger.info(f"[{self.config.name}] Rank {self.global_rank} processing batch_size={batch_size}")
+        
+        # Split video frames by batch dimension (data already per-worker)
+        video_frames_list = split_video_frames(extracted, permute_to_tchw=True)
+        captions = split_captions(extracted.non_tensor_batch['caption'], batch_size)
+        
+        # Compute scores for each sample
+        rewards = []
+        for i, (frames, caption) in enumerate(zip(video_frames_list, captions)):
+            score = self.compute_single_score(frames, caption)
+            rewards.append(torch.tensor(score, device=self.get_device()))
+        
+        rewards = torch.stack(rewards)
+        
+        # Normalize if configured
+        if self.config.normalize:
+            rewards = zscore_normalize(rewards)
+        
+        # Move to CPU for return
+        rewards = rewards.cpu()
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[{self.config.name}] compute time: {elapsed:.2f}s")
+        
+        return make_reward_batch(self.REWARD_KEY, rewards, batch_size)
+    
+    def compute_batch_score_for_joint(self, data: DataProto) -> DataProto:
+        """
+        Compute reward scores for JOINT mode with per-model DP.
+        
+        Each model can have its own dp_fraction and rank_offset:
+        - Active workers split the full batch and process their portion
+        - Inactive workers return zeros (placeholder for AllGather)
+        
+        The caller (JointRewardModelWorker) will use AllGather to collect
+        results from all active workers and reconstruct the full batch.
+        
+        Args:
+            data: Input DataProto with FULL batch (from ALL_TO_ALL dispatch)
+            
+        Returns:
+            DataProto with LOCAL rewards (this worker's portion)
+        """
+        start_time = time.time()
+        
+        # Extract data - use select() to preserve original data for other models
+        extracted = data.select(
+            batch_keys=['video_frames'],
+            non_tensor_batch_keys=['caption'],
+        )
+        
+        full_batch_size = extracted.batch.batch_size[0]
+        
+        # Calculate local batch size for this model's DP configuration
+        local_batch_size = full_batch_size // self.dp_size
+        
+        # Handle inactive workers (based on dp_fraction configuration)
         if not self.is_active:
-            batch_size = extracted.batch.batch_size[0] // self.dp_size
             logger.info(f"[{self.config.name}] Rank {self.global_rank} inactive, returning zeros")
-            dummy_rewards = torch.zeros(batch_size, device='cpu')
-            return make_reward_batch(self.REWARD_KEY, dummy_rewards, batch_size)
+            dummy_rewards = torch.zeros(local_batch_size, device='cpu')
+            return make_reward_batch(self.REWARD_KEY, dummy_rewards, local_batch_size)
         
         # Split data for this DP rank
         local_data = split_batch_for_dp(extracted, self.dp_size, self.local_dp_rank)
         batch_size = local_data.batch.batch_size[0]
         
-        logger.info(f"[{self.config.name}] Rank {self.global_rank} processing batch_size={batch_size}")
+        # Handle empty batch
+        if batch_size == 0:
+            logger.info(f"[{self.config.name}] Rank {self.global_rank} received empty batch")
+            dummy_rewards = torch.zeros(0, device='cpu')
+            return make_reward_batch(self.REWARD_KEY, dummy_rewards, 0)
         
-        # Get video frames and captions
+        logger.info(f"[{self.config.name}] Rank {self.global_rank} processing local batch_size={batch_size}")
+        
+        # Get video frames and captions for local batch
         video_frames_list = split_video_frames(local_data, permute_to_tchw=True)
         captions = split_captions(local_data.non_tensor_batch['caption'], batch_size)
         

@@ -90,7 +90,13 @@ class AestheticRewardModel(BaseRewardModel):
         self.aes_model = self._load_aesthetic_head(aes_path)
         
         # Log parameter counts
-        clip_params = sum(p.numel() for p in self.clip_model.parameters())
+        # Note: clip_model is ViTL14CLIPModel wrapper, not nn.Module directly
+        # Access the visual encoder for parameter count
+        if hasattr(self.clip_model, 'visual'):
+            clip_params = sum(p.numel() for p in self.clip_model.visual.parameters())
+        else:
+            clip_params = 0
+            logger.warning("Could not count CLIP parameters")
         aes_params = sum(p.numel() for p in self.aes_model.parameters())
         logger.info(f"Aesthetic model initialized: CLIP={clip_params:,}, Head={aes_params:,} params")
     

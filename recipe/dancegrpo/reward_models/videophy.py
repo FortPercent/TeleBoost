@@ -140,11 +140,30 @@ class VideophyRewardModel(BaseRewardModel):
         video_frames: torch.Tensor, 
         caption: str
     ) -> Dict[str, Any]:
-        """Prepare model inputs from video frames."""
-        # Handle input format
+        """Prepare model inputs from video frames.
+        
+        Expected input shapes:
+        - (T, C, H, W): T frames, C channels (usually 3)
+        - (C, T, H, W): Alternative format where C=3 and T is frame count
+        
+        We distinguish by checking if dim 1 == 3 (RGB channels) for (C,T,H,W) format.
+        """
         if video_frames.dim() == 4:
-            if video_frames.shape[0] == 3:  # (C, T, H, W)
-                video_frames = video_frames.permute(1, 0, 2, 3)  # -> (T, C, H, W)
+            # Check if it's (C, T, H, W) format by looking at second dimension
+            # If shape[1] == 3, it's likely (T, C, H, W) already
+            # If shape[0] == 3 and shape[1] != 3, it's (C, T, H, W)
+            if video_frames.shape[0] == 3 and video_frames.shape[1] != 3:
+                # (C, T, H, W) -> (T, C, H, W)
+                video_frames = video_frames.permute(1, 0, 2, 3)
+            elif video_frames.shape[1] == 3:
+                # Already (T, C, H, W)
+                pass
+            else:
+                # Ambiguous, log warning and assume (T, C, H, W)
+                logger.warning(f"Ambiguous video shape {video_frames.shape}, assuming (T, C, H, W)")
+        
+        # Now video_frames should be (T, C, H, W)
+        logger.debug(f"Video frames shape after processing: {video_frames.shape}")
         
         # Resize frames
         video_resized = self._resize_frames(video_frames)
@@ -153,8 +172,13 @@ class VideophyRewardModel(BaseRewardModel):
         text_data = self._tokenize_conversation(0)
         
         # Build batch
+        # video_resized is (T, C, H, W)
+        # Model expects (B, C, T, H, W)
+        video_tensor = video_resized.unsqueeze(0)  # (1, T, C, H, W)
+        video_tensor = video_tensor.permute(0, 2, 1, 3, 4)  # (1, C, T, H, W)
+        
         batch = {
-            "video": video_resized.unsqueeze(0),  # (1, T, C, H, W)
+            "video": video_tensor,
             "text": text_data,
             "caption": caption,
         }
