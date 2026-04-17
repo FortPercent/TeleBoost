@@ -177,7 +177,7 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
         if self._is_rollout and hasattr(self.rollout, "vae_module"):
             self.rollout.vae_module.model.decoder = torch.compile(
                 self.rollout.vae_module.model.decoder,
-                mode="max-autotune-no-cudagraphs",
+                mode="default",
             )
         
         if self._is_ref:
