@@ -290,19 +290,34 @@ Test 4: dancegrpo_fsdp_worker      ✓ 6 个内嵌 reward worker class
 Test 5: main_dancegrpo entry       ✓
 ```
 
-### 11.2 Phase B 真实训练 smoke（脚本 `run_dancegrpo_single_4gpu_smoke.sh`）
+### 11.2 Phase B 真实训练 smoke（脚本 `run_dancegrpo_single_4gpu_smoke.sh`） — **✅ 通过**
 
 参数：`n_gpus=4, sampling_steps=1, h=w=256, num_frames=9, train_bsz=2, total_steps=2, val_before_train=False`
 
 模型：Wan2.2-T2V-A14B + HPSv2 reward
 
-**遇到的 3 个外部依赖问题**（与代码无关，纯环境）：
+**最终结果**（smoke #7, commit `b873320`）：完成 2 步训练 + ckpt save，无 OOM。
 
-| # | 错误 | 阶段 | 解决 |
-|---|---|---|---|
-| 1 | `ModuleNotFoundError: No module named 'hpsv2'` | reward worker init | `pip install hpsv2` (1.2.0)，副作用 protobuf 4.24→3.20 |
-| 2 | `FileNotFoundError: bpe_simple_vocab_16e6.txt.gz` | hpsv2 加载 BPE | `cp /gfs/.../wxe/HPSv2/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz` 到 `/usr/local/lib/python3.10/dist-packages/hpsv2/src/open_clip/`（pip 包遗漏数据文件） |
-| 3 | 待验证 | 14B 加载 / forward / backward | — |
+```
+[step 1] timing_s/gen=26.8s, timing_s/reward=5.5s, timing_s/update_actor=0.8s, timing_s/step=33.1s
+[step 2] timing_s/save_checkpoint=22.0s (ckpt 总 54GB), timing_s/step=25.7s
+         train/log_probs: -0.0325 (有效)
+         train/rewards / train/advantage: nan (smoke 用 zero null context 占位的预期副作用,
+                                              非代码错误; 真实数据不会 nan)
+         actor/grad_norm: 0.0 (advantage nan 推导)
+```
+
+**遇到的 5 个问题（前 3 外部依赖，后 2 wxe 代码 patch）**：
+
+| # | 类型 | 错误 / 解决 |
+|---|---|---|
+| 1 | env | `ModuleNotFoundError: hpsv2` → `pip install hpsv2` (1.2.0)。副作用：protobuf 4.24→3.20，但 vllm/ray 仍正常 |
+| 2 | env | `FileNotFoundError: bpe_simple_vocab_16e6.txt.gz` → cp `/gfs/.../wxe/HPSv2/hpsv2/src/open_clip/...gz` 到 pip 包目录（pypi 包遗漏数据） |
+| 3 | data | `KeyError: 'context_null_path'` → patch JSON 给每条加 `context_null_path` 指向一个 zeros (26,4096) float32 npy（仅 smoke；真实需用 `data_preprocess/preprocess_wan_data.py` 跑出真 null embedding） |
+| 4 | code | `AssertionError` in `dancegrpo_ray_trainer.py:741` `pop(['caption', 'video_ids', 'video_frames'])` → commit `2167b04` 改 defensive pop（只 pop 已存在的 key） |
+| 5 | code | `KeyError: 'rewards'` 在 `compute_advantage` → commit `b873320` 在 union 后给 `{model_name}_rewards` (e.g. `hps_rewards`) 复制别名 `rewards`，下游硬编码兼容 |
+
+**问题 4、5 是 wxe 原代码的 schema 不一致**（reward worker 输出 `*_rewards` 但 trainer 期望 `rewards`、且 pop 假设 video 字段存在），不是 smoke 引入的。真实数据训练也会触发同样问题。两个 patch 已合入 verl_0902_wxe 分支并 push 到 TeleBoost。
 
 **修正路径**（脚本里写的 GFS 路径不存在，已改）：
 
