@@ -25,6 +25,15 @@ actor_rollout_ref:
     adv_clip_max: 5.0
     eta: 0.3
     max_grad_norm: 1.0
+
+    # === ported from wxe (default disabled to preserve verl_0902 behavior) ===
+    grpo_guard:
+      enable: false
+      ratio_norm: false
+      grad_reweight: false
+      ratio_norm_eps: 1e-6
+      grad_reweight_eps: 1e-6
+      grad_reweight_alpha: 1.0
   rollout:
     ulysses_sequence_parallel_size: 1.0
   video_fps: 25
@@ -40,13 +49,104 @@ actor_rollout_ref:
   timestep_fraction: 0.6
   init_same_noise: True
 
+  # === ported from wxe ===
+  tokenizer_path: google/umt5-xxl
+  vae_stride: [4, 8, 8]
+  latent_channels: 16
+
+  # === ported from wxe (default disabled) ===
+  flow_grpo:
+    enable: false
+    sde_window_size: 0
+    sde_window_range: [0, "${actor_rollout_ref.sampling_steps}"]
+    shuffle_timesteps: false
+
 
 reward_model:
   enable: False
-  
+
   strategy: diffusion
 
+  # type: qwen | single | joint
+  # - qwen   : verl_0902 default (back-compat)
+  # - single : wxe registry single mode (model_name required)
+  # - joint  : wxe dynamic joint with reward_models/* plugins
   type: qwen
+
+  # === ported from wxe (used when type=single or type=joint) ===
+  micro_batch_size_per_gpu: 1
+  model_name: hps                       # required when type=single
+  model:
+    path: ""
+  extra_config:
+    model_type: ViT-H-14
+  normalize: true
+
+  # === wxe joint config (used when type=joint, default disabled fields) ===
+  joint:
+    aggregation: weighted_sum
+    normalize_individual: true
+    normalize_final: false
+    parallel_compute: true
+    mps:
+      enabled: false
+      default_percentage: 25
+      model_percentages:
+        aesthetic: 20
+        raft: 30
+        videoclip: 25
+        videophy: 25
+    models:
+      aesthetic:
+        enabled: false
+        weight: 1.0
+        dp_fraction: 0.25
+        rank_offset: 0
+        mps_percentage: 20
+        normalize: true
+        model_path: ""
+        extra_config:
+          clip_model_path: /path/to/ViT-L-14.pt
+          aes_model_path: /path/to/sa_0_4_vit_l_14_linear.pth
+      raft:
+        enabled: false
+        weight: 1.0
+        dp_fraction: 0.25
+        rank_offset: 2
+        mps_percentage: 30
+        normalize: true
+        model_path: /path/to/raft-things.pth
+        extra_config:
+          stride: 1
+          iters: 20
+      videoclip:
+        enabled: false
+        weight: 1.5
+        dp_fraction: 0.25
+        rank_offset: 4
+        mps_percentage: 25
+        normalize: true
+        model_path: /path/to/VideoCLIP-XL.bin
+        extra_config:
+          num_frames: 8
+          target_size: 224
+      videophy:
+        enabled: false
+        weight: 0.8
+        dp_fraction: 0.25
+        rank_offset: 6
+        mps_percentage: 25
+        normalize: true
+        model_path: /path/to/videocon_physics
+        extra_config:
+          max_length: 256
+
+  # === wxe legacy weights (used when type != joint) ===
+  weights:
+    aes: 1.0
+    raft: 1.0
+    videoclip: 1.0
+    videophy: 1.0
 
   aesthetic:
     clip_model_path: /path/to/ViT-L-14.pt
