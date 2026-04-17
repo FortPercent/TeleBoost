@@ -57,10 +57,10 @@ RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 
 # Paths (沿用 wxe 部署的 GFS 路径)
-RAY_DATA_HOME="/gfs/platform/public/infra/Dance-grpo"
+RAY_DATA_HOME="/gfs/platform/public/infra/wxe"
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/dancegrpo_smoke_ckpt"}
-TRAIN_FILE=${TRAIN_FILE:-"/gfs/platform/public/infra/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
-TEST_FILE=${TEST_FILE:-"/gfs/platform/public/infra/Dance-grpo/data/14B/rl_embeddings/processed_wan_prompt.json"}
+TRAIN_FILE=${TRAIN_FILE:-"/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json"}
+TEST_FILE=${TEST_FILE:-"/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json"}
 
 export TENSORBOARD_DIR=/tmp/dancegrpo_smoke_tb/${exp_name}
 
@@ -90,9 +90,9 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     algorithm.adv_estimator=${adv_estimator} \
     algorithm.use_kl_in_reward=${use_kl_in_reward} \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
-    actor_rollout_ref.model.path='/gfs/platform/public/infra/Wan-AI/Wan2.2-T2V-A14B' \
+    actor_rollout_ref.model.path='/gfs/platform/public/infra/wxe/Wan-AI/Wan2.2-T2V-A14B' \
     +actor_rollout_ref.model.wan_version='wan22' \
-    actor_rollout_ref.model.vae_model_path='/gfs/platform/public/infra/Wan-AI/Wan2.2-T2V-A14B/Wan2.1_VAE.pth' \
+    actor_rollout_ref.model.vae_model_path='/gfs/platform/public/infra/wxe/Wan-AI/Wan2.2-T2V-A14B/Wan2.1_VAE.pth' \
     actor_rollout_ref.cfg=5.0 \
     actor_rollout_ref.h=256 \
     actor_rollout_ref.w=256 \
@@ -151,7 +151,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
     reward_model.type="single" \
     reward_model.micro_batch_size_per_gpu=1 \
     reward_model.model_name="hps" \
-    reward_model.model.path='/gfs/platform/public/infra/HPS_v2.1_compressed.pt' \
+    reward_model.model.path='/gfs/platform/public/infra/models/HPS_v2.1_compressed.pt' \
     reward_model.extra_config.model_type="ViT-H-14" \
     trainer.logger="tensorboard" \
     trainer.project_name="${project_name}" \
