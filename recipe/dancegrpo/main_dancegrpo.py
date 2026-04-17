@@ -1,345 +1,180 @@
-# Copyright 2024 Dance-GRPO Team
-"""
-Dance-GRPO Main Entry Point
-
-This module provides the main entry point for Dance-GRPO training,
-which applies Group Relative Policy Optimization to diffusion models
-for video generation with multiple reward signals.
-"""
-
-import logging
 import os
-from typing import Dict, Optional, Tuple, Any
 
 import hydra
+
+# os.environ["RAY_DEDUP_LOGS"] = "0"
 import ray
-from omegaconf import DictConfig, OmegaConf
-from pprint import pprint
 
 from verl.trainer.ppo.reward import get_custom_reward_fn
-from verl.utils.fs import copy_to_local
 
 from .dancegrpo_ray_trainer import RayDanceGRPOTrainer
 
-logger = logging.getLogger(__name__)
 
-# Ray environment variables for distributed training
-RAY_ENV_VARS = {
-    "TOKENIZERS_PARALLELISM": "true",
-    "NCCL_DEBUG": "WARN",
-    "VLLM_LOGGING_LEVEL": "WARN",
-    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
-}
-
-
-def _init_ray(config: DictConfig) -> None:
-    """
-    Initialize Ray runtime if not already initialized.
+@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
+def main(config):
+    run_ppo(config)
     
-    Args:
-        config: Configuration with ray_init settings
-    """
-    if ray.is_initialized():
-        logger.info("Ray already initialized, skipping")
-        return
-    
-    ray.init(
-        runtime_env={"env_vars": RAY_ENV_VARS},
-        num_cpus=config.ray_init.num_cpus,
-    )
-    logger.info(f"Ray initialized with {config.ray_init.num_cpus} CPUs")
-
-
-def _build_tokenizer_and_processor(
-    local_path: str, 
-    config: Optional[DictConfig] = None
-) -> Tuple[Any, Any]:
-    """
-    Build tokenizer and processor for the model.
-    
-    Args:
-        local_path: Local path to the model
-        config: Optional config for custom tokenizer path
-        
-    Returns:
-        Tuple of (tokenizer, processor)
-        
-    Raises:
-        RuntimeError: If tokenizer loading fails
-    """
-    from verl.utils import hf_processor, hf_tokenizer
-
-    # Allow configurable tokenizer path with sensible default
-    tokenizer_subpath = "google/umt5-xxl"
-    if config is not None:
-        tokenizer_subpath = config.get("tokenizer_path", tokenizer_subpath)
-    
-    tokenizer_path = os.path.join(local_path, tokenizer_subpath)
-    
-    try:
-        tokenizer = hf_tokenizer(tokenizer_path)
-        processor = hf_processor(local_path, use_fast=True)
-        logger.info(f"Loaded tokenizer from {tokenizer_path}")
-        return tokenizer, processor
-    except Exception as e:
-        raise RuntimeError(f"Failed to load tokenizer from {tokenizer_path}: {e}")
-
-
-def _resolve_actor_worker_and_group(config: DictConfig) -> Tuple[type, type]:
-    """
-    Resolve the worker class and group class based on strategy.
-    
-    Args:
-        config: Configuration with actor_rollout_ref settings
-        
-    Returns:
-        Tuple of (RayWorkerGroupClass, ActorWorkerClass)
-        
-    Raises:
-        NotImplementedError: If strategy is not supported
-    """
-    strategy = config.actor_rollout_ref.actor.strategy
-    
-    # Only check critic strategy if critic is enabled
-    use_critic = config.algorithm.get("adv_estimator", "grpo") == "gae"
-    if use_critic and hasattr(config, 'critic'):
-        assert strategy == config.critic.strategy, (
-            f"Actor strategy ({strategy}) must match critic strategy ({config.critic.strategy})"
+def run_ppo(config) -> None:
+    if not ray.is_initialized():
+        # this is for local ray cluster
+        ray.init(
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN","CUBLAS_WORKSPACE_CONFIG": ":4096:8"}},
+            num_cpus=config.ray_init.num_cpus,
         )
 
-    if strategy == "fsdp":
-        from verl.single_controller.ray import RayWorkerGroup
-        from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
-        return RayWorkerGroup, DiffusionActorRolloutRefWorker
-
-    if strategy == "megatron":
-        from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
-        from verl.workers.megatron_workers import ActorRolloutRefWorker
-        return NVMegatronRayWorkerGroup, ActorRolloutRefWorker
-
-    raise NotImplementedError(f"Unknown actor strategy: {strategy}")
-
-
-def _build_reward_fns(config: DictConfig, tokenizer):
-    """
-    Build reward functions for training and validation.
-    
-    Args:
-        config: Configuration with reward_model settings
-        tokenizer: Tokenizer for the model
-        
-    Returns:
-        Tuple of (reward_fn, val_reward_fn)
-    """
-    from verl.workers.reward_manager import get_reward_manager_cls
-
-    reward_manager_name = config.reward_model.get("reward_manager", "naive")
-    reward_manager_cls = get_reward_manager_cls(reward_manager_name)
-    compute_score = get_custom_reward_fn(config)
-
-    # Training reward function
-    reward_fn = reward_manager_cls(
-        tokenizer=tokenizer,
-        num_examine=0,
-        compute_score=compute_score,
-    )
-
-    # Validation reward function (with sample examination)
-    val_reward_fn = reward_manager_cls(
-        tokenizer=tokenizer,
-        num_examine=1,
-        compute_score=compute_score,
-    )
-    
-    return reward_fn, val_reward_fn
-
-
-def _validate_config(config: DictConfig) -> None:
-    """
-    Validate Dance-GRPO specific configuration.
-    
-    Args:
-        config: Configuration to validate
-        
-    Raises:
-        ValueError: If configuration is invalid
-    """
-    # Validate reward model configuration
-    if config.reward_model.enable:
-        strategy = config.reward_model.strategy
-        valid_strategies = ["fsdp", "megatron", "diffusion"]
-        if strategy not in valid_strategies:
-            raise ValueError(
-                f"Invalid reward_model.strategy: {strategy}. "
-                f"Must be one of {valid_strategies}"
-            )
-        
-        if strategy == "diffusion":
-            rm_type = config.reward_model.type
-            valid_types = ["qwen", "single", "joint"]
-            if rm_type not in valid_types:
-                raise ValueError(
-                    f"Invalid reward_model.type: {rm_type}. "
-                    f"Must be one of {valid_types}"
-                )
-    
-    logger.info("Configuration validation passed")
-
-
-def _register_reward_workers(
-    config: DictConfig,
-    role_worker_mapping: Dict,
-    mapping: Dict,
-    global_pool_id: str
-) -> None:
-    """
-    Register reward model workers based on configuration.
-    
-    For diffusion strategy, all reward model types (single, joint, etc.) 
-    are handled by the UnifiedRewardModelWorker, which dynamically loads
-    models from the RewardRegistry based on model_name configuration.
-    
-    Args:
-        config: Configuration with reward_model settings
-        role_worker_mapping: Dict to store role -> worker class mappings
-        mapping: Dict to store role -> pool_id mappings
-        global_pool_id: The global resource pool ID
-    """
-    from verl.trainer.ppo.ray_trainer import Role
-    
-    if not config.reward_model.enable:
-        return
-    
-    strategy = config.reward_model.strategy
-    rm_type = config.reward_model.type
-    
-    def register_role(role, worker_cls):
-        role_worker_mapping[role] = ray.remote(worker_cls)
-        mapping[role] = global_pool_id
-        logger.info(f"Registered {role} with worker {worker_cls.__name__}")
-    
-    if strategy == "fsdp":
-        from .dancegrpo_fsdp_worker import RewardModelWorker
-        register_role(Role.RewardModel, RewardModelWorker)
-        
-    elif strategy == "megatron":
-        from verl.workers.megatron_workers import RewardModelWorker
-        register_role(Role.RewardModel, RewardModelWorker)
-        
-    elif strategy == "diffusion":
-        # Special case: Qwen needs vLLM-based worker for distributed inference
-        model_name = config.reward_model.get("model_name", rm_type)
-        
-        if model_name == "qwen" or rm_type == "qwen":
-            from .dancegrpo_fsdp_worker import QwenRewardModelWorker
-            register_role(Role.RewardModel, QwenRewardModelWorker)
-            logger.info("Using QwenRewardModelWorker for vLLM-based inference")
-            
-        elif rm_type == "joint":
-            # Joint mode: uses ALL_TO_ALL dispatch, models handle their own DP splitting
-            from .unified_reward_worker import JointRewardModelWorker
-            register_role(Role.RewardModel, JointRewardModelWorker)
-            logger.info("Using JointRewardModelWorker for joint mode")
-            
-        else:
-            # Single mode: uses DP_COMPUTE_PROTO, data pre-split by framework
-            from .unified_reward_worker import UnifiedRewardModelWorker
-            register_role(Role.RewardModel, UnifiedRewardModelWorker)
-            logger.info(f"Using UnifiedRewardModelWorker for single mode (type='{rm_type}')")
-            
-    else:
-        raise NotImplementedError(f"Unknown reward model strategy: {strategy}")
-
-
-def run_ppo(config: DictConfig) -> None:
-    """
-    Initialize Ray and start the PPO training task.
-    
-    Args:
-        config: Hydra configuration
-    """
-    _init_ray(config)
-    
     runner = TaskRunner.remote()
     ray.get(runner.run.remote(config))
-
-
-@ray.remote(num_cpus=1)
+    
+@ray.remote(num_cpus=1)  # please make sure main_task is not scheduled on head
 class TaskRunner:
-    """
-    Remote task runner for Dance-GRPO training.
-    
-    This class runs on a Ray worker (not the head node) to avoid
-    resource contention with the driver process.
-    """
-    
-    def run(self, config: DictConfig) -> None:
-        """
-        Execute the training pipeline.
-        
-        Args:
-            config: Training configuration
-        """
-        from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
-        from verl.single_controller.ray import RayWorkerGroup
-        
-        # Print and resolve configuration
-        pprint(OmegaConf.to_container(config, resolve=True))
+    def run(self, config):
+        # print initial config
+        from pprint import pprint
+
+        from omegaconf import OmegaConf
+
+        from verl.utils.fs import copy_to_local
+
+        pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
         OmegaConf.resolve(config)
-        
-        # Validate configuration
-        _validate_config(config)
 
-        # Download model checkpoint
-        try:
-            local_path = copy_to_local(config.actor_rollout_ref.model.path)
-            logger.info(f"Model downloaded to {local_path}")
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to download model from {config.actor_rollout_ref.model.path}: {e}"
-            )
+        # download the checkpoint from hdfs
+        local_path = copy_to_local(config.actor_rollout_ref.model.path)
 
-        # Build tokenizer and processor
-        tokenizer, processor = _build_tokenizer_and_processor(
-            local_path, 
-            config.actor_rollout_ref.model
-        )
+        # instantiate tokenizer
+        # TODO 是否需要tokenizer和preprocessor
+        # 需要的
+        import os
 
-        # Resolve worker classes
-        ray_worker_group_cls, actor_rollout_worker_cls = _resolve_actor_worker_and_group(config)
+        from verl.utils import hf_processor, hf_tokenizer
 
-        # Setup role-worker mapping
-        role_worker_mapping = {}
+        # processor =None
+        tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
+
+        tokenizer = hf_tokenizer(tokenizer_path)
+        processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
+        # define worker classes
+        if config.actor_rollout_ref.actor.strategy == "fsdp":
+            assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+            from verl.single_controller.ray import RayWorkerGroup
+
+            from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
+
+            ray_worker_group_cls = RayWorkerGroup
+
+        elif config.actor_rollout_ref.actor.strategy == "megatron":
+            assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+            from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
+            from verl.workers.megatron_workers import ActorRolloutRefWorker, CriticWorker
+
+            ray_worker_group_cls = NVMegatronRayWorkerGroup
+
+        else:
+            raise NotImplementedError
+
+        from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
+
+        role_worker_mapping = {
+            Role.ActorRollout: ray.remote(DiffusionActorRolloutRefWorker),
+        }
+
         global_pool_id = "global_pool"
-        
         resource_pool_spec = {
             global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
         }
-        mapping = {}
+        mapping = {
+            Role.ActorRollout: global_pool_id,
+        }
+        # we should adopt a multi-source reward function here
+        # - for rule-based rm, we directly call a reward score
+        # - for model-based rm, we call a model
+        # - for code related prompt, we send to a sandbox if there are test cases
+        # - finally, we combine all the rewards together
+        # - The reward type depends on the tag of the data
+        if config.reward_model.enable:
+            if config.reward_model.strategy == "fsdp":
+                from .fsdp_worker import RewardModelWorker
+                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                mapping[Role.RewardModel] = global_pool_id
+                print(f"Mapping type {Role.RewardModel} to be the reward model")
 
-        def register_role(role, worker_cls):
-            role_worker_mapping[role] = ray.remote(worker_cls)
-            mapping[role] = global_pool_id
+            elif config.reward_model.strategy == "megatron":
+                from verl.workers.megatron_workers import RewardModelWorker
+                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                mapping[Role.RewardModel] = global_pool_id
+                print(f"Mapping type {Role.RewardModel} to be the reward model")
 
-        # Register actor/rollout worker
-        register_role(Role.ActorRollout, actor_rollout_worker_cls)
+            elif config.reward_model.strategy == "diffusion":
+                if config.reward_model.type == "qwen":
+                    from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                    mapping[Role.RewardModel] = global_pool_id
+                    print(f"Mapping type {Role.RewardModel} to be the Qwen reward model")
 
-        # Register reward workers
-        _register_reward_workers(config, role_worker_mapping, mapping, global_pool_id)
+                elif config.reward_model.type == "single":
+                    from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
+                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+                    mapping[Role.RewardModel] = global_pool_id
+                    print(f"Mapping type {Role.RewardModel} to be the single diffusion reward model")
 
-        # Build reward functions
-        reward_fn, val_reward_fn = _build_reward_fns(config, tokenizer)
+                elif config.reward_model.type == "joint":
+                    from .dancegrpo_fsdp_worker import (
+                        AestheticRewardModelWorker,
+                        RAFTRewardModelWorker,
+                        VideoclipRewardModelWorker,
+                        VideophyRewardModelWorker,
+                    )
+                    # 注意：joint 模式下可能不需要单一的 RewardModelWorker
+                    # 而是注册多个具体角色的 worker
+                    role_worker_mapping[Role.AestheticRewardModel] = ray.remote(AestheticRewardModelWorker)
+                    mapping[Role.AestheticRewardModel] = global_pool_id
 
-        # Create resource pool manager
-        resource_pool_manager = ResourcePoolManager(
-            resource_pool_spec=resource_pool_spec, 
-            mapping=mapping
+                    role_worker_mapping[Role.RAFTRewardModel] = ray.remote(RAFTRewardModelWorker)
+                    mapping[Role.RAFTRewardModel] = global_pool_id
+
+                    role_worker_mapping[Role.VideoclipRewardModel] = ray.remote(VideoclipRewardModelWorker)
+                    mapping[Role.VideoclipRewardModel] = global_pool_id
+
+                    role_worker_mapping[Role.VideophyRewardModel] = ray.remote(VideophyRewardModelWorker)
+                    mapping[Role.VideophyRewardModel] = global_pool_id
+                    
+                    print("Mapping multiple reward models for 'joint' type",role_worker_mapping)
+
+                else:
+                    raise NotImplementedError(f"Unknown diffusion reward model type: {config.reward_model.type}")
+
+            else:
+                raise NotImplementedError(f"Unknown reward model strategy: {config.reward_model.strategy}")
+
+        from verl.workers.reward_manager import get_reward_manager_cls
+
+        # Note(haibin.lin): please make sure custom reward managers are imported and
+        # registered via `verl.workers.reward_manager.register`
+        reward_manager_name = config.reward_model.get("reward_manager", "naive")
+        reward_manager_cls = get_reward_manager_cls(reward_manager_name)
+
+        compute_score = get_custom_reward_fn(config)
+
+        reward_fn = reward_manager_cls(
+            tokenizer=tokenizer,
+            num_examine=0,
+            compute_score=compute_score
         )
+        # reward_fn_key=config.data.reward_fn_key,
+        # max_resp_len=config.data.max_response_length,
+        # overlong_buffer_cfg=config.reward_model.overlong_buffer,
 
-        # Get collate function
+        # Note that we always use function-based RM for validation
+        val_reward_fn = reward_manager_cls(
+            tokenizer=tokenizer,
+            num_examine=1,
+            compute_score=compute_score,
+        )
+        
+        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+
         from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
 
-        # Create and run trainer
         trainer = RayDanceGRPOTrainer(
             config=config,
             tokenizer=tokenizer,
@@ -351,22 +186,8 @@ class TaskRunner:
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
         )
-        
         trainer.init_workers()
         trainer.fit()
-
-
-@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
-def main(config: DictConfig) -> None:
-    """
-    Main entry point for Dance-GRPO training.
-    
-    Uses Hydra for configuration management.
-    
-    Args:
-        config: Hydra-loaded configuration
-    """
-    run_ppo(config)
 
 
 if __name__ == "__main__":
