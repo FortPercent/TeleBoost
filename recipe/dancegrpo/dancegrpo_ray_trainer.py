@@ -738,7 +738,11 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             )
             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
 
-        gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids", "video_frames"])  # reward计算完就可以丢掉大tensor了
+        # [smoke-patch] defensively pop only keys that exist (original wxe code assumed all 3 present)
+        _keys_to_pop = [k for k in ("caption", "video_ids", "video_frames")
+                        if k in gen_batch_output.non_tensor_batch]
+        if _keys_to_pop:
+            gen_batch_output.pop(non_tensor_batch_keys=_keys_to_pop)  # reward计算完就可以丢掉大tensor了
         # 清理原 batch（移除大 tensor）
 
         self._debug_proto_batch("gen_batch_output", gen_batch_output)
