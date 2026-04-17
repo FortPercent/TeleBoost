@@ -4,6 +4,17 @@
 **Hardware**: 4 × NVIDIA H800 80GB (320G total), Python 3.10.12, torch 2.6.0+cu124, vllm 0.8.4, ray 2.43.0
 **Last verified**: 2026-04-17
 
+## TeleBoost Repo Branches (final state)
+
+| Branch | HEAD | 用途 |
+|---|---|---|
+| `main` | `cd8c72a5` | **默认分支**，verl_0902 + wxe 业务合并产物 + 4 个 smoke 脚本 + 2 个代码 patch + 完整 docs |
+| `hiahei_snapshot_20260417` | `c30e289e` | hiahei 在测试机上的工作 snapshot（21 个未提交改动捕获） |
+
+Test box `/gfs/platform/public/infra/wxe/`:
+- `Dance-grpo/` — clone 自 TeleBoost `main`
+- `Dance-grpo_old_hiahei_20260417/` — hiahei 旧版完整备份（含 uncommitted 改动）
+
 ---
 
 ## 1. Actor (Text-to-Video 主模型)
