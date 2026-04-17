@@ -81,22 +81,27 @@
 
 | 脚本 | actor | reward | 数据 | 状态 |
 |---|---|---|---|---|
-| `run_dancegrpo_single_4gpu_smoke.sh` | Wan2.2-14B | HPSv2 | smoke JSON | ✅ smoke #7 通过 |
-| `run_dancegrpo_1p3B_4gpu_smoke.sh` | Wan2.1-1.3B | HPSv2 | smoke JSON | 🟡 smoke #8 跑中 |
-| `run_dancegrpo_1p3B_qwen_4gpu_smoke.sh` | Wan2.1-1.3B | Qwen2.5-VL-7B | smoke JSON | ⏳ 待跑 |
-| `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | Wan2.1-1.3B | 4-reward joint | smoke JSON | ⏳ 待跑 |
+| `run_dancegrpo_single_4gpu_smoke.sh` | Wan2.2-14B | HPSv2 | smoke JSON | ✅ smoke #7 (cold step1=33s, warm step2=26s) |
+| `run_dancegrpo_1p3B_4gpu_smoke.sh` | Wan2.1-1.3B | HPSv2 | smoke JSON | ✅ smoke #8 (cold step1=703s incl. inductor, warm step2=3.6s) |
+| `run_dancegrpo_1p3B_qwen_4gpu_smoke.sh` | Wan2.1-1.3B | Qwen2.5-VL-7B | smoke JSON | ✅ smoke #9 (cold step1=31s, warm step2=6.7s, **rewards=44→19.75 真实数值**) |
+| `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | Wan2.1-1.3B | 4-reward joint | smoke JSON | ✅ smoke #11 (4 worker init OK, cold step1=80s, warm step2=12s, 4 个 reward metric 都 emit) |
 | `run_dancegrpo_single.sh`（原版）| Wan2.2-14B | HPSv2 | 脚本写的不存在路径 | ❌ 没跑（硬编码 n_gpus=8） |
 | `run_dancegrpo_qwen.sh`（原版）| Wan2.2-14B | Qwen-VL-**32B** | 同上 | ❌ 没跑 |
 | `run_dancegrpo_joint.sh`（原版）| Wan2.2-14B | 4-reward joint | 同上 | ❌ 没跑 |
 
-## 7. 环境修复（一次性）
+## 7. 环境修复（一次性，已在测试机执行）
 
 在测试机执行过（会污染系统 Python，后续在该机器上持续有效）：
 
 ```bash
-pip install hpsv2                    # 1.2.0, 附带 timm/webdataset/clint/braceexpand；protobuf 4.24→3.20（无副作用）
+# 1. HPSv2 reward (single + 4-reward joint 的 hpsv2 reg, 实际只在 single 用)
+pip install hpsv2                    # 1.2.0, 附带 timm/webdataset/clint/braceexpand
+                                     # 副作用: protobuf 4.24→3.20 (无影响 vllm/ray)
 cp /gfs/platform/public/infra/wxe/HPSv2/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz \
    /usr/local/lib/python3.10/dist-packages/hpsv2/src/open_clip/
+
+# 2. Joint reward (videophy 用 decord 读视频帧)
+pip install decord                   # 0.6.0, 13.6 MB wheel
 ```
 
 ---
