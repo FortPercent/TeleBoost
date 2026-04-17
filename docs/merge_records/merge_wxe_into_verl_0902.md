@@ -4,7 +4,25 @@
 - **操作者**：@samanthazzz929
 - **源分支**：`dance-grpo/wxe`（仓库 `/Users/wuxuaner/Desktop/teleai/Dance-grpo`，HEAD `ed3caabd`）
 - **目标分支**：`origin/verl_0902`（当前仓库，HEAD `3109719f`）
-- **产物分支**：`verl_0902_wxe`（merge commit `c4f237d0`）
+- **产物分支**：`verl_0902_wxe`（最终 HEAD `33f9b00c`）
+
+## 最终策略（决策定稿）
+
+**以 wxe 为业务主体（Tier A 取 wxe）+ 保留 verl_0902 的上游和独有价值**
+
+| 分类 | 取自 | 文件数 | 价值 |
+|---|---|---|---|
+| Tier A 业务核心 | **wxe** | 7 | wxe 的 log_prob 对齐 / GRPO_guard / reward_models 插件 / flow_grpo |
+| Tier B 上游/附属 | verl_0902 | 737 | verl 上游 rebase（OOM/offload/torch compile）+ wan22 |
+| verl_0902 独有 | verl_0902 | 164 | qwen_reward/ 独立服务、.github/、新 verl 模块 |
+| wxe 独有 | wxe | 21 | reward_models/、unified_reward_worker.py、prompts/、启动脚本 |
+
+> **决策迭代历史**（保留作记录，反映"以谁为主"在过程中翻转过）：
+> - `c4f237d0` 首次 merge 用 `ours`（Tier A = verl_0902）
+> - `f9c44a4f` 第二阶段翻为 `theirs`（Tier A = wxe）
+> - `b1553b86` + `ed554da8` 应"以 verl_0902 为主"再翻回 verl_0902
+> - `56d8932e` yaml/fsdp_worker port wxe 字段（基于 verl_0902 版）
+> - **`33f9b00c` 应"以 wxe 为主"最终翻回 wxe 版（覆盖 56d8932e 的 port，因 wxe 原版已含完整字段和 UnifiedRewardModelWorker）**
 
 ---
 
@@ -252,6 +270,64 @@ cat /tmp/tier_a.txt | xargs git add
 # 提交与改名
 git commit -m "Merge branch 'dance-grpo/wxe' ..."
 git branch -m merge_wxe_tmp verl_0902_wxe
+```
+
+---
+
+## 11. 测试机 4×H800 80GB smoke 测试记录（2026-04-17）
+
+测试机：`ssh ...:30022 → 4×NVIDIA H800 80GB / Python 3.10.12 / torch 2.6.0+cu124 / vllm 0.8.4 / ray 2.43.0`
+
+工作目录：`/gfs/platform/public/infra/wxe/Dance-grpo/_test_verl_0902_wxe`（git clone TeleBoost）
+
+### 11.1 Phase A 静态测试（5/5 通过）
+
+```
+Test 1: yaml 加载                  ✓ reward_model.type=single, model_name=hps, grpo_guard.enable=False, flow_grpo.enable=True
+Test 2: reward_models 注册表        ✓ ['aesthetic', 'raft', 'videoclip', 'videophy', 'hps']
+Test 3: unified_reward_worker      ✓
+Test 4: dancegrpo_fsdp_worker      ✓ 6 个内嵌 reward worker class
+Test 5: main_dancegrpo entry       ✓
+```
+
+### 11.2 Phase B 真实训练 smoke（脚本 `run_dancegrpo_single_4gpu_smoke.sh`）
+
+参数：`n_gpus=4, sampling_steps=1, h=w=256, num_frames=9, train_bsz=2, total_steps=2, val_before_train=False`
+
+模型：Wan2.2-T2V-A14B + HPSv2 reward
+
+**遇到的 3 个外部依赖问题**（与代码无关，纯环境）：
+
+| # | 错误 | 阶段 | 解决 |
+|---|---|---|---|
+| 1 | `ModuleNotFoundError: No module named 'hpsv2'` | reward worker init | `pip install hpsv2` (1.2.0)，副作用 protobuf 4.24→3.20 |
+| 2 | `FileNotFoundError: bpe_simple_vocab_16e6.txt.gz` | hpsv2 加载 BPE | `cp /gfs/.../wxe/HPSv2/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz` 到 `/usr/local/lib/python3.10/dist-packages/hpsv2/src/open_clip/`（pip 包遗漏数据文件） |
+| 3 | 待验证 | 14B 加载 / forward / backward | — |
+
+**修正路径**（脚本里写的 GFS 路径不存在，已改）：
+
+| 配置项 | 脚本原值 | 测试机实际 |
+|---|---|---|
+| `model.path` | `/gfs/platform/public/infra/Wan-AI/Wan2.2-T2V-A14B` | `/gfs/platform/public/infra/**wxe**/Wan-AI/Wan2.2-T2V-A14B` |
+| `reward_model.model.path` | `/gfs/platform/public/infra/HPS_v2.1_compressed.pt` | `/gfs/platform/public/infra/**models**/HPS_v2.1_compressed.pt` |
+| `TRAIN_FILE` | `/gfs/.../Dance-grpo/data/14B/.../processed_wan_prompt.json` | `/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json` |
+
+### 11.3 复现命令
+
+```bash
+# 在测试机
+ssh -p 30022 'L5bA1R9X@root@ssh-434.default@222.223.106.147'
+cd /gfs/platform/public/infra/wxe/Dance-grpo
+mkdir -p _test_verl_0902_wxe && cd _test_verl_0902_wxe
+git clone --depth 1 --branch verl_0902_wxe https://github.com/FortPercent/TeleBoost.git .
+
+# 一次性环境补丁
+pip install hpsv2
+cp /gfs/platform/public/infra/wxe/HPSv2/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz \
+   /usr/local/lib/python3.10/dist-packages/hpsv2/src/open_clip/
+
+# 跑
+bash recipe/dancegrpo/run_dancegrpo_single_4gpu_smoke.sh
 ```
 
 ---
