@@ -11,6 +11,7 @@ from megatron.core import mpu
 
 
 ALL_TO_ALL_BUFFER = None
+# Sequence counter used by the hang-locate prints in SeqAllToAll.backward.
 _CP_A2A_SEQ = itertools.count()
 
 def set_global_all_to_all_buffer(buffer_numel):

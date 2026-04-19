@@ -14,8 +14,17 @@ def count_rows(csv_path: str, has_header: bool = True) -> int:
         return sum(1 for _ in reader)
 
 
-def split_csv(csv_path: str, out_dir: str, num_parts: int = 8, has_header: bool = True) -> int:
+def split_csv(csv_path: str, out_dir: str, num_parts: int = 8, has_header: bool = True) -> tuple[int, int]:
+    """Round-robin split, truncated to a multiple of num_parts so every part has equal row count.
+
+    Returns (written_rows, dropped_rows). Equal row counts across parts prevents DP ranks
+    from getting out of sync on collective ops (TP/CP all-reduce hang).
+    """
     os.makedirs(out_dir, exist_ok=True)
+
+    total_rows = count_rows(csv_path, has_header=has_header)
+    keep_rows = (total_rows // num_parts) * num_parts
+    dropped = total_rows - keep_rows
 
     base = os.path.splitext(os.path.basename(csv_path))[0]
     out_paths = [os.path.join(out_dir, f"{base}.part{i}.csv") for i in range(num_parts)]
@@ -23,30 +32,26 @@ def split_csv(csv_path: str, out_dir: str, num_parts: int = 8, has_header: bool 
     writers = []
     out_files = []
     try:
-        # Open output files
         for p in out_paths:
             fo = open(p, "w", newline="", encoding="utf-8")
             out_files.append(fo)
             writers.append(csv.writer(fo))
 
-        # Read input and write
         with open(csv_path, "r", newline="", encoding="utf-8") as fi:
             reader = csv.reader(fi)
 
-            header = None
             if has_header:
                 header = next(reader, None)
                 if header is not None:
                     for w in writers:
                         w.writerow(header)
 
-            data_idx = 0  # 0-based index among data rows
-            for row in reader:
-                part_id = data_idx % num_parts
-                writers[part_id].writerow(row)
-                data_idx += 1
+            for data_idx, row in enumerate(reader):
+                if data_idx >= keep_rows:
+                    break
+                writers[data_idx % num_parts].writerow(row)
 
-        return data_idx  # total data rows processed
+        return keep_rows, dropped
     finally:
         for fo in out_files:
             try:
@@ -68,8 +73,9 @@ def main():
     total = count_rows(args.input, has_header=has_header)
     print(f"[INFO] Total data rows: {total}")
 
-    processed = split_csv(args.input, args.out_dir, num_parts=args.parts, has_header=has_header)
-    print(f"[INFO] Split done. Processed data rows: {processed}")
+    written, dropped = split_csv(args.input, args.out_dir, num_parts=args.parts, has_header=has_header)
+    per_part = written // args.parts
+    print(f"[INFO] Split done. Written: {written} rows ({per_part}/part), dropped: {dropped} for divisibility.")
     print(f"[INFO] Output files are in: {args.out_dir}")
 
 

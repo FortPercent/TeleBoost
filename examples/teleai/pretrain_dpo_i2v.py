@@ -10,32 +10,24 @@ import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
     print(f"[Rank {torch.distributed.get_rank()}] enter dpo_loss_func")
-    # output_tensor 可能是 [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen, dpo_loss]
+    # output_tensor: [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen, dpo_loss]
+    # The two scaled losses are kept as a list so backward_step can backprop each separately.
     if not isinstance(output_tensor, (list, tuple)):
         output_tensor = [output_tensor]
 
-    loss_for_backward = output_tensor[:2]
-    # 这两个 loss 已经是标量（你 forward 里 .sum() 了），这里不需要 .mean()
-    # 但为了安全，还是统一成 scalar
-    losses = [t if t.dim() == 0 else t.mean() for t in loss_for_backward]
+    def _to_scalar(t):
+        return t if t.dim() == 0 else t.mean()
 
-    # 返回给 deepspeed_forward_step 的 "loss" 应该是一个 Tensor（或 list），用于 backward
-    # 我们让它保持 list（长度2），后面 backward_step 里循环两次 backward。
-    loss_for_backward = losses
+    loss_for_backward = [_to_scalar(t) for t in output_tensor[:2]]
 
-    # 日志：给一个总的 dpo_loss（只是显示用，不参与反传）
-    loss_total = sum(losses).detach()
     if len(output_tensor) >= 5:
-        dpo_loss = output_tensor[4]
-        dpo_loss_mean = dpo_loss if dpo_loss.dim() == 0 else dpo_loss.mean()
+        dpo_loss_mean = _to_scalar(output_tensor[4])
     else:
-        dpo_loss_mean = loss_total
+        dpo_loss_mean = sum(loss_for_backward).detach()
 
     if len(output_tensor) >= 4:
-        loss_reject = output_tensor[2]
-        loss_chosen = output_tensor[3]
-        loss_reject_mean = loss_reject if loss_reject.dim() == 0 else loss_reject.mean()
-        loss_chosen_mean = loss_chosen if loss_chosen.dim() == 0 else loss_chosen.mean()
+        loss_reject_mean = _to_scalar(output_tensor[2])
+        loss_chosen_mean = _to_scalar(output_tensor[3])
         averaged = average_losses_across_data_parallel_group(
             [dpo_loss_mean.detach(), loss_reject_mean.detach(), loss_chosen_mean.detach()]
         )
@@ -47,6 +39,7 @@ def dpo_loss_func(output_tensor):
     else:
         averaged = average_losses_across_data_parallel_group([dpo_loss_mean.detach()])
         loss_dict = {"loss": averaged[0]}
+
     print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss scaled = {loss_for_backward}")
     return loss_for_backward, loss_dict
 
@@ -95,7 +88,6 @@ def _compute_single_loss(
         clip_feature=clip_feature,
         y=y,
     )
-    print(f"noisy_latents = {noisy_latents.shape},output_tensor_list = {output_tensor_list.shape} training_target = {training_target.shape}")
     loss = torch.nn.functional.mse_loss(
         output_tensor_list.float(), training_target.float()
     )
@@ -841,121 +833,62 @@ def forward_step(data_iterator, model, time_step=None):
         elif dist.get_rank() == mpu.get_tensor_context_parallel_src_rank():
             print(f"[DPO input-check] rank={dist.get_rank()} ok")
 
-    print(f"[Rank {torch.distributed.get_rank()}] enter chosen compute_single_loss========")
-    if use_saved_inputs:
-        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
-            _compute_single_loss_from_saved(
-                chosen_noisy_latents,
-                chosen_training_target,
-                chosen_loss_weight,
-                context,
-                chosen_clip_feature,
-                chosen_y,
-                model,
-                timestep_c,
-                expected_noise_pred=chosen_noise_pred,
-                compare_name="chosen.noise_pred",
+    def _run_branch(tag, latents, clip_feature, y, timestep, noise,
+                    saved_noisy_latents=None, saved_training_target=None,
+                    saved_loss_weight=None, saved_noise_pred=None):
+        print(f"[Rank {torch.distributed.get_rank()}] enter {tag} compute_single_loss========")
+        if use_saved_inputs:
+            loss, loss_wo_w, first_frame = _compute_single_loss_from_saved(
+                saved_noisy_latents, saved_training_target, saved_loss_weight,
+                context, clip_feature, y, model, timestep,
+                expected_noise_pred=saved_noise_pred,
+                compare_name=f"{tag}.noise_pred",
                 rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
                 atol=float(getattr(args, "compare_losses_atol", 1e-8)),
             )
-        )
-    elif return_debug:
-        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen, debug_chosen = (
-            _compute_single_loss(
-                chosen_latents,
-                context,
-                chosen_clip_feature,
-                chosen_y,
-                flow_scheduler,
-                model,
-                timestep_c,
-                noise_chosen,
-                return_debug=True,
+            return loss, loss_wo_w, first_frame, None
+        if return_debug:
+            loss, loss_wo_w, first_frame, debug = _compute_single_loss(
+                latents, context, clip_feature, y, flow_scheduler, model,
+                timestep, noise, return_debug=True,
             )
+            return loss, loss_wo_w, first_frame, debug
+        loss, loss_wo_w, first_frame = _compute_single_loss(
+            latents, context, clip_feature, y, flow_scheduler, model,
+            timestep, noise,
         )
-    else:
-        loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen = (
-            _compute_single_loss(
-                chosen_latents,
-                context,
-                chosen_clip_feature,
-                chosen_y,
-                flow_scheduler,
-                model,
-                timestep_c,
-                noise_chosen,
-            )
-        )
+        return loss, loss_wo_w, first_frame, None
 
-    print(f"[Rank {torch.distributed.get_rank()}] enter reject compute_single_loss========")
-    if use_saved_inputs:
-        loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
-            _compute_single_loss_from_saved(
-                reject_noisy_latents,
-                reject_training_target,
-                reject_loss_weight,
-                context,
-                reject_clip_feature,
-                reject_y,
-                model,
-                timestep_r,
-                expected_noise_pred=reject_noise_pred,
-                compare_name="rejected.noise_pred",
-                rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
-                atol=float(getattr(args, "compare_losses_atol", 1e-8)),
-            )
-        )
-    elif return_debug:
-        loss_reject, loss_wo_w_reject, first_frame_loss_reject, debug_reject = (
-            _compute_single_loss(
-                reject_latents,
-                context,
-                reject_clip_feature,
-                reject_y,
-                flow_scheduler,
-                model,
-                timestep_r,
-                noise_reject,
-                return_debug=True,
-            )
-        )
-    else:
-        loss_reject, loss_wo_w_reject, first_frame_loss_reject = (
-            _compute_single_loss(
-                reject_latents,
-                context,
-                reject_clip_feature,
-                reject_y,
-                flow_scheduler,
-                model,
-                timestep_r,
-                noise_reject,
-            )
-        )
-
-    beta = float(
-        set_config()
-        .get("model_config")
-        .get("dit")
-        .get("train")
-        .get("dpo")
-        .get("beta")
+    loss_chosen, loss_wo_w_chosen, first_frame_loss_chosen, debug_chosen = _run_branch(
+        "chosen", chosen_latents, chosen_clip_feature, chosen_y, timestep_c,
+        None if use_saved_inputs else noise_chosen,
+        saved_noisy_latents=chosen_noisy_latents if use_saved_inputs else None,
+        saved_training_target=chosen_training_target if use_saved_inputs else None,
+        saved_loss_weight=chosen_loss_weight if use_saved_inputs else None,
+        saved_noise_pred=chosen_noise_pred if use_saved_inputs else None,
     )
 
-    advantage = (loss_reject - loss_chosen).clamp(-20, 20)
-    # 只用 advantage 的数值算系数，不让系数本身反传（很关键）
-    with torch.no_grad():
-        # d/dadv [-logsigmoid(beta*adv)] = beta * sigmoid(-beta*adv)
-        print(f"beta = {beta}")
-        coeff = beta * torch.sigmoid(-beta * advantage)
-        # 对应你 dpo_loss 的 mean()
-        coeff = coeff / coeff.numel()
+    loss_reject, loss_wo_w_reject, first_frame_loss_reject, debug_reject = _run_branch(
+        "rejected", reject_latents, reject_clip_feature, reject_y, timestep_r,
+        None if use_saved_inputs else noise_reject,
+        saved_noisy_latents=reject_noisy_latents if use_saved_inputs else None,
+        saved_training_target=reject_training_target if use_saved_inputs else None,
+        saved_loss_weight=reject_loss_weight if use_saved_inputs else None,
+        saved_noise_pred=reject_noise_pred if use_saved_inputs else None,
+    )
 
-    # 两个“等价”的反传项： +coeff*loss_reject  和  -coeff*loss_chosen
+    beta = float(set_config()["model_config"]["dit"]["train"]["dpo"]["beta"])
+
+    advantage = (loss_reject - loss_chosen).clamp(-20, 20)
+    # Detached surrogate: only advantage's value feeds coeff, no grad through it.
+    with torch.no_grad():
+        coeff = beta * torch.sigmoid(-beta * advantage) / advantage.numel()
+
+    # L = -logσ(β·adv), adv = loss_reject - loss_chosen
+    # dL/d(loss_reject) = -coeff,  dL/d(loss_chosen) = +coeff
     loss_reject_scaled = (-coeff * loss_reject).sum()
     loss_chosen_scaled = (coeff * loss_chosen).sum()
 
-    # 这个只是用来日志/显示，不参与反传（可选）
     dpo_loss_for_log = (-F.logsigmoid(beta * advantage)).mean().detach()
 
     if return_debug and not args.test_with_pseudo_data and not use_saved_inputs:

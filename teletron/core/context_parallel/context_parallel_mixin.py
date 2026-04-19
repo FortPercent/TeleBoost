@@ -19,13 +19,13 @@ class ContextParallelMixin:
 
     @staticmethod
     def cp_grad_reduce(grad):
+        # Prints are kept for hang-locate diagnostics in CP backward paths.
         with torch.no_grad():
             reduced_grad = grad.contiguous()
             rank = torch.distributed.get_rank()
             print(f"[cp_grad_reduce] rank={rank} BEFORE all_reduce, shape={list(reduced_grad.shape)}")
             torch.distributed.all_reduce(reduced_grad, group=mpu.get_context_parallel_group())
             print(f"[cp_grad_reduce] rank={rank} AFTER all_reduce")
-        
         return reduced_grad
 
     def enable_context_parallel(self, attn_module: nn.Module):
