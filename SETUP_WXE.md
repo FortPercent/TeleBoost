@@ -62,8 +62,17 @@ pip install -r requirements.txt
 pip install -e . --no-deps
 
 # 6. 装 reward 链 + wan 模块缺的外围依赖
-pip install opencv-python easydict diffusers hpsv2 tensorboard
+pip install opencv-python easydict diffusers hpsv2 tensorboard decord
 pip install "transformers==4.57.1"     # vllm 默认带 5.x, 要降到 4.57.1
+
+# !!! apt 系统依赖 (装一次, pod 级) !!!
+# libgl1      : opencv-python 链接 libGL.so.1 要
+# libglib2.0-0: opencv-python 依赖
+# python3-tk  : 防 hpsv2 `from turtle import forward` 带出 tkinter 缺失
+# ffmpeg      : 视频 I/O (videophy / 可选)
+# apt 如果没配代理用:
+#   apt-get -o Acquire::http::Proxy=http://10.127.48.4:3128 update && \
+#   apt-get -o Acquire::http::Proxy=http://10.127.48.4:3128 install -y libgl1 libglib2.0-0 python3-tk ffmpeg
 
 # 7. hpsv2 两处必须手改的坑
 #    7a. 官方 wheel 漏了 BPE vocab
@@ -228,6 +237,20 @@ reward_model.joint.models.videophy.model_path=/user/TeleBoost/ckpts/rewards/vide
 
 14. **modelscope 没有镜像的模型**（VideoCLIP-XL / videocon_physics），fallback 到 HF `hf download` 经代理。
 
+15. **某些 pod 上 `pip install` 无端 hang 几十分钟**（无 TCP 连接、无 IO，`Sl` sleeping 态）。即便 `export https_proxy=...` 或 `--proxy=...` 也不解决——因为 pip 卡在 **resolve 默认 index** 这一步，proxy 只影响 transport 不影响 index URL。排查：`cat /etc/pip.conf /etc/xdg/pip/pip.conf /root/.pip/pip.conf /root/.config/pip/pip.conf /usr/pip.conf 2>/dev/null` 找冲突配置。修法：
+    ```bash
+    rm -f /etc/pip.conf /etc/xdg/pip/pip.conf /root/.pip/pip.conf /root/.config/pip/pip.conf /usr/pip.conf
+    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+    pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
+    ```
+    之后 pip 直接走清华镜像，不用代理也秒过。
+
+16. **两个 `pip install` 同时跑同一个 venv 会 deadlock**——都抢 `site-packages/` 的文件锁，都 sleep 等对方，永远卡住。症状：`ps` 看两个 pip 都是 `Sl` 态、无 IO、无 TCP。**任何时候一个 venv 里最多一个 pip 进程**。
+
+17. **新挂一个 /data/aigc PVC 的 GPU pod 跑现成 venv，常见两坑**：
+    - `libGL.so.1: cannot open shared object file` → `apt install -y libgl1 libglib2.0-0`（apt 没配代理的话用 `apt-get -o Acquire::http::Proxy=http://10.127.48.4:3128 install ...`）
+    - `ModuleNotFoundError: cv2` → venv 里 `site-packages/cv2/` 不存在，pip 重装 `opencv-python`
+
 ---
 
 ## 6. 文件清单
@@ -277,6 +300,49 @@ python -c "from wan.modules.t5 import T5EncoderModel; print('wan t5 ok')"
 python -c "import torch; print([torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])"
 # 期望: 4 个 'NVIDIA H100 80GB HBM3'
 ```
+
+---
+
+## 8.5 新 GPU pod 快速启动（挂 `/data/aigc` 的情况）
+
+如果新 pod 已经挂了 `/data/aigc` PVC（能看到 `/data/aigc/model_zoo/TeleBoost/{ckpts,venv,code}/`），**整套环境已在 PVC 里**，只需三步：
+
+### 一次性（首次 pod 起后做一次）
+
+```bash
+# 1. 装系统依赖 (apt 如果没配代理用下面这个)
+apt-get -o Acquire::http::Proxy=http://10.127.48.4:3128 update
+apt-get -o Acquire::http::Proxy=http://10.127.48.4:3128 install -y libgl1 libglib2.0-0 python3-tk ffmpeg
+
+# 2. 修 pip config (避免 pip 卡死 hang, 见第 15 条坑)
+rm -f /etc/pip.conf /etc/xdg/pip/pip.conf /root/.pip/pip.conf /root/.config/pip/pip.conf /usr/pip.conf 2>/dev/null
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# 3. (可选) 写到 ~/.bashrc 让每次 ssh 进来自动 activate
+echo 'source /data/aigc/model_zoo/TeleBoost/venv/teleboost-py310/bin/activate' >> ~/.bashrc
+```
+
+### 日常（每次 ssh 进 pod）
+
+```bash
+source /data/aigc/model_zoo/TeleBoost/venv/teleboost-py310/bin/activate
+cd /data/aigc/model_zoo/TeleBoost/code
+
+# 自检 (应全部 OK)
+python -c "import torch, vllm, flash_attn, cv2; from wan.modules.t5 import T5EncoderModel; from recipe.dancegrpo.reward_models import RewardRegistry; print('ok | rewards:', RewardRegistry.list_available())"
+
+# 跑 smoke
+bash recipe/dancegrpo/run_dancegrpo_1p3B_valfirst_4gpu_smoke_wxe.sh   # single HPS
+bash recipe/dancegrpo/run_dancegrpo_joint_1p3B_4gpu_smoke_wxe.sh       # joint 4-reward
+```
+
+### 硬性前提
+- Python 3.10 装在 `/usr/bin/python3.10`（NGC 24.08 / Ubuntu 22.04 默认带）
+- CUDA driver ≥ 12.4（torch 2.6+cu124 需要）
+- 4 张 H100 / H800 或等效 GPU 可见
+
+如果有缺，退回按 §1 手动重建 venv。
 
 ---
 
