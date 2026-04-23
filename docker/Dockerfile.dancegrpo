@@ -1,0 +1,95 @@
+# ============================================================
+# Dance-GRPO / TeleBoost overlay
+# ============================================================
+# 基于 verl 官方的 Dockerfile.ngc.vllm0.8 构建的 base 镜像, 只加 Dance-GRPO 特有 delta
+#
+# 两步 build:
+#   # 1) verl 官方 base (原封不动, 升级时跟 verl 上游走)
+#   docker build -f docker/Dockerfile.ngc.vllm0.8 -t teleboost/verl-ngc-vllm08:latest .
+#   # 2) Dance-GRPO overlay (本文件)
+#   docker build -f docker/Dockerfile.dancegrpo   -t teleboost/dancegrpo:latest .
+#
+# 或者一条命令:
+#   docker buildx bake -f docker/docker-bake.hcl
+#
+# Run (4×H100):
+#   docker run --rm --gpus all --ipc=host --shm-size=32g \
+#     -v $PWD:/workspace/TeleBoost \
+#     teleboost/dancegrpo:latest \
+#     bash recipe/dancegrpo/run_dancegrpo_1p3B_valfirst_4gpu_smoke_wxe.sh
+# ============================================================
+
+ARG BASE_IMAGE=teleboost/verl-ngc-vllm08:latest
+FROM ${BASE_IMAGE}
+
+ARG PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------- Delta 1: system tkinter (防 hpsv2 `from turtle import forward` 触发) ----------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3-tk ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------- Delta 2: 升级 vllm 0.8.3 → 0.8.4 (对齐 TeleBoost 内部镜像) ----------
+# 如果 verl 上游 base 后续升到 >=0.8.4, 可以删掉这条.
+RUN pip config set global.index-url "${PIP_INDEX}" && \
+    pip install --no-cache-dir "vllm==0.8.4" && \
+    pip config unset global.index-url || true
+
+# ---------- Delta 3: Dance-GRPO 特有依赖 ----------
+# - wan.modules.*     : easydict + diffusers
+# - reward videoclip  : opencv-python
+# - reward videophy   : decord (视频帧读取)
+# - reward hps        : hpsv2 (需打 2 个 patch, 见下) + ftfy
+# - aesthetic/raft    : 只需 torchvision, 已在 base
+# - logger            : tensorboard
+RUN pip config set global.index-url "${PIP_INDEX}" && \
+    pip install --no-cache-dir \
+        diffusers==0.37.1 \
+        easydict==1.13 \
+        opencv-python==4.13.0.92 \
+        decord==0.6.0 \
+        ftfy==6.3.1 \
+        einops==0.8.2 \
+        timm==1.0.26 \
+        hpsv2==1.2.0 \
+        tensorboard==2.20.0 && \
+    pip config unset global.index-url || true
+
+# ---------- Delta 4: hpsv2 wheel 两个官方 bug 打补丁 ----------
+# 4a. wheel 漏打包 BPE vocab
+RUN VOCAB_DIR=$(python -c "import hpsv2.src.open_clip as m, os; print(os.path.dirname(m.__file__))") && \
+    curl -fsSL -o "$VOCAB_DIR/bpe_simple_vocab_16e6.txt.gz" \
+        https://raw.githubusercontent.com/tgxs002/HPSv2/master/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz
+# 4b. factory.py 里 `from turtle import forward` 废代码 (带出 tkinter; 已装 python3-tk 也清理掉更干净)
+RUN FACTORY=$(python -c "import hpsv2.src.open_clip.factory as m; print(m.__file__)") && \
+    sed -i '/from turtle import forward/d' "$FACTORY"
+
+# ---------- Delta 5: 源码 editable install (覆盖 base 里从 pypi 装的 verl) ----------
+# 注: verl 官方 base 末尾 `pip install verl[vllm] -U` 从 pypi 装了稳定版,
+#    这里 uninstall 再用本地 TeleBoost 覆盖, 保证代码一致.
+RUN pip uninstall -y verl || true
+
+WORKDIR /workspace/TeleBoost
+COPY . /workspace/TeleBoost
+RUN pip install --no-cache-dir -e . --no-deps
+
+# ---------- 构建时自检 ----------
+RUN python - <<'PY'
+import torch, vllm, flash_attn, transformers, cv2
+from wan.modules.t5 import T5EncoderModel
+from recipe.dancegrpo.reward_models import RewardRegistry
+from hpsv2.src.open_clip import create_model_and_transforms
+from decord import VideoReader
+print(f"torch={torch.__version__}  vllm={vllm.__version__}  flash_attn={flash_attn.__version__}")
+print(f"transformers={transformers.__version__}  cv2={cv2.__version__}")
+print(f"reward models: {RewardRegistry.list_available()}")
+print("OK")
+PY
+
+ENV PYTHONPATH=/workspace/TeleBoost:${PYTHONPATH:-} \
+    HYDRA_FULL_ERROR=1 \
+    TOKENIZERS_PARALLELISM=false \
+    TORCH_NCCL_AVOID_RECORD_STREAMS=1
+
+CMD ["bash"]

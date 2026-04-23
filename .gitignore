@@ -135,3 +135,19 @@ events.*
 
 *.mp4
 *.log
+
+# agentic
+.agents
+tla_specs
+# === wxe additions (runtime artifacts, not source) ===
+ckpts/
+data/1__3B/rl_embeddings/context_*.npy
+data/1__3B/rl_embeddings/context_null.npy
+data/14B/
+states/
+tensorboard_log/
+verl.egg-info/
+*.egg-info/
+__pycache__/
+*.pyc
+data/1__3B/rl_embeddings/processed_wan_prompt.json
