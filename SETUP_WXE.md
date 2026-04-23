@@ -294,18 +294,14 @@ python -c "import torch; print([torch.cuda.get_device_name(i) for i in range(tor
 
 **结论**：GitHub 是唯一两边都能到的 git 源。
 
-### 8.1 账号关系（踩过的坑）
+### 8.1 一次性配置
 
-- **远端容器**：authenticates as GitHub `FortPercent`（repo 所有者账号）
-- **本地 Mac 默认 key** (`~/.ssh/id_ed25519`): authenticates as `RicardoL1u`，**对 FortPercent/TeleBoost 没 push 权限**
-- 所以本地 Mac 需要 **第二把 key 专门绑 FortPercent 账号**，配 host alias `github-fp` 让 TeleBoost-gh 这个仓库走这把 key
+**前提**：你的 GitHub 账号要有 `<OWNER>/TeleBoost` 的 push 权限（仓库所有者或 collaborator）。
 
-### 8.2 一次性配置
-
-**远端容器** (`/user/TeleBoost`)，需要 HTTP 代理 CONNECT 隧穿 SSH：
+**远端容器** (`/user/TeleBoost`)——要 HTTP 代理 CONNECT 隧穿 SSH：
 ```bash
 # 生成 key
-ssh-keygen -t ed25519 -C "teleboost-container-wxe" -f ~/.ssh/id_ed25519 -N ""
+ssh-keygen -t ed25519 -C "teleboost-container" -f ~/.ssh/id_ed25519 -N ""
 
 # 写 ~/.ssh/config, 把 github.com 流量塞进 HTTP 代理隧道
 cat >> ~/.ssh/config <<EOF
@@ -319,42 +315,42 @@ Host github.com
 EOF
 chmod 600 ~/.ssh/config
 
-# 把 ~/.ssh/id_ed25519.pub 内容贴到 FortPercent 账号的
-#   https://github.com/settings/keys → New SSH key
+# 把 ~/.ssh/id_ed25519.pub 内容贴到 GitHub:
+#   Settings → SSH and GPG keys → New SSH key
 
-# 测试 + 改 origin URL
-ssh -T git@github.com                  # 应看到 "Hi FortPercent!"
+# 测试 + 改 origin 为 SSH URL
+ssh -T git@github.com                  # 应回 "Hi <你的账号>!"
 cd /user/TeleBoost
-git remote set-url origin git@github.com:FortPercent/TeleBoost.git
+git remote set-url origin git@github.com:<OWNER>/TeleBoost.git
 ```
 
-**本地 Mac**，要和默认 `RicardoL1u` 身份隔离：
+**本地 Mac**——如果你 Mac 默认 SSH 身份是另一个 GitHub 账号（比如个人号），要用 host 别名隔离：
 ```bash
-# 生成 FortPercent 专用 key
-ssh-keygen -t ed25519 -f ~/.ssh/id_fortpercent -C "fortpercent-mac-$(date +%Y%m%d)" -N ""
+# 生成专用 key
+ssh-keygen -t ed25519 -f ~/.ssh/id_teleboost -C "mac-teleboost" -N ""
 
-# 配 host 别名
+# 配 host 别名 (不影响默认 github.com 的身份)
 cat >> ~/.ssh/config <<EOF
 
-Host github-fp
+Host github-tb
     HostName github.com
     User git
-    IdentityFile ~/.ssh/id_fortpercent
+    IdentityFile ~/.ssh/id_teleboost
     IdentitiesOnly yes
 EOF
 
-# 把 ~/.ssh/id_fortpercent.pub 加到 FortPercent 账号的
-#   https://github.com/settings/keys → New SSH key
-# (不要加到 RicardoL1u 账号)
+# 把 ~/.ssh/id_teleboost.pub 加到有写权限的 GitHub 账号
 
 # 浅 clone (完整 history 较大, 浅 clone 秒过)
 cd ~/Desktop/teleai
-git clone --depth=1 --branch=wxe git@github-fp:FortPercent/TeleBoost.git TeleBoost-gh
+git clone --depth=1 --branch=wxe git@github-tb:<OWNER>/TeleBoost.git TeleBoost-gh
 
 # 验证
-ssh -T git@github-fp                   # 应看到 "Hi FortPercent!"
-cd TeleBoost-gh && git remote -v       # origin 应显示 github-fp: 前缀
+ssh -T git@github-tb                   # 应回 "Hi <有写权限的账号>!"
+cd TeleBoost-gh && git remote -v       # origin 应以 github-tb: 开头
 ```
+
+> 如果 Mac 默认 SSH 身份就是有写权限的那个账号，跳过别名那套，直接 `git clone git@github.com:<OWNER>/TeleBoost.git TeleBoost-gh` 即可。
 
 ### 8.3 日常流程
 
