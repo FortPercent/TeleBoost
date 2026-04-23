@@ -243,9 +243,13 @@ reward_model.joint.models.videophy.model_path=/user/TeleBoost/ckpts/rewards/vide
 - `fix_null.py` — 补 context_null.npy 的 Python 脚本
 - `hps_smoke.py` — HPS 独立加载测试脚本（验证权重可用）
 
+**Docker：**
+- `docker/Dockerfile.dancegrpo` — overlay, FROM `teleboost/verl-ngc-vllm08:latest`
+- `docker/Dockerfile.ngc.vllm0.8` — verl 官方 base (不动)
+
 **venv：**
-- `/user/.venvs/dancegrpo-vllm084-py310/` — 真身（smoke 在跑时别动）
-- `/user/.venvs/teleboost-py310/` → symlink → 真身（好听版）
+- `/user/.venvs/teleboost-py310/` — 真身（Python 3.10 + torch 2.6 + vllm 0.8.4）
+- `/user/.venvs/wxe-teleboost-py312/` — 老的 TeleBoost sglang 路线环境，保留做参考
 
 ---
 
@@ -273,3 +277,105 @@ python -c "from wan.modules.t5 import T5EncoderModel; print('wan t5 ok')"
 python -c "import torch; print([torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])"
 # 期望: 4 个 'NVIDIA H100 80GB HBM3'
 ```
+
+---
+
+## 8. Git 工作流（本地 ↔ GitHub ↔ 远端容器）
+
+目标：**本地 Mac 改代码 → push 到 GitHub → 远端容器 git pull → 跑测试**。
+
+### 8.0 网络拓扑 / 为什么要绕一下
+
+| 源 | 本地 Mac | 远端容器 |
+|---|---|---|
+| 内部 gitlab `code.srdcloud.cn` | ✅ | ❌ DNS 不解析, 代理白名单里也没 |
+| `github.com` SSH 22 | ✅ | 只能走 HTTP CONNECT 代理隧穿（代理允许 CONNECT :22）|
+| `github.com` HTTPS 443 | ✅ | ✅ 走代理 |
+
+**结论**：GitHub 是唯一两边都能到的 git 源。
+
+### 8.1 账号关系（踩过的坑）
+
+- **远端容器**：authenticates as GitHub `FortPercent`（repo 所有者账号）
+- **本地 Mac 默认 key** (`~/.ssh/id_ed25519`): authenticates as `RicardoL1u`，**对 FortPercent/TeleBoost 没 push 权限**
+- 所以本地 Mac 需要 **第二把 key 专门绑 FortPercent 账号**，配 host alias `github-fp` 让 TeleBoost-gh 这个仓库走这把 key
+
+### 8.2 一次性配置
+
+**远端容器** (`/user/TeleBoost`)，需要 HTTP 代理 CONNECT 隧穿 SSH：
+```bash
+# 生成 key
+ssh-keygen -t ed25519 -C "teleboost-container-wxe" -f ~/.ssh/id_ed25519 -N ""
+
+# 写 ~/.ssh/config, 把 github.com 流量塞进 HTTP 代理隧道
+cat >> ~/.ssh/config <<EOF
+Host github.com
+    User git
+    HostName github.com
+    ProxyCommand nc -X connect -x 10.127.48.4:3128 %h %p
+    StrictHostKeyChecking accept-new
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 30
+EOF
+chmod 600 ~/.ssh/config
+
+# 把 ~/.ssh/id_ed25519.pub 内容贴到 FortPercent 账号的
+#   https://github.com/settings/keys → New SSH key
+
+# 测试 + 改 origin URL
+ssh -T git@github.com                  # 应看到 "Hi FortPercent!"
+cd /user/TeleBoost
+git remote set-url origin git@github.com:FortPercent/TeleBoost.git
+```
+
+**本地 Mac**，要和默认 `RicardoL1u` 身份隔离：
+```bash
+# 生成 FortPercent 专用 key
+ssh-keygen -t ed25519 -f ~/.ssh/id_fortpercent -C "fortpercent-mac-$(date +%Y%m%d)" -N ""
+
+# 配 host 别名
+cat >> ~/.ssh/config <<EOF
+
+Host github-fp
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_fortpercent
+    IdentitiesOnly yes
+EOF
+
+# 把 ~/.ssh/id_fortpercent.pub 加到 FortPercent 账号的
+#   https://github.com/settings/keys → New SSH key
+# (不要加到 RicardoL1u 账号)
+
+# 浅 clone (完整 history 较大, 浅 clone 秒过)
+cd ~/Desktop/teleai
+git clone --depth=1 --branch=wxe git@github-fp:FortPercent/TeleBoost.git TeleBoost-gh
+
+# 验证
+ssh -T git@github-fp                   # 应看到 "Hi FortPercent!"
+cd TeleBoost-gh && git remote -v       # origin 应显示 github-fp: 前缀
+```
+
+### 8.3 日常流程
+
+**本地 Mac**：
+```bash
+cd ~/Desktop/teleai/TeleBoost-gh
+# 写代码
+vim recipe/dancegrpo/xxx.sh
+git commit -am "xxx"
+git push origin wxe
+```
+
+**远端容器**：
+```bash
+ssh -p 32585 root@116.238.240.2
+cd /user/TeleBoost
+git pull origin wxe
+source /user/.venvs/teleboost-py310/bin/activate
+bash recipe/dancegrpo/run_dancegrpo_1p3B_valfirst_4gpu_smoke_wxe.sh
+```
+
+### 8.4 原来的内部 gitlab 仓库怎么处理
+
+`/Users/wuxuaner/Desktop/teleai/Dance-grpo/` 那份（origin 指内部 gitlab）**保持不动**，继续推 gitlab 做团队内部可见。GitHub 这条线和 gitlab 线**不做自动双向同步**，需要时手动 `git cherry-pick` 或 `git push origin wxe:wxe-github` 等。
