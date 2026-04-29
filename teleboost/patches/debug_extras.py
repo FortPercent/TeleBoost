@@ -1,15 +1,46 @@
-"""Inject TeleBoost-only debug helpers into ``verl.utils.debug`` namespace.
+"""Inject TeleBoost-only symbols into upstream verl namespaces.
 
-Recipe code uses ``from verl.utils.debug import marked_timer``, but upstream
-verl@v0.4.0 doesn't define it. Rather than rewrite every recipe import, we
-patch the verl module so the symbol exists.
+Upstream verl@v0.4.0 doesn't ship a few APIs that recipe/dancegrpo/* uses:
+  - verl.utils.debug: marked_timer, simple_timer, ProfilerConfig, WorkerProfiler,
+                      WorkerProfilerExtension
+  - verl.utils.device: get_device_id
+  - verl.workers.reward_manager: register
+
+Rather than rewrite every recipe import, we patch the upstream modules at
+runtime so the symbols exist. teleboost-internal modules use the
+teleboost.* paths directly.
 """
 from __future__ import annotations
 
 
 def apply() -> None:
+    # verl.utils.debug
     import verl.utils.debug as _vud
+    from teleboost.utils.debug import (
+        ProfilerConfig,
+        WorkerProfiler,
+        WorkerProfilerExtension,
+        marked_timer,
+        simple_timer,
+    )
+    for name, value in [
+        ("marked_timer", marked_timer),
+        ("simple_timer", simple_timer),
+        ("ProfilerConfig", ProfilerConfig),
+        ("WorkerProfiler", WorkerProfiler),
+        ("WorkerProfilerExtension", WorkerProfilerExtension),
+    ]:
+        if not hasattr(_vud, name):
+            setattr(_vud, name, value)
 
-    if not hasattr(_vud, "marked_timer"):
-        from teleboost.utils.debug._marked_timer import marked_timer
-        _vud.marked_timer = marked_timer
+    # verl.utils.device
+    import verl.utils.device as _vudev
+    from teleboost.utils.device import get_device_id
+    if not hasattr(_vudev, "get_device_id"):
+        _vudev.get_device_id = get_device_id
+
+    # verl.workers.reward_manager
+    import verl.workers.reward_manager as _vrm
+    from teleboost.workers.reward_manager.registry import register
+    if not hasattr(_vrm, "register"):
+        _vrm.register = register
