@@ -1,6 +1,0 @@
-opencv-python
-ftfy
-regex
-timm
-decord
-einops
