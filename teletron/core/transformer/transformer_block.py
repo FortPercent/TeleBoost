@@ -108,5 +108,17 @@ class TransformerGeneralMixin:
             if module_to_wrap is not blocks[i]:
                 blocks[i] = module_to_wrap
 
+    def enable_activation_checkpointing(self, blocks):
+        """Convenience: checkpoint-only activation optimization."""
+        self.enable_activation_optimizations(
+            blocks, enable_checkpointing=True, enable_offloading=False
+        )
+
+    def enable_activation_offload(self, blocks):
+        """Convenience: checkpoint + CPU offload of activations."""
+        self.enable_activation_optimizations(
+            blocks, enable_checkpointing=True, enable_offloading=True
+        )
+
     def set_input_tensor(self, x):
         return None
