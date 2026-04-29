@@ -4,7 +4,7 @@ Re-exports the backport symbols that upstream verl@v0.4.0 doesn't ship but
 TeleBoost code (and recipe code via teleboost.patches injection) needs.
 """
 from teleboost.utils.debug._marked_timer import marked_timer
-from teleboost.utils.debug._profile import (
+from teleboost.utils.debug.profile import (
     ProfilerConfig,
     WorkerProfiler,
     WorkerProfilerExtension,

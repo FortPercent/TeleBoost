@@ -16,11 +16,32 @@ from __future__ import annotations
 
 
 def apply() -> None:
-    """Replace verl.utils.ulysses.register_cp_grad_reduce_hook in-place."""
+    """Inject TeleBoost cp-aware autograd Functions + fixed register hook into
+    verl.utils.ulysses. Wan transformer blocks then call them via
+    `from verl.utils.ulysses import gate_with_cp_grad_reduce` etc.
+    """
     import torch
     import torch.distributed as dist
     import verl.utils.ulysses as _u
 
+    # 1. Inject the cp-aware autograd Function entry points (upstream-missing).
+    from teleboost.utils._ulysses_cp import (
+        GateWithGradReduce,
+        ModulateWithCPGradReduce,
+        gate_with_cp_grad_reduce,
+        modulate_with_cp_grad_reduce,
+    )
+    for name, value in [
+        ("GateWithGradReduce", GateWithGradReduce),
+        ("ModulateWithCPGradReduce", ModulateWithCPGradReduce),
+        ("gate_with_cp_grad_reduce", gate_with_cp_grad_reduce),
+        ("modulate_with_cp_grad_reduce", modulate_with_cp_grad_reduce),
+    ]:
+        if not hasattr(_u, name):
+            setattr(_u, name, value)
+
+    # 2. Replace register_cp_grad_reduce_hook to skip modulation params (root-cause
+    #    fix for the cp grad double-reduce bug; see fix b0cecf7a / b311fbfc).
     def register_cp_grad_reduce_hook(model):
         def _cp_grad_reduce(grad):
             with torch.no_grad():
@@ -32,9 +53,8 @@ def apply() -> None:
                 return grad
 
         for name, param in model.named_parameters():
-            # modulation params are already SUM-allreduced inside
-            # ModulateWithCPGradReduce / GateWithGradReduce backward; skipping
-            # here avoids double-reduce that would scale grad by sp_size.
+            # modulation params are already SUM-allreduced inside Modulate/Gate
+            # WithCPGradReduce.backward; skipping here avoids double-reduce.
             if "blocks" in name and "modulation" not in name.lower():
                 param.register_hook(_cp_grad_reduce)
 
