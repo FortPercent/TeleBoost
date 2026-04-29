@@ -1,7 +1,5 @@
-megatron-core==0.6.0
-setuptools==78.1.0
+megatron-core==0.16.1
 yunchang==0.6.0
-numpy==1.26.4
 omegaconf
 huggingface_hub==0.27.0
 safetensors==0.4.5
@@ -26,3 +24,10 @@ attrs==24.2.0
 easydict==1.13
 cattrs==24.1.3
 func_timeout==4.3.5
+tensordict
+etcd3
+peft
+# Note: do NOT pin numpy here — it must follow whatever the NGC torch
+# build links against, otherwise the torch <-> numpy ABI breaks.
+# Note: setuptools is provided by the NGC base image; pinning it here
+# can cause spurious upgrade warnings.
