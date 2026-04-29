@@ -35,7 +35,7 @@ from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
 from verl.utils.torch_functional import get_response_mask
 from wan.modules.vae import WanVAE
 
-from .base import BaseRollout
+from verl.workers.rollout.base import BaseRollout
 import logging
 
 __all__ = ['DiffusionRollout']
