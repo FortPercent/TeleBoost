@@ -28,7 +28,7 @@ from starlette.requests import Request
 
 from verl.protocol import DataProto
 from verl.single_controller.ray.base import RayWorkerGroup
-from verl.workers.rollout.chat_scheduler import ChatCompletionScheduler
+from teleboost.workers.rollout.chat_scheduler import ChatCompletionScheduler
 
 logger = logging.getLogger(__file__)
 

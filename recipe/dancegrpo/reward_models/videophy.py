@@ -74,7 +74,7 @@ class VideophyRewardModel(BaseRewardModel):
         
         try:
             from transformers.models.llama.tokenization_llama import LlamaTokenizer
-            from verl.models.Videophy.mplug_owl_video import (
+            from teleboost.models.Videophy.mplug_owl_video import (
                 MplugOwlConfig,
                 MplugOwlForConditionalGeneration,
                 MplugOwlImageProcessor,

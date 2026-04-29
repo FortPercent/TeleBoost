@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from verl.models.utils.utils import bilinear_sampler, coords_grid
+from teleboost.models.utils.utils import bilinear_sampler, coords_grid
 
 try:
     import alt_cuda_corr

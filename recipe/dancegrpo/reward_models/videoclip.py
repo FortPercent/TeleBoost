@@ -61,7 +61,7 @@ class VideoCLIPRewardModel(BaseRewardModel):
             raise ValueError("VideoCLIP model requires 'model_path' in config")
         
         try:
-            from verl.models.VideoCLIP_XL.modeling import VideoCLIP_XL
+            from teleboost.models.VideoCLIP_XL.modeling import VideoCLIP_XL
             
             model = VideoCLIP_XL()
             state_dict = torch.load(model_path, map_location="cpu")
@@ -92,7 +92,7 @@ class VideoCLIPRewardModel(BaseRewardModel):
         Returns:
             Cosine similarity score (scaled by 100)
         """
-        from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
+        from teleboost.models.VideoCLIP_XL.utils.text_encoder import text_encoder
         
         self.videoclip_model.to(self.get_device())
         self.videoclip_model.eval()

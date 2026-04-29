@@ -145,7 +145,7 @@ def forward_with_triton_backend(
     temperature: float = 1.0,
     **loss_kwargs,
 ) -> Union[Tuple, CausalLMOutputForPPO]:
-    from verl.utils.kernel import linear_cross_entropy
+    from teleboost.utils.kernel import linear_cross_entropy
 
     outputs = forward_base_model(
         self,

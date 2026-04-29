@@ -79,7 +79,7 @@ class AestheticRewardModel(BaseRewardModel):
         
         # Load CLIP model
         try:
-            from verl.models.offline_clip import create_offline_clip_model
+            from teleboost.models.offline_clip import create_offline_clip_model
             self.clip_model = create_offline_clip_model(clip_path, "cpu")
             logger.info(f"Loaded CLIP model from {clip_path}")
         except Exception as e:

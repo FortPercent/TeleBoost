@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from verl.models.raft.update import BasicUpdateBlock, SmallUpdateBlock
-from verl.models.raft.extractor import BasicEncoder, SmallEncoder
-from verl.models.raft.corr import CorrBlock, AlternateCorrBlock
-from verl.models.utils.utils import coords_grid, upflow8
+from teleboost.models.raft.update import BasicUpdateBlock, SmallUpdateBlock
+from teleboost.models.raft.extractor import BasicEncoder, SmallEncoder
+from teleboost.models.raft.corr import CorrBlock, AlternateCorrBlock
+from teleboost.models.utils.utils import coords_grid, upflow8
 
 autocast = torch.cuda.amp.autocast
 

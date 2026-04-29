@@ -19,7 +19,7 @@ from tensordict import TensorDict
 
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
-from verl.utils.reward_score.diffusion import compute_red_intensity_reward
+from teleboost.utils.reward_score.diffusion import compute_red_intensity_reward
 from verl.workers.reward_manager import register
 
 

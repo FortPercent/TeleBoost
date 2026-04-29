@@ -72,7 +72,7 @@ class RAFTRewardModel(BaseRewardModel):
         
         # Load RAFT model
         try:
-            from verl.models.raft.raft import RAFT
+            from teleboost.models.raft.raft import RAFT
             model = RAFT(args)
             
             # Load state dict, handling 'module.' prefix
@@ -140,7 +140,7 @@ class RAFTRewardModel(BaseRewardModel):
         Returns:
             Mean flow magnitude
         """
-        from verl.models.utils.utils import InputPadder
+        from teleboost.models.utils.utils import InputPadder
         
         optical_flows = []
         

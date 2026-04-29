@@ -15,7 +15,7 @@
 import pytest
 
 # Assuming REWARD_MANAGER_REGISTRY is defined somewhere in the module
-from verl.workers.reward_manager.registry import REWARD_MANAGER_REGISTRY, get_reward_manager_cls, register
+from teleboost.workers.reward_manager.registry import REWARD_MANAGER_REGISTRY, get_reward_manager_cls, register
 
 
 @pytest.fixture

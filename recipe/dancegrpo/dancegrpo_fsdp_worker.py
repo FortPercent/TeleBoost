@@ -300,7 +300,7 @@ class QwenRewardModelWorker(RewardModelWorker):
         rollout_name = self.config.rollout.name # rollout使用的架构 vllm
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
-        from verl.workers.sharding_manager.reward_qwen import RewardVLLMManager
+        from teleboost.workers.sharding_manager.reward_qwen import RewardVLLMManager
         log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
         local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False)) # use_shm 是否使用shared_memory
        
@@ -838,7 +838,7 @@ class AestheticRewardModelWorker(RewardModelWorker):
     
     def _build_model(self):
         
-        from verl.models.offline_clip import create_offline_clip_model
+        from teleboost.models.offline_clip import create_offline_clip_model
         self.clip_model = create_offline_clip_model(self.clip_model_path, "cpu")
         self.aesthetic_model = self._load_aesthetic_model(self.aes_model_path)
         num_params_1 = sum(p.numel() for p in self.clip_model.visual.parameters())
@@ -949,7 +949,7 @@ class RAFTRewardModelWorker(RewardModelWorker):
         }
         args = dict_to_namespace(args_dict)
         
-        from verl.models.raft.raft import RAFT
+        from teleboost.models.raft.raft import RAFT
         model = RAFT(args)
         
         from collections import OrderedDict
@@ -975,7 +975,7 @@ class RAFTRewardModelWorker(RewardModelWorker):
             print("Not enough frames to compute optical flow.")
             return 0.0
 
-        from verl.models.utils.utils import InputPadder
+        from teleboost.models.utils.utils import InputPadder
 
         optical_flows = []
         with torch.no_grad():
@@ -1078,7 +1078,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
             print(f"[RANK {self.rank}] VideoclipWorker is inactive")
         
     def _build_model(self):
-        from verl.models.VideoCLIP_XL.modeling import VideoCLIP_XL
+        from teleboost.models.VideoCLIP_XL.modeling import VideoCLIP_XL
         # 需要适配videoCLIP_XL中vision_model frame 配置
         self.videoclip_model = VideoCLIP_XL()
         state_dict = torch.load(self.videoclip_model_path, map_location="cpu")
@@ -1147,7 +1147,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         batch_caption = _split_captions(caption, datas.batch.batch_size[0])
         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
 
-        from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
+        from teleboost.models.VideoCLIP_XL.utils.text_encoder import text_encoder
         all_rewards = []
         self.videoclip_model.to(get_device_id()).eval()
         print(f"videoclip batch size: {len(batch_caption)}")
@@ -1221,12 +1221,12 @@ class VideophyRewardModelWorker(RewardModelWorker):
     def _build_model(self):
 
         from transformers.models.llama.tokenization_llama import LlamaTokenizer
-        from verl.models.Videophy.mplug_owl_video import MplugOwlForConditionalGeneration
-        from verl.models.Videophy.mplug_owl_video import (
+        from teleboost.models.Videophy.mplug_owl_video import MplugOwlForConditionalGeneration
+        from teleboost.models.Videophy.mplug_owl_video import (
             MplugOwlImageProcessor,
             MplugOwlProcessor,
         )
-        from verl.models.Videophy.mplug_owl_video import MplugOwlConfig        
+        from teleboost.models.Videophy.mplug_owl_video import MplugOwlConfig        
         self.tokenizer = LlamaTokenizer.from_pretrained(self.checkpoint)
         print("Model Loading")
         self.videophy_model = MplugOwlForConditionalGeneration.from_pretrained(

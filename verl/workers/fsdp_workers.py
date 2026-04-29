@@ -332,7 +332,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
                     )
 
             if actor_module_class.__name__ == "WanModel" and use_wan22:
-                from verl.models.transformers.wan22 import Wan22DualModel
+                from teleboost.models.transformers.wan22 import Wan22DualModel
                 from verl.utils.fs import copy_to_local
 
                 fused_kernel_options = self.config.model.get("fused_kernel_options", None)
@@ -677,7 +677,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         rollout_name = self.config.rollout.name
         if self.config.type=="diffusion":  #用的是这个
             from verl.workers.rollout import DiffusionRollout
-            from verl.workers.sharding_manager.diffusion import DiffusionBaseShardingManager
+            from teleboost.workers.sharding_manager.diffusion import DiffusionBaseShardingManager
 
             rollout = DiffusionRollout(module=self.actor_module_fsdp, config=self.config)
             rollout_sharding_manager = DiffusionBaseShardingManager(module=self.actor_module_fsdp,inference_engine=None,model_config=self.actor_model_config,offload_param=self._is_offload_param)
