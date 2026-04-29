@@ -91,7 +91,8 @@ class BasePipeline(torch.nn.Module):
         return video
 
 
-    def load_models_to_device(self, model_names=[]):
+    def load_models_to_device(self, model_names=None):
+        model_names = list(model_names) if model_names is not None else []
         if self.vram_management_enabled:
             # offload models
             for name, model in self.named_children():

@@ -262,9 +262,12 @@ def _compare_preprocessed_image(pipe, image_tensor, branch, pair_id, tag_suffix)
     if pair_id is None or not branch:
         return
     try:
+        # mpu raises if model-parallel state isn't initialized — typical
+        # when running this pipeline outside a torchrun/megatron context.
+        # Fall back to rank 0.
         from megatron.core import mpu
         cp_rank = mpu.get_tensor_context_parallel_rank()
-    except Exception:
+    except (AssertionError, RuntimeError, AttributeError):
         cp_rank = 0
     if cp_rank != 0:
         return

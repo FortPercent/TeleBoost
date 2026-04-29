@@ -306,7 +306,8 @@ def get_img_clip_feature(batch, image_encoder, dtype=torch.bfloat16):
     return clip_context
 
 @torch.no_grad
-def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_kwargs={}):
+def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_kwargs=None):
+    tiler_kwargs = dict(tiler_kwargs) if tiler_kwargs is not None else {}
     _, num_frames, _, height, width = batch["images"].shape
     if 'ref_images' in batch:
         # assert False, "ref_images is not supported yet"
@@ -352,7 +353,8 @@ def get_img_emb_y(batch, vae, dtype=torch.bfloat16, compression=(4,8,8), tiler_k
     return y
 
 @torch.no_grad
-def get_latents(batch, vae, dtype=torch.bfloat16, tiler_kwargs={}):
+def get_latents(batch, vae, dtype=torch.bfloat16, tiler_kwargs=None):
+    tiler_kwargs = dict(tiler_kwargs) if tiler_kwargs is not None else {}
     def _get_latents(images):
         # 将视频张量重排为 VAE期望的 (b, c, t, h, w) 格式并进行编码
         latents = encode_video(
@@ -376,7 +378,8 @@ def get_noise(batch, dtype=torch.bfloat16, compression=(4,8,8)):
         return torch.randn(bsz, 16, (num_frames + 3) // compression[0], height // compression[1], width // compression[2]).to(dtype=dtype, device=torch.cuda.current_device())
 
 @torch.no_grad
-def get_fake_latents(batch, vae, dtype=torch.bfloat16, tiler_kwargs={}):
+def get_fake_latents(batch, vae, dtype=torch.bfloat16, tiler_kwargs=None):
+    tiler_kwargs = dict(tiler_kwargs) if tiler_kwargs is not None else {}
     bsz, num_frames, video_channels, height, width = batch["images"].shape
     
     low_res_video = torch.nn.functional.interpolate(
@@ -411,7 +414,8 @@ def get_frame_interval(batch, dtype=torch.bfloat16):
     )
 
 @torch.no_grad
-def get_depth_latents(batch, depth_model, vae, dtype=torch.bfloat16, tiler_kwargs={}):
+def get_depth_latents(batch, depth_model, vae, dtype=torch.bfloat16, tiler_kwargs=None):
+    tiler_kwargs = dict(tiler_kwargs) if tiler_kwargs is not None else {}
     global_config = set_config()
     target_fps = global_config.dataset.filter_cfg.dst_fps
     frames = rearrange(batch["images"], "b t c h w -> b t h w c").squeeze(0).numpy()

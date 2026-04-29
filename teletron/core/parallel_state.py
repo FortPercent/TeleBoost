@@ -86,14 +86,31 @@ def apply_distributed_op_patches(models_num=1):
 
         broadcast = torch.distributed.broadcast
 
+        def _translate_src_into_group(src, group_ranks):
+            """Translate a (possibly out-of-group) src rank into the matching
+            rank inside group_ranks by stepping by the transformer-model-group
+            size. Bounded: raises if no match exists rather than looping forever.
+            """
+            if src in group_ranks:
+                return src
+            stride = dist.get_world_size(group=get_this_transformer_model_group())
+            world = dist.get_world_size()
+            # Need at most ceil(world/stride) hops to scan every stride-aligned rank.
+            for _ in range((world + stride - 1) // stride + 1):
+                src += stride
+                if src in group_ranks:
+                    return src
+            raise RuntimeError(
+                f"broadcast: cannot align src into group_ranks={group_ranks} "
+                f"using stride={stride} (world={world})"
+            )
+
         def broadcast_model_group(tensor, src=None, group=None):
             if group is None:
                 group = get_this_transformer_model_group()
-            group_ranks = dist.get_process_group_ranks(group)
-            while (src in group_ranks) is False:
-                src += dist.get_world_size(group=get_this_transformer_model_group())
+            src = _translate_src_into_group(src, dist.get_process_group_ranks(group))
             return broadcast(tensor, src=src, group=group)
-        
+
         torch.distributed.broadcast = broadcast_model_group
 
         broadcast_object_list = torch.distributed.broadcast_object_list
@@ -101,9 +118,7 @@ def apply_distributed_op_patches(models_num=1):
         def broadcast_object_list_model_group(object_list, src=None, group=None, device=None):
             if group is None:
                 group = get_this_transformer_model_group()
-            group_ranks = dist.get_process_group_ranks(group)
-            while (src in group_ranks) is False:
-                src += dist.get_world_size(group=get_this_transformer_model_group())
+            src = _translate_src_into_group(src, dist.get_process_group_ranks(group))
             return broadcast_object_list(object_list, src=src, group=group, device=device)
 
         torch.distributed.broadcast_object_list = broadcast_object_list_model_group
