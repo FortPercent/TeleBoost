@@ -19,7 +19,7 @@ from PIL import Image
 from einops import repeat
 from teleai_data_tool.file.file_client import FileClient
 from teleai_data_tool.file.lmdb_client import LmdbClient
-from my_utils import get_global_logger
+import logging
 from megatron.core import mpu
 
 
@@ -333,7 +333,6 @@ class UnifiedDataset(torch.utils.data.Dataset):
         self.pipeline = Compose(pipeline) if pipeline is not None else None
         self.load_metadata(metadata_path)
         # try:
-        #     from my_utils import UniversalDumper, DumpConfig, get_dumper
         #     self.dumper = get_dumper(DumpConfig(
         #         root_dir="./dump_dataset",
         #         enable=True,
@@ -590,7 +589,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         self.data = _load_single_metadata(metadata_path)
 
     def _get_logger(self):
-        return get_global_logger()
+        return logging.getLogger("teletron")
 
     def _get_producer_rank(self):
         if dist.is_available() and dist.is_initialized():

@@ -13,7 +13,6 @@ from .video_transform import (
     GenerateRefImagesWithMask, 
     GenerateRawFirstRefImage,
     InjectRawFirstImageFromVideo,
-    CompareImageEmbedFromVideo,
     LoadInputImageAsFirstFrame,
     GenerateRawFirstLastRefImage,
     GenerateRefImagesWithTimeMask,
@@ -39,7 +38,6 @@ TRANSFORMS.register_module(GenerateFirstRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithMask)
 TRANSFORMS.register_module(GenerateRawFirstRefImage)
 TRANSFORMS.register_module(InjectRawFirstImageFromVideo)
-TRANSFORMS.register_module(CompareImageEmbedFromVideo)
 TRANSFORMS.register_module(GenerateRawFirstLastRefImage)
 TRANSFORMS.register_module(GenerateRefImagesWithTimeMask)
 TRANSFORMS.register_module(InjectPromptToTopLevel)

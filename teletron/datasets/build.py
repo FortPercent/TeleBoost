@@ -13,7 +13,7 @@ from teletron.utils import (
     get_args,
     set_config,
 )
-from my_utils import get_global_logger
+import logging
 from teletron.train.utils import (
     get_train_valid_test_num_samples,
 )
@@ -43,7 +43,7 @@ def build_train_valid_test_datasets(dp_rank=None, dp_size=None, shuffle=False):
         return  None, None, None
     else:
         import os
-        logger = get_global_logger()
+        logger = logging.getLogger("teletron")
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         global_rank = int(os.environ.get("RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))

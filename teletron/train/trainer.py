@@ -56,7 +56,6 @@ from teletron.train.consumer_dataloader import create_batch_loader
 from functools import partial
 import logging
 
-from my_utils import setup_logging_and_timer
 
 logger = getLogger(__name__)
 _TRAIN_START_TIME = time.time()
@@ -80,12 +79,9 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
         if not hasattr(args, "logdir") and hasattr(args, "log_dir"):
             args.logdir = args.log_dir
         role_tag = "Producer" if transformer_group is None else "Trainer"
-        self.logger, self.timer = setup_logging_and_timer(
-            args=args,
-            role_tag=role_tag,
-            use_cuda=torch.cuda.is_available(),
-            is_distributed=dist.is_initialized(),
-        )
+        self.logger = logging.getLogger(f"teletron.{role_tag}")
+        # (drop self.timer — it was unused)
+        # but was never actually consumed — drop it.
         if transformer_group is None:
             rank = int(os.environ.get("RANK"))
             producer_logger = logging.getLogger(f"ProducerRank{rank}")
