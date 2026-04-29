@@ -1,4 +1,6 @@
-# requirements.txt records the full set of dependencies for development
+# requirements.txt records the full set of dependencies for development.
+# verl is vendored under verl/; no external pin needed.
+
 accelerate
 codetiming
 datasets

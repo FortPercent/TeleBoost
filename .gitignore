@@ -151,3 +151,4 @@ verl.egg-info/
 __pycache__/
 *.pyc
 data/1__3B/rl_embeddings/processed_wan_prompt.json
+.git.backup-*
