@@ -1,0 +1,88 @@
+From dc8770a4e28ff86a829e81eaed389b2822924888 Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 11:00:05 +0800
+Subject: [PATCH 02/20] =?UTF-8?q?=E5=A2=9E=E5=8A=A0=E4=BA=86config?=
+ =?UTF-8?q?=E6=96=87=E4=BB=B6=E7=9A=84=E6=B3=A8=E9=87=8A?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/config/dancegrpo_trainer.yaml | 14 +++++++++++---
+ recipe/dancegrpo/run_dancegrpo.sh              |  3 ++-
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 9fc9609b..4f2f1052 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -19,12 +19,14 @@ actor_rollout_ref:
+   model:
+     vae_model_path: data/flux
+     data_json_path: data/rl_embeddings/videos2caption.json
++  
+   actor:
+     timestep_fraction: 0.6
+     clip_range: 1e-4
+     adv_clip_max: 5.0
+     eta: 0.3
+     max_grad_norm: 1.0
++    
+     grpo_guard:
+       enable: false
+       ratio_norm: true
+@@ -32,8 +34,10 @@ actor_rollout_ref:
+       ratio_norm_eps: 1e-6
+       grad_reweight_eps: 1e-6
+       grad_reweight_alpha: 1.0
++  
+   rollout:
+     ulysses_sequence_parallel_size: 1.0
++  
+   video_fps: 25
+   guide_scale: 5.0
+   cfg: 0.0
+@@ -47,12 +51,16 @@ actor_rollout_ref:
+   timestep_fraction: 0.6
+   init_same_noise: True
+ 
++  # if fast flow-grpo
+   flow_grpo:
+     enable: false
+-    sde_window_size: 0
++    sde_window_size: 2
+     sde_window_range: [0, ${actor_rollout_ref.sampling_steps}]
+-    shuffle_timesteps: true
+-
++    shuffle_timesteps: false
++  # if standard flow-grpo
++  # flow_grpo:
++  #   enable: true
++  #   sde_window_size: 0
+ 
+ reward_model:
+   enable: True
+diff --git a/recipe/dancegrpo/run_dancegrpo.sh b/recipe/dancegrpo/run_dancegrpo.sh
+index f8997403..9dc25cb1 100644
+--- a/recipe/dancegrpo/run_dancegrpo.sh
++++ b/recipe/dancegrpo/run_dancegrpo.sh
+@@ -76,7 +76,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
+     actor_rollout_ref.h=480 \
+     actor_rollout_ref.w=832 \
+     actor_rollout_ref.num_frames=49 \
+-    actor_rollout_ref.sampling_steps=6 \
++    actor_rollout_ref.sampling_steps=10 \
+     actor_rollout_ref.actor.eta=0.25 \
+     actor_rollout_ref.lr_warmup_steps=0 \
+     actor_rollout_ref.use_hpsv2=True \
+@@ -130,6 +130,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
+     reward_model.rollout.load_format=safetensors \
+     reward_model.micro_batch_size_per_gpu=1 \
+     reward_model.model.path='/root/models/Qwen2.5-VL-7B-Instruct' \
++    reward_model.rollout.gpu_memory_utilization=0.8 \
+     reward_model.model.input_tokenizer=null \
+     reward_model.rollout.max_model_len=$((max_prompt_length + max_response_length)) \
+     reward_model.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
+-- 
+2.50.1 (Apple Git-155)
+

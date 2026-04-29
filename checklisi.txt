@@ -1,0 +1,170 @@
+TeleBoost Wan2.1 T2V Pixel 加权迁移代码检查清单
+===============================================
+
+目标
+----
+请只 review 新增的 `_pixel` 分支实现，确认它是否把 DanceGRPO 参考脚本中的 pixel-weighted advantage 逻辑，正确迁移到 TeleBoost 当前 Wan2.1 T2V 训练链路中。
+
+注意范围
+--------
+1. 不需要 review 原始主流程是否优雅，主流程没有被刻意修改。
+2. 重点看 `_pixel` 新文件之间的数据流、shape、一致性和潜在运行时错误。
+3. 不要求你运行训练；以静态代码审查为主。
+
+参考来源
+--------
+参考逻辑来自：
+/data/aigc/liangyzh_intern/zqni/DanceGRPO-main/fastvideo/train_grpo_wan_fsdp_pixel_wise_dino_on_adv.py
+
+参考时重点对照的逻辑点：
+1. DINO reverse semantic map 生成
+2. reward + pixel map 组装
+3. dense log-prob 路径
+4. scalar advantage -> dense advantage
+
+本次新增文件
+------------
+1. recipe/dancegrpo/main_dancegrpo_pixel.py
+2. recipe/dancegrpo/dancegrpo_ray_trainer_pixel.py
+3. recipe/dancegrpo/dancegrpo_fsdp_worker_pixel.py
+4. recipe/dancegrpo/dp_actor_pixel.py
+5. recipe/dancegrpo/diffusion_rollout_pixel.py
+6. recipe/dancegrpo/pixel_weight_utils_pixel.py
+7. recipe/dancegrpo/config/dancegrpo_trainer_pixel.yaml
+8. recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke_pixel.sh
+
+你需要回答的核心问题
+--------------------
+1. 这套 `_pixel` 链路是否能在不影响主流程的前提下独立工作？
+2. pixel 权重图的计算、尺寸对齐、dtype/device 迁移是否正确？
+3. rollout 输出的 dense `log_probs`、trainer 生成的 dense `advantages`、actor 消费的 dense loss 三者 shape 是否自洽？
+4. 这套实现是否真正复现了参考脚本的核心算法，而不是只做了表面拼接？
+5. 是否存在明显的 batch 维度、时间维度、latent 空间维度错位问题？
+6. 是否存在潜在的 silent bug：广播错误、view/reshape 错误、detach 不当、device 不一致、pop 掉关键字段后下游再访问等？
+
+总体验收标准
+------------
+[ ] 主流程入口未被破坏，只有 `_pixel` 入口才会启用新逻辑
+[ ] `_pixel` 版本从入口 -> trainer -> worker -> rollout/actor 的引用链闭环正确
+[ ] dense log-prob 的 shape 与 dense advantage 的 shape 在 loss 计算前严格兼容
+[ ] pixel map 与 latent 时空分辨率对齐，没有隐式错位
+[ ] reward 标量归一化与 dense 扩展逻辑和参考脚本一致或有充分理由解释差异
+[ ] 新逻辑不会误伤 ref policy / KL / metrics 等依赖路径
+[ ] 没有明显运行时崩溃点
+
+逐文件检查清单
+--------------
+
+一、recipe/dancegrpo/main_dancegrpo_pixel.py
+[ ] 是否只把入口切到 pixel 版 trainer / worker，而没有影响原有 main_dancegrpo.py 的默认行为
+[ ] 配置加载路径是否正确指向 pixel 版 yaml
+[ ] 是否仍然复用了 TeleBoost 现有必要初始化逻辑，而不是丢失关键 setup
+[ ] import 路径是否全部可解析，是否会与原始模块命名冲突
+
+二、recipe/dancegrpo/dancegrpo_fsdp_worker_pixel.py
+[ ] actor 是否被正确替换为 `DataParallelPPOActorPixel`
+[ ] ref policy 若也切到 pixel actor，是否确有必要；是否会影响 KL/reference 行为
+[ ] rollout 是否被正确替换为 `DiffusionRolloutPixel`
+[ ] worker 的初始化、设备放置、FSDP 包装、权重同步逻辑是否仍与原流程兼容
+[ ] 是否存在只替换了 actor 但忘了替换其他关键组件的路径
+
+三、recipe/dancegrpo/diffusion_rollout_pixel.py
+[ ] rollout 生成完视频后，`video_frames` 是否是可用且稳定的数据源
+[ ] `pixel_weight_maps` 的生成时机是否正确，是否在所有必要字段都准备好后执行
+[ ] `pixel_weight_maps` 写入 batch / output 的键名是否与下游 trainer 一致
+[ ] 重写后的 `wan_step` 是否真的保留了 dense `log_prob`，而不是又在中间被压成标量
+[ ] dense `log_prob` 的 shape 具体是什么，请你明确写出推断结果
+[ ] 这个 shape 是否与 actor 侧 `old_log_prob` / `log_prob` / `advantages` 的使用方式一致
+[ ] 这里是否有时间维 T、空间维 H/W、通道维 C 的错误求和或错误保留
+[ ] rollout 里是否有额外依赖原始标量 `log_prob` 的指标/缓存路径被破坏
+
+四、recipe/dancegrpo/dancegrpo_ray_trainer_pixel.py
+[ ] `compute_advantage_pixel` 是否与参考脚本语义一致：先从 scalar reward 得到标准化 advantage，再乘 pixel map 得到 dense advantage
+[ ] reward 的归一化维度、group 逻辑、均值方差计算是否与 TeleBoost 原实现兼容
+[ ] `pixel_weight_maps` 的 shape 是否在这里被正确 broadcast 到 normalized advantage
+[ ] 如果 `pixel_weight_maps` 使用 `pop` 取出，下游是否再也不会依赖这个字段；若会依赖，这是 bug
+[ ] `advantages` 存回 batch 的 shape / dtype / device 是否明确且正确
+[ ] 是否还需要同时保留一份 scalar advantage 用于日志、KL 或其他统计
+[ ] `fit` 中是否完整替换到了 pixel advantage 路径，没有漏掉某些 update 分支
+
+五、recipe/dancegrpo/dp_actor_pixel.py
+[ ] PPO loss 是否明确消费 dense `advantages`
+[ ] `log_prob` 与 `old_log_prob` 的 shape 是否完全一致
+[ ] ratio、clip、loss reduction 的维度语义是否仍正确
+[ ] 当前实现是否把 dense advantage 复用于所有 diffusion step；这是否与参考脚本一致，请给出结论
+[ ] `wan_step` 中只压缩通道维、保留时空维的做法，是否与 rollout 侧 dense log-prob 定义一致
+[ ] batch 拆分、micro-batch、gradient accumulation 时，dense tensor 的 gather/split 是否可靠
+[ ] actor update 中是否仍保留了原有必要 mask；如果有 mask，它和 dense spatial loss 的形状是否兼容
+[ ] reduction 最终得到标量 loss 的路径是否正确，是否可能因维度多保留一层而产生 silent broadcast
+[ ] 是否会影响 ref log-prob / KL 分支的 shape 假设
+
+六、recipe/dancegrpo/pixel_weight_utils_pixel.py
+[ ] DINOv2 特征提取流程是否正确，输入预处理是否合理
+[ ] reverse semantic map 的实现是否与参考逻辑一致
+[ ] 这里用 numpy SVD 替代 sklearn PCA，数值行为是否足够等价；请评估风险
+[ ] 输出权重图的归一化、取值范围、非负性是否合理
+[ ] 时间维、空间维 resize/downsample 到 latent 分辨率时是否严格对齐
+[ ] 若使用 `scipy.ndimage.gaussian_filter`，在 scipy 不可用时的 fallback 是否合理
+[ ] CPU/GPU 来回搬运、numpy <-> torch 转换是否可能造成性能或 device 错误
+[ ] 极端输入下是否会出现全零、NaN、除零、奇异值退化等问题
+
+七、recipe/dancegrpo/config/dancegrpo_trainer_pixel.yaml
+[ ] 是否只新增 pixel 分支所需配置，没有误改原始配置语义
+[ ] 新增配置项名是否和代码读取路径完全一致
+[ ] 默认值是否合理，缺省时是否会在运行时报 KeyError / AttributeError
+[ ] DINO 相关配置是否完整：模型名、输入尺寸、平滑参数、latent 尺寸相关参数等
+
+八、recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke_pixel.sh
+[ ] 是否只切入口和配置到 `_pixel` 版本
+[ ] 其余训练参数是否与原脚本保持兼容
+[ ] shell 里是否有写错的路径、环境变量、模块名
+
+请重点怀疑的高风险点
+------------------
+1. shape 风险
+   - dense `log_prob`
+   - dense `advantages`
+   - `pixel_weight_maps`
+   - actor loss reduction 前后的维度
+
+2. 语义风险
+   - 参考脚本是“标量 reward -> 标量 advantage 归一化 -> dense 加权”
+   - 请确认当前迁移是不是这个顺序，而不是先 dense 后再做不一致归一化
+
+3. ref/KL 风险
+   - ref actor 也切成 pixel 版后，是否会影响 KL 路径原本默认的 shape 假设
+
+4. 数据生命周期风险
+   - rollout 写出的 `pixel_weight_maps` 是否在 trainer 中被安全消费
+   - trainer `pop` 后是否还有任何后续逻辑会再访问它
+
+5. 数值稳定性风险
+   - PCA/SVD 近似
+   - map 归一化
+   - 全零/低方差 case
+   - dense ratio / clip 的数值范围
+
+希望你输出的 review 结果格式
+--------------------------
+请按下面结构给结论：
+
+1. 总结
+   - 是否可合并
+   - 如果不可合并，最高优先级问题是什么
+
+2. 必修问题
+   - 必须在运行前修复的问题，按严重度排序
+
+3. 建议问题
+   - 不一定阻塞，但建议修复或加断言/日志
+
+4. shape 结论
+   - 请明确写出你推断的关键 tensor shape
+   - 包括 rollout 输出、trainer 存储、actor loss 输入
+
+5. 与参考脚本的一致性
+   - 哪些点一致
+   - 哪些点有偏差
+   - 这些偏差是否可接受
+
+如果你认为某个地方需要补充断言，请直接指出应该加在哪个 `_pixel` 文件里、断言什么 shape 或条件。

@@ -1,0 +1,43 @@
+From 22a8c829fe7011a150b91271c11403dc33004927 Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 14:37:14 +0800
+Subject: [PATCH 11/20] =?UTF-8?q?=E8=BD=AC=E5=88=B0=E6=9C=AC=E5=9C=B0?=
+ =?UTF-8?q?=E4=BF=AE=E6=94=B9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index 1e4dfa17..6d5d280d 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -217,16 +217,19 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
+ 
+                 if ratio_norm:
+-                    prev_sample_mean_step = prev_sample_mean[..., current_step]
++                    prev_sample_mean_step = prev_sample_mean
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
++                    print(f"Step {step_idx}: RatioNorm scale {prev_sample_mean_step.shape}, mean bias {prev_sample_mean_old.shape}")
++                    
+                     ratio_mean_bias = (prev_sample_mean_step - prev_sample_mean_old).pow(2).mean(
+                         dim=tuple(range(1, prev_sample_mean_step.ndim))
+                     )
++                    
+                     sqrt_dt = sqrt_dt.mean()
+-                    sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
++                    std_dev_t_step = std_dev_t[..., current_step]
++                    sigma_t = std_dev_t_step / (sqrt_dt + ratio_norm_eps)
+                     scale = sqrt_dt * sigma_t
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+-                    print(f"Step {step_idx}: RatioNorm scale {scale.item()}, mean bias {ratio_mean_bias.item()}")
+                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                 else:
+                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
+-- 
+2.50.1 (Apple Git-155)
+

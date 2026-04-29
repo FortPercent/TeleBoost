@@ -1,0 +1,50 @@
+From 77830e177900ba6c5fe2e0386a8ed19db0be8b9f Mon Sep 17 00:00:00 2001
+From: hiahei <850405207@qq.com>
+Date: Fri, 6 Feb 2026 13:58:01 +0800
+Subject: [PATCH 09/20] =?UTF-8?q?=E5=86=8D=E6=AC=A1=E4=BF=AE=E6=94=B9?=
+ =?UTF-8?q?=E4=BA=86=E9=A2=9D=E8=AE=A1=E7=AE=97log=5Fprob=E7=9A=84?=
+ =?UTF-8?q?=E9=80=BB=E8=BE=91=EF=BC=8C=E8=BF=98=E6=B2=A1=E6=A3=80=E6=9F=A5?=
+ =?UTF-8?q?=E6=98=AF=E5=90=A6=E6=AD=A3=E7=A1=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index 3467ab0c..e15d24c9 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -208,11 +208,13 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 )
+ 
+                 # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
+-                old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
++                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx]
+ 
+                 # 2. 拿到当前这一步的 new_log_prob (形状: Batch)
+                 current_step = -train_timesteps + step_idx
+-                new_log_probs = new_log_probs[..., current_step]
++                new_log_probs_step = new_log_probs[..., current_step]
++
++                print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
+ 
+                 if ratio_norm:
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+@@ -223,9 +225,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                     sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
+                     scale = sqrt_dt * sigma_t
+                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
+-                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
++                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale) # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+                 else:
+-                    ratio = torch.exp(new_log_probs - old_log_probs)
++                    ratio = torch.exp(new_log_probs_step - old_log_probs_step)
+ 
+                 clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
+                 clip_count = clipped_mask.sum().detach().item()
+-- 
+2.50.1 (Apple Git-155)
+

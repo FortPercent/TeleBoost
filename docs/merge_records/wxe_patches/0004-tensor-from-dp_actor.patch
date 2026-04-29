@@ -1,0 +1,43 @@
+From 9dee20b400da3b0b5932177b0e33075fee672be7 Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 11:33:00 +0800
+Subject: [PATCH 04/20] =?UTF-8?q?=E9=81=87=E5=88=B0=E4=BA=86tensor?=
+ =?UTF-8?q?=E5=BD=A2=E7=8A=B6=E9=97=AE=E9=A2=98=20from=20dp=5Factor?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/config/dancegrpo_trainer.yaml | 2 +-
+ recipe/dancegrpo/run_dancegrpo.sh              | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index 4f2f1052..68db4e41 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -55,7 +55,7 @@ actor_rollout_ref:
+   flow_grpo:
+     enable: false
+     sde_window_size: 2
+-    sde_window_range: [0, ${actor_rollout_ref.sampling_steps}]
++    sde_window_range: [0, "${actor_rollout_ref.sampling_steps}"]
+     shuffle_timesteps: false
+   # if standard flow-grpo
+   # flow_grpo:
+diff --git a/recipe/dancegrpo/run_dancegrpo.sh b/recipe/dancegrpo/run_dancegrpo.sh
+index 9dc25cb1..0247735a 100644
+--- a/recipe/dancegrpo/run_dancegrpo.sh
++++ b/recipe/dancegrpo/run_dancegrpo.sh
+@@ -109,7 +109,7 @@ HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo \
+     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode} \
+     actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp_size} \
+     actor_rollout_ref.rollout.ulysses_sequence_parallel_size=1 \
+-    actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
++    actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
+     actor_rollout_ref.rollout.tensor_model_parallel_size=${gen_tp} \
+     actor_rollout_ref.rollout.enable_chunked_prefill=True \
+     actor_rollout_ref.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
+-- 
+2.50.1 (Apple Git-155)
+

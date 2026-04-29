@@ -1,0 +1,2952 @@
+From 34202ae05f0fa45c2dc37fdb2082bdb3aa7d8568 Mon Sep 17 00:00:00 2001
+From: Xuaner <wuxuaner@wuxuanerdeMacBook-Air-2.local>
+Date: Fri, 6 Feb 2026 09:51:13 +0800
+Subject: [PATCH 01/20] refactor and add gaurd-grpo / flow-grpo /
+ flow-grpo-fast
+
+---
+ .../dancegrpo/config/dancegrpo_trainer.yaml   |  13 +
+ recipe/dancegrpo/dancegrpo_fsdp_worker.py     | 135 +--
+ recipe/dancegrpo/dancegrpo_ray_trainer.py     | 516 +---------
+ recipe/dancegrpo/dp_actor.py                  | 507 +++++-----
+ recipe/dancegrpo/main_dancegrpo.py            | 202 ++--
+ verl/utils/dataset/dancegrpo_ray_trainer.py   | 930 ++++++++----------
+ verl/workers/rollout/diffusion_rollout.py     | 157 ++-
+ 7 files changed, 984 insertions(+), 1476 deletions(-)
+
+diff --git a/recipe/dancegrpo/config/dancegrpo_trainer.yaml b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+index ffc9b62b..9fc9609b 100644
+--- a/recipe/dancegrpo/config/dancegrpo_trainer.yaml
++++ b/recipe/dancegrpo/config/dancegrpo_trainer.yaml
+@@ -25,6 +25,13 @@ actor_rollout_ref:
+     adv_clip_max: 5.0
+     eta: 0.3
+     max_grad_norm: 1.0
++    grpo_guard:
++      enable: false
++      ratio_norm: true
++      grad_reweight: false
++      ratio_norm_eps: 1e-6
++      grad_reweight_eps: 1e-6
++      grad_reweight_alpha: 1.0
+   rollout:
+     ulysses_sequence_parallel_size: 1.0
+   video_fps: 25
+@@ -40,6 +47,12 @@ actor_rollout_ref:
+   timestep_fraction: 0.6
+   init_same_noise: True
+ 
++  flow_grpo:
++    enable: false
++    sde_window_size: 0
++    sde_window_range: [0, ${actor_rollout_ref.sampling_steps}]
++    shuffle_timesteps: true
++
+ 
+ reward_model:
+   enable: True
+diff --git a/recipe/dancegrpo/dancegrpo_fsdp_worker.py b/recipe/dancegrpo/dancegrpo_fsdp_worker.py
+index db564016..1cac003f 100644
+--- a/recipe/dancegrpo/dancegrpo_fsdp_worker.py
++++ b/recipe/dancegrpo/dancegrpo_fsdp_worker.py
+@@ -73,6 +73,31 @@ except ImportError:
+ logger = logging.getLogger(__file__)
+ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+ 
++def _zscore_tensor(values: torch.Tensor) -> torch.Tensor:
++    mean = values.mean()
++    std = values.std(unbiased=False)
++    return (values - mean) / (std + 1e-8)
++
++
++def _split_video_frames(data: DataProto, *, permute_to_tchw: bool) -> List[torch.Tensor]:
++    batch_size = data.batch.batch_size[0]
++    decoded = data.batch["video_frames"]
++    frames = [x.squeeze(0) for x in decoded.chunk(batch_size, dim=0)]
++    if permute_to_tchw:
++        frames = [x.permute(1, 0, 2, 3) for x in frames]
++    return frames
++
++
++def _split_captions(caption, batch_size: int) -> List[str]:
++    batch_caption = np.array_split(caption, batch_size)
++    return [str(x.squeeze(0)) for x in batch_caption]
++
++
++def _make_reward_batch(key: str, rewards: torch.Tensor, batch_size: int) -> DataProto:
++    batch = TensorDict({key: rewards}, batch_size=batch_size)
++    return DataProto(batch=batch)
++
++
+             
+ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
+     """
+@@ -150,12 +175,13 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
+             self.rollout, self.rollout_sharding_manager = self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
+ 
+         # fhd compile vae
+-        self.rollout.vae_module.model.decoder = torch.compile(
+-            self.rollout.vae_module.model.decoder, 
+-            mode="max-autotune-no-cudagraphs", 
+-            # fullgraph=True, 
+-            # dynamic=True if self.is_hip() else None
+-        )
++        if self._is_rollout and hasattr(self.rollout, "vae_module"):
++            self.rollout.vae_module.model.decoder = torch.compile(
++                self.rollout.vae_module.model.decoder, 
++                mode="max-autotune-no-cudagraphs", 
++                # fullgraph=True, 
++                # dynamic=True if self.is_hip() else None
++            )
+         
+         if self._is_ref:
+             local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
+@@ -532,8 +558,6 @@ class QwenRewardModelWorker(RewardModelWorker):
+             import numpy as np
+             # batch_paths = np.array_split(video_paths, datas.batch.batch_size[0])
+             batch_ids = np.array_split(video_ids, datas.batch.batch_size[0])
+-            # batch_paths = [list(x) for x in  batch_paths]
+-            video_ids = [list(x) for x in video_ids]
+             
+             all_rewards = []  
+             # 每个batch_path是一批video_paths的列表
+@@ -663,9 +687,7 @@ class DiffusionRewardModelWorker(RewardModelWorker):
+         decoded_images = decoded_image.chunk(data.batch.batch_size[0], dim=0)
+         decoded_images = [x.squeeze(0) for x in decoded_images]
+         caption=data.non_tensor_batch['caption']
+-        import numpy as np
+-        batch_caption = np.array_split(caption, data.batch.batch_size[0])
+-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
++        batch_caption = _split_captions(caption, data.batch.batch_size[0])
+         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
+         all_rewards = []  
+         self.reward_module.to(device=get_device_id())
+@@ -839,35 +861,14 @@ class AestheticRewardModelWorker(RewardModelWorker):
+             empty_bs = datas.batch.batch_size[0] // self.aes_dp
+             print(f"[RANK {self.rank}] AestheticWorker is inactive, returning zeros")
+             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
+-            batch = TensorDict(
+-                {
+-                    "aes_rewards": dummy_rewards,
+-                },
+-                batch_size = empty_bs
+-            )
+-            return DataProto(batch=batch)
++            return _make_reward_batch("aes_rewards", dummy_rewards, empty_bs)
+         
+         datas = _split_batch(datas, self.aes_dp, self.rank % self.aes_dp)
+         print(f"[RANK {self.rank}] AestheticWorker processing batch size: {datas.batch.batch_size[0]}")
+-        # (B, C, H, W)
+-        decoded_image = datas.batch['video_frames']
+-        # List of [(1, C, H, W),...,...]
+-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+-        # List of [(C, H, W),...,...]
+-        decoded_images = [x.squeeze(0) for x in decoded_images]
+-        
+-        # (B, C, Frame, H, W)
+-        decoded_image = datas.batch['video_frames']
+-        # List of [(1, C, Frame, H, W),...,...]
+-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+-        # List of [(C, Frame, H, W),...,...]
+-        decoded_images = [x.squeeze(0) for x in decoded_images]
+-        # List of [(Frame, C, H, W),...,...]
+-        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
++        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
+         caption = datas.non_tensor_batch['caption']       
+ 
+-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
++        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
+         
+         transform = clip_transform(224)
+@@ -891,10 +892,7 @@ class AestheticRewardModelWorker(RewardModelWorker):
+             
+         all_rewards = torch.cat(all_rewards, dim=0)
+         
+-        # Z-score标准化
+-        mean = all_rewards.mean()
+-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0        
++        all_rewards = _zscore_tensor(all_rewards)
+         
+         all_rewards = all_rewards.to(torch.device('cpu'))
+         batch = TensorDict(
+@@ -1011,38 +1009,16 @@ class RAFTRewardModelWorker(RewardModelWorker):
+             empty_bs = datas.batch.batch_size[0] // self.raft_dp
+             print(f"[RANK {self.rank}] RAFTWorker is inactive, returning zeros")
+             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
+-            batch = TensorDict(
+-                {
+-                    "raft_rewards": dummy_rewards,
+-                },
+-                batch_size = empty_bs
+-            )
+-            return DataProto(batch=batch)
++            return _make_reward_batch("raft_rewards", dummy_rewards, empty_bs)
+         datas = _split_batch(datas, self.raft_dp, self.rank % self.raft_dp)
+         print(f"[RANK {self.rank}] RAFTWorker processing batch size: {datas.batch.batch_size[0]}")
+-        # (B, C, H, W)
+-        decoded_image = datas.batch['video_frames']
+-        # List of [(1, C, H, W),...,...]
+-        batch_size = len(decoded_image)
+-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+-        # List of [(C, H, W),...,...]
+-        # decoded_images = [x.squeeze(0) for x in decoded_images]
+-
+-        # (B, C, Frame, H, W)
+-        decoded_image = datas.batch['video_frames']
+-        # List of [(1, C, Frame, H, W),...,...]
+-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+-        # List of [(C, Frame, H, W),...,...]
+-        decoded_images = [x.squeeze(0) for x in decoded_images]
+-        # List of [(Frame, C, H, W),...,...]
+-        decoded_images = [x.permute(1, 0, 2, 3) for x in decoded_images]
++        decoded_images = _split_video_frames(datas, permute_to_tchw=True)
+         
+         caption = datas.non_tensor_batch['caption']       
+-        
+-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
++
++        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
+-        
++
+         self.raft_model.to(get_device_id())
+         print(f"raft batch size: {len(batch_caption)}")
+         all_rewards = []
+@@ -1056,10 +1032,7 @@ class RAFTRewardModelWorker(RewardModelWorker):
+             all_rewards.append(torch.tensor(flow_score, device=get_device_id()).unsqueeze(0))
+             
+         all_rewards = torch.cat(all_rewards, dim=0)
+-        # Z-score标准化
+-        mean = all_rewards.mean()
+-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0   
++        all_rewards = _zscore_tensor(all_rewards)
+                 
+         all_rewards = all_rewards.to(torch.device('cpu'))
+         batch = TensorDict(
+@@ -1160,29 +1133,18 @@ class VideoclipRewardModelWorker(RewardModelWorker):
+             empty_bs = datas.batch.batch_size[0] // self.videoclip_dp
+             print(f"[RANK {self.rank}] VideoclipWorker is inactive, returning zeros")
+             dummy_rewards = torch.zeros(empty_bs, device=torch.device('cpu'))
+-            batch = TensorDict(
+-                {
+-                    "videoclip_rewards": dummy_rewards,
+-                },
+-                batch_size = empty_bs
+-            )
+-            return DataProto(batch=batch)
++            return _make_reward_batch("videoclip_rewards", dummy_rewards, empty_bs)
+         
+         datas = _split_batch(datas, self.videoclip_dp, self.rank % self.videoclip_dp)
+         print(f"[RANK {self.rank}] VideoclipWorker processing batch size: {datas.batch.batch_size[0]}")
+         # (B, C, Frame, H, W)
+-        decoded_image = datas.batch['video_frames']
+-        # List of [(1, C, Frame, H, W),...,...]
+         if datas.batch.batch_size[0]==0:
+             print(torch.get.dis)
+-        decoded_images = decoded_image.chunk(datas.batch.batch_size[0], dim=0)
+-        # List of [(C, Frame, H, W),...,...]
+-        decoded_images = [x.squeeze(0) for x in decoded_images]
++        decoded_images = _split_video_frames(datas, permute_to_tchw=False)
+ 
+         caption = datas.non_tensor_batch['caption']       
+ 
+-        batch_caption = np.array_split(caption, datas.batch.batch_size[0])
+-        batch_caption = [str(x.squeeze(0)) for x in batch_caption]
++        batch_caption = _split_captions(caption, datas.batch.batch_size[0])
+         batch_indices = torch.chunk(torch.arange(len(batch_caption)), len(batch_caption))
+ 
+         from verl.models.VideoCLIP_XL.utils.text_encoder import text_encoder
+@@ -1207,10 +1169,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
+         
+         all_rewards = torch.cat(all_rewards, dim=0)
+         
+-        # Z-score标准化
+-        mean = all_rewards.mean()
+-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
+-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0           
++        all_rewards = _zscore_tensor(all_rewards)
+         
+         all_rewards = all_rewards.to(torch.device('cpu'))
+         batch = TensorDict(
+diff --git a/recipe/dancegrpo/dancegrpo_ray_trainer.py b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+index 79e7e720..41aff9e9 100644
+--- a/recipe/dancegrpo/dancegrpo_ray_trainer.py
++++ b/recipe/dancegrpo/dancegrpo_ray_trainer.py
+@@ -1,508 +1,8 @@
+-import uuid
+-from collections import defaultdict
+-from copy import deepcopy
+-from pprint import pprint
+-
+-import numpy as np
+-import torch
+-import time
+-
+-# from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
+-from omegaconf import OmegaConf, open_dict
+-from tqdm import tqdm
+-
+-from verl import DataProto
+-from verl.single_controller.ray.base import create_colocated_worker_cls
+-from verl.trainer.ppo.core_algos import agg_loss
+-from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_response_mask
+-from verl.utils.debug import marked_timer
+-from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
+-
+-
+-def fprint(*args, **kwargs):
+-    text = " ".join(str(a) for a in args)
+-    with open("output.log", "a", encoding="utf-8") as f:
+-        f.write(text + "\n")
+-
+-# 这里计算优势函数时，直接使用组内标准化的奖励作为优势
+-def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
+-    datas=data.pop(
+-        batch_keys=['rewards'],
+-    )
+-    advantages=torch.zeros_like(datas.batch['rewards'])
+-    #TODO when batchsize not equal to 1
+-    group_mean = datas.batch['rewards'].mean()
+-    group_std = datas.batch['rewards'].std() + 1e-8
+-    advantages = (datas.batch['rewards'] - group_mean) / group_std
+-    data.batch["advantages"] = advantages
+-    return data
+-
+-from typing import List
+-import torch
+-import numpy as np
+-
+-@staticmethod
+-def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") -> DataProto:
+-    """
+-    拼接多个 DataProto。
+-    对于每个数据键(key)，只拼接那些自身包含非零元素的 tensor/array。
+-    完全由零组成的 tensor/array 会被忽略。
+-    
+-    Args:
+-        data_list (List[DataProto]): 多个 DataProto
+-        dummy_key (str): (此参数在当前逻辑中未使用)
+-    
+-    Returns:
+-        DataProto: 拼接后的 DataProto
+-    """
+-    if not data_list:
+-        return DataProto()
+-    
+-    # 1. 收集所有唯一的 key
+-    all_batch_keys = set() # 初始化空的集合 set会自动去重 但是List不会
+-    all_non_tensor_keys = set() # 返回的dataproto包当中的key里面可能会有重复的
+-    for dp in data_list:
+-        if dp.batch is not None:
+-            all_batch_keys.update(dp.batch.keys())
+-        if dp.non_tensor_batch is not None:
+-            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
+-
+-    # 2. 处理 batch (PyTorch tensors)
+-    batch_dict = {}
+-    for key in all_batch_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）tensors
+-        tensors_to_concat = []
+-        for dp in data_list:
+-            if dp.batch is not None and key in dp.batch:
+-                tensor = dp.batch[key]
+-                # 关键改动：检查这一个 tensor 是否包含非零元素
+-                if torch.any(tensor != 0):# any任意一个元素不为0返回true
+-                    # 如果包含，则将其加入待拼接列表
+-                    tensors_to_concat.append(tensor)
+-        
+-        # 如果列表不为空（即至少有一个 tensor 是有意义的），则执行拼接
+-        if tensors_to_concat:
+-            batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
+-            
+-    # 3. 处理 non_tensor_batch (NumPy arrays)
+-    non_tensor_dict = {}
+-    for key in all_non_tensor_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）arrays
+-        arrays_to_concat = []
+-        for dp in data_list:
+-            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
+-                arr = dp.non_tensor_batch[key]
+-                # 关键改动：检查这一个 array 是否包含非零元素
+-                if np.any(arr != 0):
+-                    # 如果包含，则将其加入待拼接列表
+-                    arrays_to_concat.append(arr)
+-        
+-        # 如果列表不为空，则执行拼接
+-        if arrays_to_concat:
+-            non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
+-            
+-    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict) # 转换成标准的DataProto格式
+-
+-class RayDanceGRPOTrainer(RayPPOTrainer):
+-    """
+-    Note that this trainer runs on the driver process on a single CPU/GPU node.
+-    """
+-    #TODO dataset!!!! DataProto
+-    def fit(self):
+-        """
+-        The training loop of PPO.
+-        The driver process only need to call the compute functions of the worker group through RPC
+-        to construct the PPO dataflow.
+-        The light-weight advantage computation is done on the driver process.
+-        """
+-        from omegaconf import OmegaConf
+-
+-        from verl.utils.tracking import Tracking
+-
+-        logger = Tracking(
+-            project_name=self.config.trainer.project_name,
+-            experiment_name=self.config.trainer.experiment_name,
+-            default_backend=self.config.trainer.logger,
+-            config=OmegaConf.to_container(self.config, resolve=True),
+-        )
+-
+-        self.global_steps = 0
+-
+-        # load checkpoint before doing anything
+-        self._load_checkpoint()
+-
+-        # perform validation before training
+-        # currently, we only support validation using the reward_function.
+-        # if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
+-        #     val_metrics = self._validate()
+-        #     assert val_metrics, f"{val_metrics=}"
+-        #     pprint(f"Initial validation metrics: {val_metrics}")
+-        #     logger.log(data=val_metrics, step=self.global_steps)
+-        #     if self.config.trainer.get("val_only", False):
+-        #         return
+-
+-        # add tqdm
+-        progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
+-
+-        # we start from step 1
+-        self.global_steps += 1
+-        last_val_metrics = None
+-
+-        timing_raw = defaultdict(float)
+-        batch = None
+-        num_prompt_in_batch = 0
+-        num_gen_batches = 0
+-        
+-        if self.use_rm and self.config.reward_model.type=="joint":
+-            import threading
+-            reward_results = {}
+-            thread_inputs = {}
+-            ready_events = {}
+-            done_events = {}
+-
+-            def thread_loop(name, worker):
+-                while True:
+-                    ready_events[name].wait()      # 等待主线程喂数据
+-                    ready_events[name].clear()
+-                    # 调用现有 worker 的 compute_rm_score
+-                    reward_results[name] = worker.compute_rm_score(thread_inputs[name])
+-                    done_events[name].set()        # 通知主线程完成
+-
+-            # 四个线程
+-            workers = {
+-                "aes": self.aes_rm_wg,
+-                "raft": self.raft_rm_wg,
+-                "videoclip": self.videoclip_rm_wg,
+-                "videophy": self.videophy_rm_wg,
+-            }
+-
+-            threads = []
+-            for name, worker in workers.items():
+-                reward_results[name] = None
+-                thread_inputs[name] = None
+-                ready_events[name] = threading.Event()
+-                done_events[name] = threading.Event()
+-                t = threading.Thread(target=thread_loop, args=(name, worker), daemon=True)
+-                t.start()
+-                threads.append(t)       
+-        
+-        def _debug_proto_batch(name, proto):
+-            if proto is None:
+-                print(f"[debug] {name} is None")
+-                return
+-            batch = getattr(proto, "batch", None)
+-            if batch is None:
+-                non_tensor = getattr(proto, "non_tensor_batch", None) or {}
+-                print(f"[debug] {name}.batch is None; non_tensor_keys={list(non_tensor.keys())}")
+-                return
+-            print(f"[debug] {name}.batch_size={batch.batch_size}")
+-            
+-        for epoch in range(self.config.trainer.total_epochs):
+-            # ======== 1. 数据 ========
+-            for batch_dict in self.train_dataloader: # self.train_dataloader处理数据
+-
+-                new_batch: DataProto = DataProto.from_single_dict(batch_dict)
+-                num_gen_batches += 1
+-                
+-                # pop those keys for generation TODO!!!
+-                # trainer的类型是diffusion
+-                if self.config.trainer.type=="diffusion":
+-                    # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=["context","context_orig_lengths","null_context"],
+-                        non_tensor_batch_keys=["caption"],
+-                    )
+-                    
+-                    # 形状与配置
+-                    B = new_batch.batch.batch_size[0]
+-                    S = self.config.actor_rollout_ref.sampling_steps # sample_steps在这里
+-                    num_frames = self.config.actor_rollout_ref.num_frames
+-                    size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
+-                    vae_stride = [4, 8, 8] # VAE 
+-                    latent_dtype = torch.float32
+-                    latent_shape = (
+-                        16, # 这里的16指的是什么
+-                        (num_frames - 1) // vae_stride[0] + 1,
+-                        size[1] // vae_stride[1],
+-                        size[0] // vae_stride[2],
+-                    )
+-
+-                    # 预分配批量张量
+-                    input_latents = torch.empty((B, *latent_shape), dtype=latent_dtype)
+-                    sigma_schedule_B = torch.empty((B, S+1), dtype=torch.float32)
+-
+-                    def sd3_time_shift(shift, x):
+-                        return (shift * x) / (1 + (shift - 1) * x)
+-
+-                    for i in range(new_batch.batch.batch_size[0]):  # 注意：这里用 gen_batch，不是 new_batch
+-                        sigma_schedule = torch.linspace(1, 0, S + 1)
+-                        
+-                        sigma_schedule = sd3_time_shift(self.config.actor_rollout_ref.shift, sigma_schedule)   # [S+1]
+-                        
+-                        sigma_schedule_B[i] = sigma_schedule
+-
+-                        input_latents[i] = torch.randn(latent_shape, dtype=latent_dtype)
+-
+-                    gen_batch.batch["input_latents"]  = input_latents
+-                    gen_batch.batch["sigma_schedule"] = sigma_schedule_B
+-                    
+-                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n) # 采样的次数 重复n
+-
+-                elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+-                    )
+-                else:
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+-                        non_tensor_batch_keys=["raw_prompt_ids"],
+-                    )
+-
+-                is_last_step = self.global_steps >= self.total_training_steps
+-
+-                with marked_timer("step", timing_raw):
+-                    # generate a batch
+-                    with marked_timer("gen", timing_raw):
+-                        # gen_batch_output的数据类型是DataProto
+-                        # 具体见DiffusionActorRolloutWorker.generate_sequences方法
+-                        # 得到的gen_batch_output是聚合所有gpu的结果
+-                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch) # 这里生成视频
+-
+-                    # 目前用的是 GAE(组间相对优势)，TODO:修改reward计算方法
+-                    if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
+-                        with marked_timer("gen_max", timing_raw):
+-                            gen_baseline_batch = deepcopy(gen_batch)
+-                            gen_baseline_batch.meta_info["do_sample"] = False
+-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
+-
+-                            new_batch = new_batch.union(gen_baseline_output)
+-                            reward_baseline_tensor = self.reward_fn(new_batch)
+-                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
+-
+-                            new_batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
+-
+-                            new_batch.batch["reward_baselines"] = reward_baseline_tensor
+-
+-                            del gen_baseline_batch, gen_baseline_output
+-
+-                    new_batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object)
+-                    
+-                    # validate
+-                    if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
+-                        with marked_timer("validation", timing_raw):
+-                            from verl.utils.checkpoint.checkpoint_manager import save_video_and_prompt
+-                            video_frames = gen_batch_output.batch["video_frames"] 
+-                            for i in range(video_frames.shape[0]):
+-                                save_video_and_prompt(video_frames[i] , 0, i)
+-                    # repeat to align with repeated responses in rollout
+-                    # new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+-                    # new_batch = new_batch.union(gen_batch_output)
+-
+-                    with marked_timer("reward", timing_raw):
+-                        # compute scores. Support both model and function-based.
+-                        # We first compute the scores using reward model. Then, we call reward_fn to combine
+-                        # the results from reward model and rule-based results.
+-                        if self.use_rm:
+-                            print("begin to compute reward")
+-                            with torch.amp.autocast('cuda'):
+-
+-                                if self.config.reward_model.type == "joint":
+-                                    # ======================
+-                                    # Joint Reward Models
+-                                    # ======================
+-                                    import time
+-                                    start_time = time.time()
+-
+-                                    # 启动所有 RM 线程
+-                                    for name in workers:
+-                                        thread_inputs[name] = gen_batch_output
+-                                        done_events[name].clear()
+-                                        ready_events[name].set()
+-
+-                                    # 等待完成
+-                                    for name in workers:
+-                                        done_events[name].wait()
+-
+-                                    # 收集并 merge 结果
+-                                    aes_tensor = merge_worker_results(reward_results["aes"])
+-                                    raft_tensor = merge_worker_results(reward_results["raft"])
+-                                    videoclip_tensor = merge_worker_results(reward_results["videoclip"])
+-                                    videophy_tensor = merge_worker_results(reward_results["videophy"])
+-
+-                                    # 调试输出（可选）
+-                                    # for idx, data in enumerate(videophy_tensor):
+-                                    #     print(f"idx {idx}: {data.print_data_proto(f'videophy_data_{idx}')}")
+-
+-                                    # 合并所有 reward 到 batch
+-                                    batch_with_rewards = (
+-                                        gen_batch_output
+-                                        .union(aes_tensor)
+-                                        .union(raft_tensor)
+-                                        .union(videoclip_tensor)
+-                                        .union(videophy_tensor)
+-                                    )
+-
+-                                    # 计算平均 reward（可配置权重）
+-                                    avg_reward = (
+-                                        batch_with_rewards.batch["aes_rewards"]
+-                                        + batch_with_rewards.batch["raft_rewards"]
+-                                        + batch_with_rewards.batch["videoclip_rewards"]
+-                                        + batch_with_rewards.batch["videophy_rewards"]
+-                                    )
+-
+-                                    # 构造最终 reward DataProto（带平均 reward）
+-                                    from tensordict import TensorDict
+-                                    avg_reward_td = TensorDict({"rewards": avg_reward}, batch_size=avg_reward.shape[0])
+-                                    avg_reward_proto = DataProto(
+-                                        batch=avg_reward_td,
+-                                        non_tensor_batch=aes_tensor.non_tensor_batch  # 假设一致
+-                                    )
+-                                    final_batch = batch_with_rewards.union(avg_reward_proto)
+-
+-                                    # 更新指标
+-                                    metrics["train/rewards"] = avg_reward.mean()
+-                                    metrics["train/log_probs"] = final_batch.batch["log_probs"].mean()
+-
+-                                    # 替换 gen_batch_output（用于后续训练）
+-                                    gen_batch_output = final_batch
+-
+-                                    print(f"reward time: {time.time() - start_time:.2f}s")
+-
+-                                elif self.config.reward_model.type in ("qwen", "single"):
+-                                    # ======================
+-                                    # Single / Qwen Reward Model
+-                                    # ======================
+-                                    # 调用统一的 rm_wg（仅 single/qwen 有）
+-                                    if self.config.reward_model.type == "qwen":
+-                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
+-                                            batch_keys=['null_context'],
+-                                            non_tensor_batch_keys=["caption", "video_ids"]
+-                                        )
+-                                        reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+-                                        reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
+-                                        gen_batch_output.pop(
+-                                            non_tensor_batch_keys=["caption", "video_ids"]
+-                                        )
+-                                        # 清理原 batch（移除大 tensor 如 video_frames）
+-                                    
+-                                    else:  # "single"
+-                                        reward_input = gen_batch_output.select( # 选取之后 原对象的这些属性还在gen_batch_output里面
+-                                            batch_keys=['video_frames'],
+-                                            non_tensor_batch_keys=["caption"]
+-                                        )
+-                                        reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+-                                        reward_input = gen_batch_output
+-                                    
+-                                    _debug_proto_batch("gen_batch_output", gen_batch_output)
+-                                    _debug_proto_batch("reward_tensor", reward_tensor)
+-                                    gen_batch_output = gen_batch_output.union(reward_tensor)
+-                                    # gen_batch_output = gen_batch_output.pop(
+-                                    #     non_tensor_batch_keys=["caption", "video_ids"]
+-                                    # )
+-                                    # 更新指标
+-                                    metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
+-                                    metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
+-
+-                                else:
+-                                    raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
+-                
+-                        else:
+-                            reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
+-                            gen_batch_output = gen_batch_output.union(reward_tensor)
+-                            gen_batch_output.pop(batch_keys=['video_frames'])
+-                    
+-                    # === Updating ===
+-                    # batch.batch["response_mask"] = compute_response_mask(batch)
+-
+-                    # Balance the number of valid tokens across DP ranks.
+-                    # NOTE: This usually changes the order of data in the `batch`,
+-                    # which won't affect the advantage calculation (since it's based on uid),
+-                    # but might affect the loss calculation (due to the change of mini-batching).
+-                    # TODO: Decouple the DP balancing and mini-batching.
+-
+-                    
+-                    # if self.config.trainer.balance_batch:
+-                    #     self._balance_batch(new_batch, metrics=metrics)
+-
+-                    # compute global_valid tokens
+-                    # batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+-
+-                    # if self.use_reference_policy:
+-                    #     # compute reference log_prob
+-                    #     with marked_timer("ref", timing_raw):
+-                    #         ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
+-                    #         batch = batch.union(ref_log_prob)
+-
+-                    # compute values
+-                    # if self.use_critic:
+-                    #     with marked_timer("values", timing_raw):
+-                    #         values = self.critic_wg.compute_values(batch)
+-                    #         batch = batch.union(values)
+-
+-                    with marked_timer("adv", timing_raw):
+-                        # compute advantages, executed on the driver process
+-                        norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
+-                        gen_batch_output = compute_advantage(
+-                            gen_batch_output,
+-                            adv_estimator=self.config.algorithm.adv_estimator,
+-                            gamma=self.config.algorithm.gamma,
+-                            lam=self.config.algorithm.lam,
+-                            num_repeat=self.config.actor_rollout_ref.rollout.n,
+-                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+-                        )
+-                        metrics["train/advantage"] = gen_batch_output.batch['advantages'].mean()
+-
+-                    # # update critic
+-                    # if self.use_critic:
+-                    #     with marked_timer("update_critic", timing_raw):
+-                    #         critic_output = self.critic_wg.update_critic(batch)
+-                    #     critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
+-                    #     metrics.update(critic_output_metrics)
+-
+-                    # implement critic warmup
+-                    if self.config.trainer.critic_warmup <= self.global_steps:
+-                        # update actor
+-                        with marked_timer("update_actor", timing_raw):
+-                            gen_batch_output = self.actor_rollout_wg.update_actor(gen_batch_output)
+-                        actor_output_metrics = reduce_metrics(gen_batch_output.meta_info["metrics"])
+-                        metrics.update(actor_output_metrics)
+-
+-                    # validate
+-                    # if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
+-                    #     with marked_timer("testing", timing_raw):
+-                    #         val_metrics: dict = self._validate()
+-                    #         if is_last_step:
+-                    #             last_val_metrics = val_metrics
+-                    #     metrics.update(val_metrics)
+-
+-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+-                        with marked_timer("save_checkpoint", timing_raw):
+-                            self._save_checkpoint()
+-
+-                # collect metrics
+-                # metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+-                metrics.update(compute_timing_metrics(batch=new_batch, timing_raw=timing_raw))
+-                print("metrics",metrics)
+-                print("="*100)
+-                # TODO: implement actual tflpo and theoretical tflpo
+-                n_gpus = self.resource_pool_manager.get_n_gpus()
+-                # metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+-                # timing_raw = defaultdict(float)  # clear timing
+-
+-                # metrics["train/num_gen_batches"] = num_gen_batches
+-                batch = None
+-                num_prompt_in_batch = 0
+-                num_gen_batches = 0
+-
+-                logger.log(data=metrics, step=self.global_steps)
+-                timing_raw = defaultdict(float)
+-
+-                if is_last_step:
+-                    pprint(f"Final validation metrics: {last_val_metrics}")
+-                    progress_bar.close()
+-                    return
+-
+-                progress_bar.update(1)
+-                self.global_steps += 1
+\ No newline at end of file
++# Thin wrapper to avoid duplicate trainer implementations.
++from verl.utils.dataset.dancegrpo_ray_trainer import (
++    RayDanceGRPOTrainer,
++    compute_advantage,
++    merge_worker_results,
++)
++
++__all__ = ["RayDanceGRPOTrainer", "compute_advantage", "merge_worker_results"]
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index 49a209b3..92e1860f 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -1,47 +1,21 @@
+-import itertools
+ import logging
+ import math
+ import os
+-from collections import defaultdict
+ 
+ import numpy as np
+ import torch
+ 
+-from recipe.spin.core_algos import compute_online_dpo_loss, get_batch_logps
+ from verl import DataProto
+ from verl.utils.debug import GPUMemoryLogger
+-from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
+-from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+-from verl.utils.ulysses import gather_outpus_and_unpad
+-from verl.workers.actor import DataParallelPPOActor
++from verl.utils.device import get_device_id
+ from verl.utils.py_functional import append_to_dict
++from verl.workers.actor import DataParallelPPOActor
+ 
+-# from tensorwatch import TensorWatch,watch_module_forward_backward
+ __all__ = ["DiffusionDataParallelPPOActor"]
+ 
+ logger = logging.getLogger(__file__)
+ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+ 
+-def fprint(*args, **kwargs):
+-    text = " ".join(str(a) for a in args)
+-    with open("output.log", "a", encoding="utf-8") as f:
+-        f.write(text + "\n")
+-
+-# hook 函数：保存输入数据和模块名
+-def save_input_hook(name):
+-    def hook(module, input, output):
+-        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+-        file_name = f"output/{rank}_{name}_input.pt"
+-        for param_name, param in module.named_parameters(recurse=False):
+-            print(f"  Param: {name}, Shape: {param.shape},{param.float().norm().item()}")
+-
+-        # print(f"[HOOK] Saving {name} input to {file_name}")
+-        torch.save({
+-            "name": name,
+-            "input": input,
+-            "output": output
+-        }, file_name)
+-    return hook
+ 
+ def _normalize_wan22_timestep(t, sigma):
+     if sigma is not None:
+@@ -58,6 +32,7 @@ def _normalize_wan22_timestep(t, sigma):
+         t_val = t_val / 1000.0
+     return t_val
+ 
++
+ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
+     if isinstance(guide_scale, (list, tuple)) and len(guide_scale) >= 2:
+         t_val = _normalize_wan22_timestep(t, sigma)
+@@ -66,231 +41,236 @@ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
+         return guide_scale[1] if t_val >= boundary else guide_scale[0]
+     return guide_scale
+ 
+-def register_all_hooks(model):
+-    for name, module in model.named_modules():
+-        print(f"[REGISTER] Hooking module: {name}")
+-        module.register_forward_hook(save_input_hook(name))
+ 
+ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
++    @staticmethod
++    def _build_perms(timesteps: torch.Tensor, shuffle: bool = True) -> torch.Tensor:
++        seq_len = len(timesteps[0])
++        if shuffle:
++            return torch.stack([torch.randperm(seq_len) for _ in range(timesteps.shape[0])])
++        return torch.stack([torch.arange(seq_len) for _ in range(timesteps.shape[0])])
++
++    @staticmethod
++    def _broadcast_perms(perms: torch.Tensor) -> None:
++        from verl.utils.ulysses import (
++            get_ulysses_sequence_parallel_group,
++            get_ulysses_sequence_parallel_world_size,
++        )
++
++        if get_ulysses_sequence_parallel_world_size() > 1:
++            sp_size = get_ulysses_sequence_parallel_world_size()
++            src_rank = (torch.distributed.get_rank() // sp_size) * sp_size
++            torch.distributed.broadcast(perms, src=src_rank, group=get_ulysses_sequence_parallel_group())
++            torch.distributed.barrier()
++
++    @staticmethod
++    def _reorder_batch_by_perms(data: DataProto, perms: torch.Tensor, keys) -> None:
++        batch_idx = torch.arange(data.batch.batch_size[0])[:, None]
++        for key in keys:
++            data.batch[key] = data.batch[key][batch_idx, perms]
++
++    @staticmethod
++    def _prepare_contexts(td, device):
++        ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
++        ctxs_cpu = [td["contexts"][i][:int(ctx_lens[i])] for i in range(len(ctx_lens))]
++        nctx_cpu = [td["null_context"][i] for i in range(len(ctx_lens))]
++        ctxs = [c.to(device) for c in ctxs_cpu]
++        nctxs = [c.to(device) for c in nctx_cpu]
++        return ctxs, nctxs
++
++    @staticmethod
++    def _calc_seq_len(latents: torch.Tensor) -> int:
++        latent_shape = latents.shape
++        return math.ceil((latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2])
+ 
+     @GPUMemoryLogger(role="dp actor", logger=logger)
+     def update_policy(self, data: DataProto):
+-        #这里显存就开始增加了
+-        # free, total = torch.cuda.mem_get_info()
+-        # print("begin forward")
+-        # print(f"剩余显存: {free / (1024 ** 3):.2f} GB")
+-        # print(f"总显存:   {total / (1024 ** 3):.2f} GB")
+-        # print(f"已用显存: {(total - free) / (1024 ** 3):.2f} GB")
+-        # data = data.to(get_device_id())
+         # make sure we are in training mode
+-        # print(data.batch['timesteps'].device)
+-
+         self.actor_module.train()
+- 
+-        # torch.cuda.memory._record_memory_history(max_entries=100000)
+-        
+-        perms = torch.stack([
+-            torch.randperm(len(data.batch["timesteps"][0])) 
+-            for _ in range(data.batch.batch_size[0])
+-        ])
+-
+-        from verl.utils.ulysses import get_ulysses_sequence_parallel_group, get_ulysses_sequence_parallel_world_size
+-        if get_ulysses_sequence_parallel_world_size() > 1:
+-            src_rank = (torch.distributed.get_rank() // get_ulysses_sequence_parallel_world_size()) * get_ulysses_sequence_parallel_world_size()
+-            torch.distributed.broadcast(perms, src=src_rank,group=get_ulysses_sequence_parallel_group())
+-            torch.distributed.barrier()
+ 
+-        # exit(0)
+-        for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+-            data.batch[key] = data.batch[key][
+-                torch.arange(data.batch.batch_size[0])[:, None],
+-                perms,
+-            ]
+-            
+-        # B = data.batch.batch_size[0]  # = 12
+-        # # 定义你想要的输出顺序：[1,2,3,1,2,3,1,2,3,1,2,3] 对应原始索引
+-        # # 原始数据： [1,1,1,1,  2,2,2,2,  3,3,3,3]
+-        # # 索引位置：[0,1,2,3,  4,5,6,7,  8,9,10,11]
+-        # # 目标顺序：取第0个1, 第0个2, 第0个3 → 然后第1个1,2,3 → ...
+-        # # 所以目标索引是：[0,4,8, 1,5,9, 2,6,10, 3,7,11]
+-
+-        # # 自动生成这个 permutation
+-        # K = 3  # 有3种不同的值
+-        # T = 8  # 每个值重复4次
+-        # assert B == K * T
+-
+-        # # 构造 permutation: [0,4,8,1,5,9,2,6,10,3,7,11]
+-        # perm = torch.tensor([i * T + j for j in range(T) for i in range(K)])  # 注意：i 是组号，j 是组内位置
+-
+-        # # 应用到所有 key
+-        # for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+-        #     if key in data.batch:
+-        #         data.batch[key] = data.batch[key][perm]  # 直接按 batch 维度重排
+-
+-        # print(data.batch["timesteps"].shape,type(data.batch["timesteps"]),data.batch["timesteps"][0].shape,type(data.batch["timesteps"][0]),len(data.batch["timesteps"][0].shape[1]))
++        # GRPO-Guard options (Flow-GRPO RatioNorm)
++        guard_cfg = self.config.get("grpo_guard", {})
++        guard_enable = guard_cfg.get("enable", False)
++        ratio_norm = guard_cfg.get("ratio_norm", guard_enable)
++        ratio_norm_eps = guard_cfg.get("ratio_norm_eps", 1e-6)
++
++        flow_cfg = self.config.get("flow_grpo", {})
++        shuffle_timesteps = flow_cfg.get("shuffle_timesteps", True)
++        if "timestep_indices" in data.batch and shuffle_timesteps:
++            shuffle_timesteps = False
++
++        perms = self._build_perms(data.batch["timesteps"], shuffle=shuffle_timesteps)
++        self._broadcast_perms(perms)
++
++        permute_keys = ["timesteps", "latents", "next_latents", "log_probs"]
++        if ratio_norm:
++            permute_keys.append("prev_sample_mean")
++        if "timestep_indices" in data.batch:
++            permute_keys.append("timestep_indices")
++        self._reorder_batch_by_perms(data, perms, permute_keys)
++
+         train_timesteps = int(len(data.batch["timesteps"][0]) * self.config.timestep_fraction)
+         grad_norm = None
+-        
+-        # num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
+ 
+-        select_keys=["timesteps", "latents", "next_latents", "log_probs","contexts","sigma_schedule","advantages","context_orig_lengths","null_context"]
++        select_keys = [
++            "timesteps",
++            "latents",
++            "next_latents",
++            "log_probs",
++            "contexts",
++            "sigma_schedule",
++            "advantages",
++            "context_orig_lengths",
++            "null_context",
++        ]
++        if ratio_norm:
++            select_keys.append("prev_sample_mean")
++        if "timestep_indices" in data.batch:
++            select_keys.append("timestep_indices")
+         non_tensor_select_keys = ["caption"]
+ 
+-        # Split to make minibatch iterator for updating the actor
+-        # See PPO paper for details. https://arxiv.org/abs/1707.06347
+-        
+-        # from tensordict import TensorDict
+-
+-        # batch = TensorDict()
+-        # for k, v in data.batch.items():
+-        #     if isinstance(v, torch.Tensor):
+-        #         batch[k] = v.unsqueeze(1)  # 添加一维，保持 [B, 1, ...] 结构
+-        # batch.batch_size=data.batch.batch_size
+-
+         self.gradient_accumulation = (
+-                self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
+-            )
+-        
++            self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
++        )
++
+         print("gradient_accumulation", self.gradient_accumulation)
+-        print("="*100)
++        print("=" * 100)
+ 
+-        # data=data.to("cpu")
+         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
+-        
+-        device = torch.device(f"cuda:{get_device_id()}")
+ 
++        device = torch.device(f"cuda:{get_device_id()}")
+         move_keys = ["latents", "next_latents", "timesteps", "log_probs", "advantages", "sigma_schedule"]
+-        perms=perms.to(device)
+-        # log_file = f"/gemini/space/wuxuaner/Dancegrpo/recipe/dancegrpo/log/rank{get_device_id()}"
++        if ratio_norm:
++            move_keys.append("prev_sample_mean")
++        if "timestep_indices" in data.batch:
++            move_keys.append("timestep_indices")
++        perms = perms.to(device)
++
+         metrics = {}
+-        # os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+-        for batch_idx, data in enumerate(dataloader):
+-            td = data.batch
+-            ctx_lens = td["context_orig_lengths"].tolist() if torch.is_tensor(td["context_orig_lengths"]) else td["context_orig_lengths"]
+-            # 裁剪后的 CPU 列表（短生命周期）
+-            ctxs_cpu  = [td["contexts"][i][:int(ctx_lens[i])]   for i in range(len(data))]
+-            nctx_cpu  = [td["null_context"][i]                  for i in range(len(data))]
+-            
+-            td = data.pop(batch_keys=move_keys).to(device)
+-            # for k in move_keys:
+-                # print(k,device)
+-                # td[k] = td[k].to(device)
+-                # print("after",k,td[k].device)
+-                
+-            ctxs  = [c.to(device) for c in ctxs_cpu]
+-            nctxs = [c.to(device) for c in nctx_cpu]
+-            del ctxs_cpu, nctx_cpu
+-            # mini_batch = data
+-            # # split batch into micro_batches
+-            # micro_batches = mini_batch.chunk(self.config.ppo_micro_batch_size_per_gpu)
++        for batch_idx, mini_batch in enumerate(dataloader):
++            td = mini_batch.batch
++            ctxs, nctxs = self._prepare_contexts(td, device)
++            batch_on_device = mini_batch.pop(batch_keys=move_keys).to(device)
++
+             self.actor_optimizer.zero_grad()
+-            # batch_contexts = [data.batch["contexts"][i] for i in range(len(data))]
+-            # batch_null_contexts = [data.batch["null_context"][i] for i in range(len(data))]
+-            # for i in range(len(data)):
+-            #     orig_lengths =int(data.batch['context_orig_lengths'][i])
+-            #     assert batch_contexts[i].shape[0] >= orig_lengths, \
+-            #         f"Context length mismatch: expected at least {orig_lengths}, but got {data.batch['contexts'][i].shape[0]}. Caption: {data.non_tensor_batch['caption']}"
+-            #     batch_contexts[i] = batch_contexts[i][:orig_lengths]
+-                
++
+             for step_idx in range(train_timesteps):
+                 clip_range = self.config.clip_range
+                 adv_clip_max = self.config.adv_clip_max
+-                latent_t  = td.batch["latents"][:, step_idx]
+-                nlatent_t = td.batch["next_latents"][:, step_idx]
+-                t_t       = td.batch["timesteps"][:, step_idx]
+-                sigma_0   = td.batch["sigma_schedule"][0]  # 若每样本不同 schedule，这里改成按样本取
+-        
+-                latent_shape = td.batch["latents"][:, step_idx].shape
+-                seq_len = math.ceil(
+-                    (latent_shape[3] * latent_shape[4]) / (2 * 2) * latent_shape[2]
+-                )
+-                
+-                new_log_probs = self.grpo_wan_one_step(
+-                    latent_t,
+-                    nlatent_t,
+-                    ctxs, 
+-                    nctxs,
+-                    seq_len,
+-                    self.actor_module,
+-                    t_t,
+-                    perms[batch_idx][step_idx],
+-                    sigma_0, 
+-                )
+-                
++
++                latent_t = batch_on_device.batch["latents"][:, step_idx]
++                nlatent_t = batch_on_device.batch["next_latents"][:, step_idx]
++                t_t = batch_on_device.batch["timesteps"][:, step_idx]
++                sigma_0 = batch_on_device.batch["sigma_schedule"][0]
++
++                seq_len = self._calc_seq_len(latent_t)
++
++                if "timestep_indices" in batch_on_device.batch:
++                    step_indices = batch_on_device.batch["timestep_indices"][0, step_idx]
++                else:
++                    step_indices = perms[batch_idx][step_idx]
++
++                if ratio_norm:
++                    (
++                        new_log_probs,
++                        prev_sample_mean,
++                        std_dev_t,
++                        sqrt_dt,
++                    ) = self.grpo_wan_one_step(
++                        latent_t,
++                        nlatent_t,
++                        ctxs,
++                        nctxs,
++                        seq_len,
++                        self.actor_module,
++                        t_t,
++                        step_indices,
++                        sigma_0,
++                        return_stats=True,
++                    )
++                else:
++                    new_log_probs = self.grpo_wan_one_step(
++                        latent_t,
++                        nlatent_t,
++                        ctxs,
++                        nctxs,
++                        seq_len,
++                        self.actor_module,
++                        t_t,
++                        step_indices,
++                        sigma_0,
++                    )
++
+                 advantages = torch.clamp(
+-                    td.batch["advantages"],
++                    batch_on_device.batch["advantages"],
+                     -adv_clip_max,
+                     adv_clip_max,
+                 )
+ 
+-                ratio = torch.exp(new_log_probs - td.batch["log_probs"][:, step_idx])
++                old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
++
++                if ratio_norm:
++                    prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
++                    ratio_mean_bias = (prev_sample_mean - prev_sample_mean_old).pow(2).mean(
++                        dim=tuple(range(1, prev_sample_mean.ndim))
++                    )
++                    sqrt_dt = sqrt_dt.mean()
++                    sigma_t = std_dev_t / (sqrt_dt + ratio_norm_eps)
++                    scale = sqrt_dt * sigma_t
++                    ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
++                    ratio = torch.exp((new_log_probs - old_log_probs + ratio_mean_bias) * scale)
++                else:
++                    ratio = torch.exp(new_log_probs - old_log_probs)
++
+                 clipped_mask = (ratio < (1.0 - clip_range)) | (ratio > (1.0 + clip_range))
+                 clip_count = clipped_mask.sum().detach().item()
+-                clip_fraction = clipped_mask.float().mean().detach().item()                     
+-                
+-                # print("ratio",ratio)
+-                # print("="*100)
++                clip_fraction = clipped_mask.float().mean().detach().item()
+ 
+-                # ratio = torch.exp(new_log_probs - current_log_probs)
+-
+-                
+                 unclipped_loss = -advantages * ratio
+                 clipped_loss = -advantages * torch.clamp(
+                     ratio,
+                     1.0 - clip_range,
+                     1.0 + clip_range,
+                 )
+-                # temp = torch.maximum(unclipped_loss, clipped_loss)
+-                
+-                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss)) / (self.gradient_accumulation * train_timesteps)
+-                data = {
++
++                policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
++                if ratio_norm:
++                    policy_loss = policy_loss / (sqrt_dt**2)
++
++                loss = policy_loss / (self.gradient_accumulation * train_timesteps)
++
++                data_dict = {
+                     "actor/clip_count": clip_count,
+                     "actor/clip_fraction": clip_fraction,
+                     "actor/loss": loss.detach().item(),
+-                    # "actor/log_ratio_mean": log_ratios.mean().detach().item(),
+-                    # "actor/preference_mean": preference.mean().detach().item(),
+                 }
+-                append_to_dict(metrics, data)
+-                # exit(0)
++                if ratio_norm:
++                    data_dict["actor/ratio_mean_bias"] = ratio_mean_bias.detach().mean().item()
++                    data_dict["actor/ratio_scale"] = scale.detach().item()
++                    data_dict["actor/sqrt_dt"] = sqrt_dt.detach().item()
++                append_to_dict(metrics, data_dict)
++
+                 loss.backward()
+ 
+                 avg_loss = loss.detach()
+-
+                 torch.distributed.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+-                
+-                # # 查看显存占用
+-                # import gc
+-                # # 遍历当前存活的所有 Tensor
+-                # for obj in gc.get_objects():
+-                #     try:
+-                #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+-                #             print(f"Tensor shape: {tuple(obj.shape)}, dtype: {obj.dtype}, device: {obj.device}, size: {obj.numel() * obj.element_size() / 1024**2:.2f} MB")
+-                #     except Exception as e:
+-                #         pass
+-
+-                # print("batch_idx",batch_idx)
+-                # print("+"*100)
+-                # print(f"Allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+-                # print(f"Reserved:  {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+-                # print(f"Max Allocated: {torch.cuda.max_memory_allocated(0) / 1024**3:.2f} GB")
+-                # with open
+-                # if batch_idx==3:
+-                #     exit(0)
++
+             if (batch_idx + 1) % self.gradient_accumulation == 0:
+-                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), self.config.max_grad_norm)
++                grad_norm = torch.nn.utils.clip_grad_norm_(
++                    self.actor_module.parameters(), self.config.max_grad_norm
++                )
+                 self.actor_optimizer.step()
+                 self.actor_optimizer.zero_grad()
+-                data = {"actor/grad_norm": grad_norm.detach().item()}
+-                append_to_dict(metrics, data)
+-                
++                data_dict = {"actor/grad_norm": grad_norm.detach().item()}
++                append_to_dict(metrics, data_dict)
++
+             del ctxs, nctxs
+-            for k in move_keys:
+-                if k in td: 
+-                    del td[k]
+-            del td, data
++            for key in move_keys:
++                if key in batch_on_device:
++                    del batch_on_device[key]
++            del batch_on_device, mini_batch
+             torch.cuda.empty_cache()
+-                
+-            
++
+         return metrics
+ 
+     def grpo_wan_one_step(
+@@ -305,121 +285,130 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+         i,
+         sigma_schedule,
+         guide_scale=5.0,
++        return_stats: bool = False,
+     ):
+         """GRPO的单步训练，支持FP16优化"""
+-        B = len(context) if isinstance(context, list) else context.shape[0]
+         transformer.train()
+-        
++
+         # 确保latents维度正确：(16, 7, 64, 64)
+         if latents.dim() == 5:
+             latents = latents.squeeze(0)
+-        
++
+         if pre_latents.dim() == 5:
+             pre_latents = pre_latents.squeeze(0)
+-        
++
+         if latents.shape[0] != 16:
+             raise ValueError(f"Expected 16 channels, got {latents.shape[0]} channels")
+-        
++
+         boundary = getattr(self.config, "wan22_boundary", 0.9)
+         sigma = sigma_schedule[i] if sigma_schedule is not None else None
+         sample_guide_scale = _select_wan22_guide_scale(guide_scale, timesteps, sigma, boundary)
+-        
++
+         autocast_dtype = torch.bfloat16
+         with torch.autocast("cuda", dtype=autocast_dtype):
+             with torch.no_grad():
+                 pred_uncond = transformer(
+-                    x=[latents],  # [(16, 7, 64, 64)]
++                    x=[latents],
+                     t=timesteps,
+                     context=context_null,
+-                    seq_len=seq_len
++                    seq_len=seq_len,
+                 )
+-            
+-            #处理无条件预测输出
+-            if isinstance(pred_uncond, dict) and 'rgb' in pred_uncond:
+-                model_output_uncond = pred_uncond['rgb'][0].detach()
++
++            # 处理无条件预测输出
++            if isinstance(pred_uncond, dict) and "rgb" in pred_uncond:
++                model_output_uncond = pred_uncond["rgb"][0].detach()
+             elif isinstance(pred_uncond, list):
+                 model_output_uncond = pred_uncond[0].detach()
+             else:
+                 model_output_uncond = pred_uncond.detach()
+-            
++
+             pred_cond = transformer(
+                 x=[latents],
+                 t=timesteps,
+                 context=context,
+-                seq_len=seq_len
++                seq_len=seq_len,
+             )
+-            
++
+             # 处理条件预测输出
+-            if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
+-                model_output_cond = pred_cond['rgb'][0]
++            if isinstance(pred_cond, dict) and "rgb" in pred_cond:
++                model_output_cond = pred_cond["rgb"][0]
+             elif isinstance(pred_cond, list):
+                 model_output_cond = pred_cond[0]
+             else:
+                 model_output_cond = pred_cond
+-                    
+-                # del pred_uncond
+-                # torch.cuda.empty_cache()
+-            
++
+             # CFG组合
+             model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
+-            # del model_output_cond, model_output_uncond
+-            # model_output = model_output_cond
+ 
+-        # 确保数据类型一致性
++        if return_stats:
++            _, _, log_prob, prev_sample_mean, std_dev_t, sqrt_dt = self.wan_step(
++                model_output,
++                latents.to(torch.float32),
++                self.config.eta,
++                sigma_schedule,
++                i,
++                prev_sample=pre_latents,
++                grpo=True,
++                sde_solver=True,
++                return_stats=True,
++            )
++            return log_prob, prev_sample_mean, std_dev_t, sqrt_dt
+ 
+-        # computation_dtype = torch.float32
+         _, _, log_prob = self.wan_step(
+-            model_output, 
+-            latents.to(torch.float32), 
+-            self.config.eta, 
++            model_output,
++            latents.to(torch.float32),
++            self.config.eta,
+             sigma_schedule,
+-            i, 
+-            prev_sample=pre_latents, 
+-            grpo=True, 
+-            sde_solver=True
++            i,
++            prev_sample=pre_latents,
++            grpo=True,
++            sde_solver=True,
+         )
+-        
++
+         return log_prob
+ 
+     def wan_step(
+         self,
+-        model_output: torch.Tensor,  # 模型预测的flow
+-        latents: torch.Tensor,       # 当前时间步的潜在表示 (16, 7, 64, 64)
+-        eta: float,                  # 控制随机性强度
+-        sigmas: torch.Tensor,        # sigma调度序列 (类似FLUX)
+-        index: int,                  # 当前时间步索引  
+-        prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
+-        grpo: bool,                  # True时会得到logprob
+-        sde_solver: bool,            # 使用SDE求解器
++        model_output: torch.Tensor,
++        latents: torch.Tensor,
++        eta: float,
++        sigmas: torch.Tensor,
++        index: int,
++        prev_sample: torch.Tensor,
++        grpo: bool,
++        sde_solver: bool,
++        return_stats: bool = False,
+     ):
+         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
+         sigma = sigmas[index]
+-        dsigma = sigmas[index + 1] - sigma  # sigma差分
++        dsigma = sigmas[index + 1] - sigma
+         prev_sample_mean = latents + dsigma * model_output
+-        # 预测的原始样本
+         pred_original_sample = latents - sigma * model_output
+-        
+-        delta_t = sigma - sigmas[index + 1]  # 时间差分
+-        # std_dev_t = eta * math.sqrt(abs(delta_t))  # 随机噪声的std
+-        std_dev_t = eta * torch.sqrt(delta_t)  # 根据hunyuan改的
+-        
+-        if sde_solver:  # 使用SDE求解器（和FLUX相同）
+-            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
+-            log_term = -0.5 * eta**2 * score_estimate  # 对数项修正
+-            prev_sample_mean = prev_sample_mean + log_term * dsigma  # 修正的均值
+-        
++
++        delta_t = sigma - sigmas[index + 1]
++        std_dev_t = eta * torch.sqrt(delta_t)
++
++        if sde_solver:
++            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)
++            log_term = -0.5 * eta**2 * score_estimate
++            prev_sample_mean = prev_sample_mean + log_term * dsigma
++
+         if grpo and prev_sample is None:
+             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
+ 
+         if grpo:
+-            # 计算log概率
+             log_prob = (
+                 -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2)
+                 / (2 * (std_dev_t**2))
+             ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
+ 
+-            # 在除batch维度外的所有维度上求平均
+             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
++            if return_stats:
++                sqrt_dt = torch.sqrt(delta_t)
++                return prev_sample, pred_original_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
+             return prev_sample, pred_original_sample, log_prob
+-        else:
+-            return prev_sample_mean, pred_original_sample
++
++        if return_stats:
++            sqrt_dt = torch.sqrt(delta_t)
++            return prev_sample_mean, pred_original_sample, prev_sample_mean, std_dev_t, sqrt_dt
++        return prev_sample_mean, pred_original_sample
+diff --git a/recipe/dancegrpo/main_dancegrpo.py b/recipe/dancegrpo/main_dancegrpo.py
+index 70608d4b..59560ab7 100644
+--- a/recipe/dancegrpo/main_dancegrpo.py
++++ b/recipe/dancegrpo/main_dancegrpo.py
+@@ -1,5 +1,3 @@
+-import os
+-
+ import hydra
+ 
+ # os.environ["RAY_DEDUP_LOGS"] = "0"
+@@ -9,22 +7,91 @@ from verl.trainer.ppo.reward import get_custom_reward_fn
+ 
+ from .dancegrpo_ray_trainer import RayDanceGRPOTrainer
+ 
++RAY_ENV_VARS = {
++    "TOKENIZERS_PARALLELISM": "true",
++    "NCCL_DEBUG": "WARN",
++    "VLLM_LOGGING_LEVEL": "WARN",
++    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
++}
++
++
++def _init_ray(config) -> None:
++    if ray.is_initialized():
++        return
++    # this is for local ray cluster
++    ray.init(
++        runtime_env={"env_vars": RAY_ENV_VARS},
++        num_cpus=config.ray_init.num_cpus,
++    )
++
++
++def _build_tokenizer_and_processor(local_path):
++    import os
++    from verl.utils import hf_processor, hf_tokenizer
++
++    tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
++    tokenizer = hf_tokenizer(tokenizer_path)
++    processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
++    return tokenizer, processor
++
++
++def _resolve_actor_worker_and_group(config):
++    strategy = config.actor_rollout_ref.actor.strategy
++    assert strategy == config.critic.strategy
++
++    if strategy == "fsdp":  # actor的策略
++        from verl.single_controller.ray import RayWorkerGroup
++        from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
++
++        return RayWorkerGroup, DiffusionActorRolloutRefWorker
++
++    if strategy == "megatron":
++        from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
++        from verl.workers.megatron_workers import ActorRolloutRefWorker
++
++        return NVMegatronRayWorkerGroup, ActorRolloutRefWorker
++
++    raise NotImplementedError(f"Unknown actor strategy: {strategy}")
++
++
++def _build_reward_fns(config, tokenizer):
++    from verl.workers.reward_manager import get_reward_manager_cls
++
++    # Note(haibin.lin): please make sure custom reward managers are imported and
++    # registered via `verl.workers.reward_manager.register`
++    reward_manager_name = config.reward_model.get("reward_manager", "naive")
++    reward_manager_cls = get_reward_manager_cls(reward_manager_name)  # 这里看注册的reward manager是什么
++    compute_score = get_custom_reward_fn(config)  # 这里返回None，表示没有自定义的reward function
++
++    # 初始化reward function，这个函数会被传入每一个worker中，作为计算reward的接口
++    # 使用的reward manager 是 dancegrpo(从config中读取的) -> AIGCRewardManager
++    reward_fn = reward_manager_cls(
++        tokenizer=tokenizer,
++        num_examine=0,
++        compute_score=compute_score,  # 没有定义的话这里会自动转为默认的default_compute_score函数
++    )
++
++    # Note that we always use function-based RM for validation
++    val_reward_fn = reward_manager_cls(
++        tokenizer=tokenizer,
++        num_examine=1,
++        compute_score=compute_score,
++    )
++    return reward_fn, val_reward_fn
++
+ 
+-@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
+-def main(config):
+-    run_ppo(config)
+-    
+ def run_ppo(config) -> None:
+-    if not ray.is_initialized():
+-        # this is for local ray cluster
+-        ray.init(
+-            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN","CUBLAS_WORKSPACE_CONFIG": ":4096:8"}},
+-            num_cpus=config.ray_init.num_cpus,
+-        )
++    _init_ray(config)
+ 
+     runner = TaskRunner.remote()
+     ray.get(runner.run.remote(config))
+-    
++
++
++@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
++def main(config):
++    run_ppo(config)
++
++
+ @ray.remote(num_cpus=1)  # please make sure main_task is not scheduled on head
+ class TaskRunner:
+     def run(self, config):
+@@ -41,39 +108,15 @@ class TaskRunner:
+ 
+         # instantiate tokenizer
+         # 需要tokenizer和preprocessor
+-        import os
+-        from verl.utils import hf_processor, hf_tokenizer
+-
+-        # processor =None
+-        tokenizer_path = os.path.join(local_path, "google/umt5-xxl")
++        tokenizer, processor = _build_tokenizer_and_processor(local_path)
+ 
+-        tokenizer = hf_tokenizer(tokenizer_path)
+-        processor = hf_processor(local_path, use_fast=True)  # used for multimodal LLM, could be none
+         # define worker classes
+-        if config.actor_rollout_ref.actor.strategy == "fsdp": # actor的策略
+-            assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+-            from verl.single_controller.ray import RayWorkerGroup
+-
+-            from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
+-
+-            ray_worker_group_cls = RayWorkerGroup
+-
+-        elif config.actor_rollout_ref.actor.strategy == "megatron":
+-            assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+-            from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
+-            from verl.workers.megatron_workers import ActorRolloutRefWorker, CriticWorker
+-
+-            ray_worker_group_cls = NVMegatronRayWorkerGroup
+-        else:
+-            raise NotImplementedError
++        ray_worker_group_cls, actor_rollout_worker_cls = _resolve_actor_worker_and_group(config)
+ 
+         from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
+ 
+         # Dict[Role, RayClass]
+-        role_worker_mapping = {
+-            # 调用ActorRollout，需要通过ray.remote的方式实例化DiffusionActorRolloutRefWorker
+-            Role.ActorRollout: ray.remote(DiffusionActorRolloutRefWorker),# ray.remote(Worker).remote() 这才是启动一个远程worker
+-        }
++        role_worker_mapping = {}
+ 
+         global_pool_id = "global_pool"
+         # Dict[str, List[int]]
+@@ -83,9 +126,15 @@ class TaskRunner:
+ 
+         # Dict[Role, str]
+         # global_pool_id 本身也是一个Dict[str, List[int]]
+-        mapping = {
+-            Role.ActorRollout: global_pool_id,
+-        }
++        mapping = {}
++
++        def register_role(role, worker_cls):
++            # ray.remote(Worker).remote() 这才是启动一个远程worker
++            role_worker_mapping[role] = ray.remote(worker_cls)
++            mapping[role] = global_pool_id
++
++        # 调用ActorRollout，需要通过ray.remote的方式实例化worker
++        register_role(Role.ActorRollout, actor_rollout_worker_cls)
+ 
+         # we should adopt a multi-source reward function here
+         # - for rule-based rm, we directly call a reward score
+@@ -94,34 +143,28 @@ class TaskRunner:
+         # - finally, we combine all the rewards together
+         # - The reward type depends on the tag of the data
+ 
+-        if config.reward_model.enable: # reward model的策略
+-
++        if config.reward_model.enable:  # reward model的策略
+             # 以何种分布式并行方式加载这个奖励模型 LLM（大语言模型）
+             if config.reward_model.strategy == "fsdp":
+                 from .fsdp_worker import RewardModelWorker
+-                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+-                mapping[Role.RewardModel] = global_pool_id
++                register_role(Role.RewardModel, RewardModelWorker)
+                 print(f"Mapping type {Role.RewardModel} to be the reward model")
+ 
+             elif config.reward_model.strategy == "megatron":
+                 from verl.workers.megatron_workers import RewardModelWorker
+-                role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+-                mapping[Role.RewardModel] = global_pool_id
++                register_role(Role.RewardModel, RewardModelWorker)
+                 print(f"Mapping type {Role.RewardModel} to be the reward model")
+ 
+             # reward model 使用 diffusion 模型
+-            elif config.reward_model.strategy == "diffusion": # reward使用的是diffusion
+-
+-                if config.reward_model.type == "qwen": # reward model的类型
++            elif config.reward_model.strategy == "diffusion":  # reward使用的是diffusion
++                if config.reward_model.type == "qwen":  # reward model的类型
+                     from .dancegrpo_fsdp_worker import QwenRewardModelWorker as RewardModelWorker
+-                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+-                    mapping[Role.RewardModel] = global_pool_id
++                    register_role(Role.RewardModel, RewardModelWorker)
+                     print(f"Mapping type {Role.RewardModel} to be the Qwen reward model")
+ 
+                 elif config.reward_model.type == "single":
+                     from .dancegrpo_fsdp_worker import DiffusionRewardModelWorker as RewardModelWorker
+-                    role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
+-                    mapping[Role.RewardModel] = global_pool_id
++                    register_role(Role.RewardModel, RewardModelWorker)
+                     print(f"Mapping type {Role.RewardModel} to be the single diffusion reward model")
+ 
+                 elif config.reward_model.type == "joint":
+@@ -133,18 +176,11 @@ class TaskRunner:
+                     )
+                     # 注意：joint 模式下可能不需要单一的 RewardModelWorker
+                     # 而是注册多个具体角色的 worker
+-                    role_worker_mapping[Role.AestheticRewardModel] = ray.remote(AestheticRewardModelWorker)
+-                    mapping[Role.AestheticRewardModel] = global_pool_id
+-
+-                    role_worker_mapping[Role.RAFTRewardModel] = ray.remote(RAFTRewardModelWorker)
+-                    mapping[Role.RAFTRewardModel] = global_pool_id
+-
+-                    role_worker_mapping[Role.VideoclipRewardModel] = ray.remote(VideoclipRewardModelWorker)
+-                    mapping[Role.VideoclipRewardModel] = global_pool_id
++                    register_role(Role.AestheticRewardModel, AestheticRewardModelWorker)
++                    register_role(Role.RAFTRewardModel, RAFTRewardModelWorker)
++                    register_role(Role.VideoclipRewardModel, VideoclipRewardModelWorker)
++                    register_role(Role.VideophyRewardModel, VideophyRewardModelWorker)
+ 
+-                    role_worker_mapping[Role.VideophyRewardModel] = ray.remote(VideophyRewardModelWorker)
+-                    mapping[Role.VideophyRewardModel] = global_pool_id
+-                    
+                     print("Mapping multiple reward models for 'joint' type", role_worker_mapping)
+ 
+                 else:
+@@ -153,37 +189,13 @@ class TaskRunner:
+             else:
+                 raise NotImplementedError(f"Unknown reward model strategy: {config.reward_model.strategy}")
+ 
+-        from verl.workers.reward_manager import get_reward_manager_cls
++        reward_fn, val_reward_fn = _build_reward_fns(config, tokenizer)
+ 
+-        # Note(haibin.lin): please make sure custom reward managers are imported and
+-        # registered via `verl.workers.reward_manager.register`
+-        reward_manager_name = config.reward_model.get("reward_manager", "naive")
+-        reward_manager_cls = get_reward_manager_cls(reward_manager_name) # 这里看注册的reward manager是什么
+-        compute_score = get_custom_reward_fn(config) # 这里返回None，表示没有自定义的reward function
+-
+-        # 初始化reward function，这个函数会被传入每一个worker中，作为计算reward的接口
+-        # 使用的reward manager 是 dancegrpo(从config中读取的) -> AIGCRewardManager
+-        reward_fn = reward_manager_cls(
+-            tokenizer=tokenizer,
+-            num_examine=0,
+-            compute_score=compute_score # 没有定义的话这里会自动转为默认的default_compute_score函数
+-        )
+-        # reward_fn_key=config.data.reward_fn_key,
+-        # max_resp_len=config.data.max_response_length,
+-        # overlong_buffer_cfg=config.reward_model.overlong_buffer,
+-
+-        # Note that we always use function-based RM for validation
+-        val_reward_fn = reward_manager_cls(
+-            tokenizer=tokenizer,
+-            num_examine=1,
+-            compute_score=compute_score,
+-        )
+-        
+         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+ 
+         from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
+ 
+-        trainer = RayDanceGRPOTrainer( # 初始化训练类
++        trainer = RayDanceGRPOTrainer(  # 初始化训练类
+             config=config,
+             tokenizer=tokenizer,
+             processor=processor,
+@@ -194,8 +206,8 @@ class TaskRunner:
+             reward_fn=reward_fn,
+             val_reward_fn=val_reward_fn,
+         )
+-        trainer.init_workers() # 初始化所有的worker
+-        trainer.fit() # 开始训练
++        trainer.init_workers()  # 初始化所有的worker
++        trainer.fit()  # 开始训练
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/verl/utils/dataset/dancegrpo_ray_trainer.py b/verl/utils/dataset/dancegrpo_ray_trainer.py
+index ceecd345..301418ce 100644
+--- a/verl/utils/dataset/dancegrpo_ray_trainer.py
++++ b/verl/utils/dataset/dancegrpo_ray_trainer.py
+@@ -1,496 +1,434 @@
+-import uuid
+-from collections import defaultdict
+-from copy import deepcopy
+-from pprint import pprint
+-
+-import numpy as np
+-import torch
+-import time
+-
+-# from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
+-from omegaconf import OmegaConf, open_dict
+-from tqdm import tqdm
+-
+-from verl import DataProto
+-from verl.single_controller.ray.base import create_colocated_worker_cls
+-from verl.trainer.ppo.core_algos import agg_loss
+-from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, apply_kl_penalty, compute_response_mask
+-from verl.utils.debug import marked_timer
+-from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
+-
+-
+-def fprint(*args, **kwargs):
+-    text = " ".join(str(a) for a in args)
+-    with open("output.log", "a", encoding="utf-8") as f:
+-        f.write(text + "\n")
+-
+-
+-def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
+-    datas=data.pop(
+-        batch_keys=['rewards'],
+-    )
+-    advantages=torch.zeros_like(datas.batch['rewards'])
+-    #TODO when batchsize not equal to 1
+-    group_mean = datas.batch['rewards'].mean()
+-    group_std = datas.batch['rewards'].std() + 1e-8
+-    advantages = (datas.batch['rewards'] - group_mean) / group_std
+-    data.batch["advantages"] = advantages
+-    return data
+-
+-from typing import List
+-import torch
+-import numpy as np
+-
+-@staticmethod
+-def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") -> DataProto:
+-    """
+-    拼接多个 DataProto。
+-    对于每个数据键(key)，只拼接那些自身包含非零元素的 tensor/array。
+-    完全由零组成的 tensor/array 会被忽略。
+-    
+-    Args:
+-        data_list (List[DataProto]): 多个 DataProto
+-        dummy_key (str): (此参数在当前逻辑中未使用)
+-    
+-    Returns:
+-        DataProto: 拼接后的 DataProto
+-    """
+-    if not data_list:
+-        return DataProto()
+-    
+-    # 1. 收集所有唯一的 key
+-    all_batch_keys = set()
+-    all_non_tensor_keys = set()
+-    for dp in data_list:
+-        if dp.batch is not None:
+-            all_batch_keys.update(dp.batch.keys())
+-        if dp.non_tensor_batch is not None:
+-            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
+-
+-    # 2. 处理 batch (PyTorch tensors)
+-    batch_dict = {}
+-    for key in all_batch_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）tensors
+-        tensors_to_concat = []
+-        for dp in data_list:
+-            if dp.batch is not None and key in dp.batch:
+-                tensor = dp.batch[key]
+-                # 关键改动：检查这一个 tensor 是否包含非零元素
+-                if torch.any(tensor != 0):
+-                    # 如果包含，则将其加入待拼接列表
+-                    tensors_to_concat.append(tensor)
+-        
+-        # 如果列表不为空（即至少有一个 tensor 是有意义的），则执行拼接
+-        if tensors_to_concat:
+-            batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
+-            
+-    # 3. 处理 non_tensor_batch (NumPy arrays)
+-    non_tensor_dict = {}
+-    for key in all_non_tensor_keys:
+-        # 准备一个列表，只存放“有意义的”（非全零）arrays
+-        arrays_to_concat = []
+-        for dp in data_list:
+-            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
+-                arr = dp.non_tensor_batch[key]
+-                # 关键改动：检查这一个 array 是否包含非零元素
+-                if np.any(arr != 0):
+-                    # 如果包含，则将其加入待拼接列表
+-                    arrays_to_concat.append(arr)
+-        
+-        # 如果列表不为空，则执行拼接
+-        if arrays_to_concat:
+-            non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
+-            
+-    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
+-
+-class RayDanceGRPOTrainer(RayPPOTrainer):
+-    """
+-    Note that this trainer runs on the driver process on a single CPU/GPU node.
+-    """
+-    #TODO dataset!!!! DataProto
+-    def fit(self):
+-        """
+-        The training loop of PPO.
+-        The driver process only need to call the compute functions of the worker group through RPC
+-        to construct the PPO dataflow.
+-        The light-weight advantage computation is done on the driver process.
+-        """
+-        from omegaconf import OmegaConf
+-
+-        from verl.utils.tracking import Tracking
+-
+-        logger = Tracking(
+-            project_name=self.config.trainer.project_name,
+-            experiment_name=self.config.trainer.experiment_name,
+-            default_backend=self.config.trainer.logger,
+-            config=OmegaConf.to_container(self.config, resolve=True),
+-        )
+-
+-        self.global_steps = 0
+-
+-        # load checkpoint before doing anything
+-        self._load_checkpoint()
+-
+-        # perform validation before training
+-        # currently, we only support validation using the reward_function.
+-        # if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
+-        #     val_metrics = self._validate()
+-        #     assert val_metrics, f"{val_metrics=}"
+-        #     pprint(f"Initial validation metrics: {val_metrics}")
+-        #     logger.log(data=val_metrics, step=self.global_steps)
+-        #     if self.config.trainer.get("val_only", False):
+-        #         return
+-
+-        # add tqdm
+-        progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
+-
+-        # we start from step 1
+-        self.global_steps += 1
+-        last_val_metrics = None
+-
+-        timing_raw = defaultdict(float)
+-        batch = None
+-        num_prompt_in_batch = 0
+-        num_gen_batches = 0
+-        
+-        if self.use_rm and self.config.reward_model.type=="joint":
+-            import threading
+-            reward_results = {}
+-            thread_inputs = {}
+-            ready_events = {}
+-            done_events = {}
+-
+-            def thread_loop(name, worker):
+-                while True:
+-                    ready_events[name].wait()      # 等待主线程喂数据
+-                    ready_events[name].clear()
+-                    # 调用现有 worker 的 compute_rm_score
+-                    reward_results[name] = worker.compute_rm_score(thread_inputs[name])
+-                    done_events[name].set()        # 通知主线程完成
+-
+-            # 四个线程
+-            workers = {
+-                "aes": self.aes_rm_wg,
+-                "raft": self.raft_rm_wg,
+-                "videoclip": self.videoclip_rm_wg,
+-                "videophy": self.videophy_rm_wg,
+-            }
+-
+-            threads = []
+-            for name, worker in workers.items():
+-                reward_results[name] = None
+-                thread_inputs[name] = None
+-                ready_events[name] = threading.Event()
+-                done_events[name] = threading.Event()
+-                t = threading.Thread(target=thread_loop, args=(name, worker), daemon=True)
+-                t.start()
+-                threads.append(t)       
+-            
+-        for epoch in range(self.config.trainer.total_epochs):
+-            for batch_dict in self.train_dataloader:
+-                metrics = {}
+-
+-                new_batch: DataProto = DataProto.from_single_dict(batch_dict)
+-                num_gen_batches += 1
+-                
+-                # pop those keys for generation TODO!!!
+-                # trainer的类型是diffusion
+-                if self.config.trainer.type=="diffusion":
+-                    # print("non-tensor keys:", new_batch.non_tensor_batch_keys.keys())
+-                    # For diffusion, context tensors live in batch, while paths/captions are non-tensors.
+-                    batch_keys = ["context"]
+-                    if "null_context" in new_batch.batch.keys():
+-                        batch_keys.append("null_context")
+-
+-                    non_tensor_batch_keys = ["caption"]
+-                    for k in ("context_path", "context_null_path"):
+-                        if k in new_batch.non_tensor_batch.keys():
+-                            non_tensor_batch_keys.append(k)
+-
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=batch_keys,
+-                        non_tensor_batch_keys=non_tensor_batch_keys,
+-                    )
+-                    
+-                    # 形状与配置
+-                    B = new_batch.batch.batch_size[0]
+-                    S = self.config.actor_rollout_ref.sampling_steps
+-                    num_frames = self.config.actor_rollout_ref.num_frames
+-                    size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
+-                    vae_stride = [4, 8, 8]
+-                    latent_dtype = torch.float32
+-                    latent_shape = (
+-                        16,
+-                        (num_frames - 1) // vae_stride[0] + 1,
+-                        size[1] // vae_stride[1],
+-                        size[0] // vae_stride[2],
+-                    )
+-
+-                    # 预分配批量张量
+-                    input_latents = torch.empty((B, *latent_shape), dtype=latent_dtype)
+-                    sigma_schedule_B = torch.empty((B, S+1), dtype=torch.float32)
+-
+-                    def sd3_time_shift(shift, x):
+-                        return (shift * x) / (1 + (shift - 1) * x)
+-
+-                    for i in range(new_batch.batch.batch_size[0]):  # 注意：这里用 gen_batch，不是 new_batch
+-                        sigma_schedule = torch.linspace(1, 0, S + 1)
+-                        
+-                        sigma_schedule = sd3_time_shift(self.config.actor_rollout_ref.shift, sigma_schedule)   # [S+1]
+-                        
+-                        sigma_schedule_B[i] = sigma_schedule
+-
+-                        input_latents[i] = torch.randn(latent_shape, dtype=latent_dtype)
+-
+-                    gen_batch.batch["input_latents"]  = input_latents
+-                    gen_batch.batch["sigma_schedule"] = sigma_schedule_B
+-                    
+-                    gen_batch = gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
+-                elif "multi_modal_data" in new_batch.non_tensor_batch.keys():
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+-                    )
+-                else:
+-                    gen_batch = new_batch.pop(
+-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+-                        non_tensor_batch_keys=["raw_prompt_ids"],
+-                    )
+-
+-                is_last_step = self.global_steps >= self.total_training_steps
+-
+-                with marked_timer("step", timing_raw):
+-                    # generate a batch
+-                    with marked_timer("gen", timing_raw):
+-                        # gen_batch_output的数据类型是DataProto
+-                        # 具体见DiffusionActorRolloutWorker.generate_sequences方法
+-                        # 得到的gen_batch_output是聚合所有gpu的结果
+-                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+-
+-                    # 目前用的是gae，TODO:修改reward计算方法
+-                    if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
+-                        with marked_timer("gen_max", timing_raw):
+-                            gen_baseline_batch = deepcopy(gen_batch)
+-                            gen_baseline_batch.meta_info["do_sample"] = False
+-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
+-
+-                            new_batch = new_batch.union(gen_baseline_output)
+-                            reward_baseline_tensor = self.reward_fn(new_batch)
+-                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
+-
+-                            new_batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
+-
+-                            new_batch.batch["reward_baselines"] = reward_baseline_tensor
+-
+-                            del gen_baseline_batch, gen_baseline_output
+-
+-                    new_batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object)
+-                    
+-                    # validate
+-                    if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
+-                        with marked_timer("validation", timing_raw):
+-                            from verl.utils.checkpoint.checkpoint_manager import save_video_and_prompt
+-                            video_frames = gen_batch_output.batch["video_frames"] 
+-                            for i in range(video_frames.shape[0]):
+-                                save_video_and_prompt(video_frames[i] , 0, i)
+-                    # repeat to align with repeated responses in rollout
+-                    # new_batch = new_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+-                    # new_batch = new_batch.union(gen_batch_output)
+-
+-                    with marked_timer("reward", timing_raw):
+-                        # compute scores. Support both model and function-based.
+-                        # We first compute the scores using reward model. Then, we call reward_fn to combine
+-                        # the results from reward model and rule-based results.
+-                        if self.use_rm:
+-                            print("begin to compute reward")
+-                            with torch.amp.autocast('cuda'):
+-                                if self.config.reward_model.type == "joint":
+-                                    # ======================
+-                                    # Joint Reward Models
+-                                    # ======================
+-                                    import time
+-                                    start_time = time.time()
+-
+-                                    # 启动所有 RM 线程
+-                                    for name in workers:
+-                                        thread_inputs[name] = gen_batch_output
+-                                        done_events[name].clear()
+-                                        ready_events[name].set()
+-
+-                                    # 等待完成
+-                                    for name in workers:
+-                                        done_events[name].wait()
+-
+-                                    # 收集并 merge 结果
+-                                    aes_tensor = merge_worker_results(reward_results["aes"])
+-                                    raft_tensor = merge_worker_results(reward_results["raft"])
+-                                    videoclip_tensor = merge_worker_results(reward_results["videoclip"])
+-                                    videophy_tensor = merge_worker_results(reward_results["videophy"])
+-
+-                                    # 调试输出（可选）
+-                                    # for idx, data in enumerate(videophy_tensor):
+-                                    #     print(f"idx {idx}: {data.print_data_proto(f'videophy_data_{idx}')}")
+-
+-                                    # 合并所有 reward 到 batch
+-                                    batch_with_rewards = (
+-                                        gen_batch_output
+-                                        .union(aes_tensor)
+-                                        .union(raft_tensor)
+-                                        .union(videoclip_tensor)
+-                                        .union(videophy_tensor)
+-                                    )
+-
+-                                    # 计算平均 reward（可配置权重）
+-                                    avg_reward = (
+-                                        batch_with_rewards.batch["aes_rewards"]
+-                                        + batch_with_rewards.batch["raft_rewards"]
+-                                        + batch_with_rewards.batch["videoclip_rewards"]
+-                                        + batch_with_rewards.batch["videophy_rewards"]
+-                                    )
+-
+-                                    # 构造最终 reward DataProto（带平均 reward）
+-                                    from tensordict import TensorDict
+-                                    avg_reward_td = TensorDict({"rewards": avg_reward}, batch_size=avg_reward.shape[0])
+-                                    avg_reward_proto = DataProto(
+-                                        batch=avg_reward_td,
+-                                        non_tensor_batch=aes_tensor.non_tensor_batch  # 假设一致
+-                                    )
+-                                    final_batch = batch_with_rewards.union(avg_reward_proto)
+-
+-                                    # 更新指标
+-                                    metrics["train/rewards"] = avg_reward.mean()
+-                                    metrics["train/log_probs"] = final_batch.batch["log_probs"].mean()
+-
+-                                    # 替换 gen_batch_output（用于后续训练）
+-                                    gen_batch_output = final_batch
+-
+-                                    print(f"reward time: {time.time() - start_time:.2f}s")
+-
+-                                elif self.config.reward_model.type in ("qwen", "single"):
+-                                    # ======================
+-                                    # Single / Qwen Reward Model
+-                                    # ======================
+-                                    if self.config.reward_model.type == "qwen":
+-                                        reward_input = gen_batch_output.select(
+-                                            batch_keys=['null_context'],
+-                                            non_tensor_batch_keys=["caption", "video_ids"]
+-                                        )
+-                                    else:  # "single"
+-                                        reward_input = gen_batch_output
+-
+-                                    # 调用统一的 rm_wg（仅 single/qwen 有）
+-                                    reward_tensor = self.rm_wg.compute_rm_score(reward_input)
+-                                    reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
+-                                    gen_batch_output.pop(
+-                                        non_tensor_batch_keys=["caption", "video_ids"]
+-                                    )
+-                                    gen_batch_output = gen_batch_output.union(reward_tensor)
+-                                    # gen_batch_output = gen_batch_output.pop(
+-                                    #     non_tensor_batch_keys=["caption", "video_ids"]
+-                                    # )
+-                                    # 更新指标
+-                                    metrics["train/rewards"] = gen_batch_output.batch['rewards'].mean()
+-                                    metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
+-
+-                                else:
+-                                    raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
+-                
+-                        else:
+-                            reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
+-                            gen_batch_output = gen_batch_output.union(reward_tensor)
+-                            gen_batch_output.pop(batch_keys=['video_frames'])
+-                    
+-                    # === Updating ===
+-                    # batch.batch["response_mask"] = compute_response_mask(batch)
+-
+-                    # Balance the number of valid tokens across DP ranks.
+-                    # NOTE: This usually changes the order of data in the `batch`,
+-                    # which won't affect the advantage calculation (since it's based on uid),
+-                    # but might affect the loss calculation (due to the change of mini-batching).
+-                    # TODO: Decouple the DP balancing and mini-batching.
+-
+-                    
+-                    # if self.config.trainer.balance_batch:
+-                    #     self._balance_batch(new_batch, metrics=metrics)
+-
+-                    # compute global_valid tokens
+-                    # batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+-
+-                    # if self.use_reference_policy:
+-                    #     # compute reference log_prob
+-                    #     with marked_timer("ref", timing_raw):
+-                    #         ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
+-                    #         batch = batch.union(ref_log_prob)
+-
+-                    # compute values
+-                    # if self.use_critic:
+-                    #     with marked_timer("values", timing_raw):
+-                    #         values = self.critic_wg.compute_values(batch)
+-                    #         batch = batch.union(values)
+-
+-                    with marked_timer("adv", timing_raw):
+-                        # compute advantages, executed on the driver process
+-                        norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
+-                        gen_batch_output = compute_advantage(
+-                            gen_batch_output,
+-                            adv_estimator=self.config.algorithm.adv_estimator,
+-                            gamma=self.config.algorithm.gamma,
+-                            lam=self.config.algorithm.lam,
+-                            num_repeat=self.config.actor_rollout_ref.rollout.n,
+-                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+-                        )
+-                        metrics["train/advantage"] = gen_batch_output.batch['advantages'].mean()
+-
+-                    # # update critic
+-                    # if self.use_critic:
+-                    #     with marked_timer("update_critic", timing_raw):
+-                    #         critic_output = self.critic_wg.update_critic(batch)
+-                    #     critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
+-                    #     metrics.update(critic_output_metrics)
+-
+-                    # implement critic warmup
+-                    if self.config.trainer.critic_warmup <= self.global_steps:
+-                        # update actor
+-                        with marked_timer("update_actor", timing_raw):
+-                            gen_batch_output = self.actor_rollout_wg.update_actor(gen_batch_output)
+-                        actor_output_metrics = reduce_metrics(gen_batch_output.meta_info["metrics"])
+-                        metrics.update(actor_output_metrics)
+-
+-                    # validate
+-                    # if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
+-                    #     with marked_timer("testing", timing_raw):
+-                    #         val_metrics: dict = self._validate()
+-                    #         if is_last_step:
+-                    #             last_val_metrics = val_metrics
+-                    #     metrics.update(val_metrics)
+-
+-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+-                        with marked_timer("save_checkpoint", timing_raw):
+-                            self._save_checkpoint()
+-
+-                # collect metrics
+-                # metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+-                metrics.update(compute_timing_metrics(batch=new_batch, timing_raw=timing_raw))
+-                print("metrics",metrics)
+-                print("="*100)
+-                # TODO: implement actual tflpo and theoretical tflpo
+-                n_gpus = self.resource_pool_manager.get_n_gpus()
+-                # metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+-                # timing_raw = defaultdict(float)  # clear timing
+-
+-                # metrics["train/num_gen_batches"] = num_gen_batches
+-                batch = None
+-                num_prompt_in_batch = 0
+-                num_gen_batches = 0
+-
+-                logger.log(data=metrics, step=self.global_steps)
+-                timing_raw = defaultdict(float)
+-
+-                if is_last_step:
+-                    pprint(f"Final validation metrics: {last_val_metrics}")
+-                    progress_bar.close()
+-                    return
+-
+-                progress_bar.update(1)
+-                self.global_steps += 1
+\ No newline at end of file
++import time
++import uuid
++from collections import defaultdict
++from copy import deepcopy
++from typing import Dict, List
++
++import numpy as np
++import torch
++from tqdm import tqdm
++
++from verl import DataProto
++from verl.trainer.ppo.metric_utils import compute_timing_metrics, reduce_metrics
++from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
++from verl.utils.debug import marked_timer
++
++
++def compute_advantage(
++    data: DataProto,
++    adv_estimator,
++    gamma=1.0,
++    lam=1.0,
++    num_repeat=1,
++    multi_turn=False,
++    norm_adv_by_std_in_grpo=True,
++    config=None,
++):
++    datas = data.pop(
++        batch_keys=["rewards"],
++    )
++    advantages = torch.zeros_like(datas.batch["rewards"])
++    # TODO: when batchsize not equal to 1
++    group_mean = datas.batch["rewards"].mean()
++    group_std = datas.batch["rewards"].std() + 1e-8
++    advantages = (datas.batch["rewards"] - group_mean) / group_std
++    data.batch["advantages"] = advantages
++    return data
++
++
++def merge_worker_results(data_list: List[DataProto], dummy_key="dummy_rewards") -> DataProto:
++    """
++    拼接多个 DataProto。
++    对于每个数据键(key)，只拼接那些自身包含非零元素的 tensor/array。
++    完全由零组成的 tensor/array 会被忽略。
++
++    Args:
++        data_list (List[DataProto]): 多个 DataProto
++        dummy_key (str): (此参数在当前逻辑中未使用)
++
++    Returns:
++        DataProto: 拼接后的 DataProto
++    """
++    _ = dummy_key
++    if data_list is None:
++        return DataProto()
++    if isinstance(data_list, DataProto):
++        return data_list
++    if not data_list:
++        return DataProto()
++
++    # 1. 收集所有唯一的 key
++    all_batch_keys = set()
++    all_non_tensor_keys = set()
++    for dp in data_list:
++        if dp.batch is not None:
++            all_batch_keys.update(dp.batch.keys())
++        if dp.non_tensor_batch is not None:
++            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
++
++    # 2. 处理 batch (PyTorch tensors)
++    batch_dict = {}
++    for key in all_batch_keys:
++        # 准备一个列表，只存放“有意义的”（非全零）tensors
++        tensors_to_concat = []
++        for dp in data_list:
++            if dp.batch is not None and key in dp.batch:
++                tensor = dp.batch[key]
++                # 关键改动：检查这一个 tensor 是否包含非零元素
++                if torch.any(tensor != 0):
++                    # 如果包含，则将其加入待拼接列表
++                    tensors_to_concat.append(tensor)
++
++        # 如果列表不为空（即至少有一个 tensor 是有意义的），则执行拼接
++        if tensors_to_concat:
++            batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
++
++    # 3. 处理 non_tensor_batch (NumPy arrays)
++    non_tensor_dict = {}
++    for key in all_non_tensor_keys:
++        # 准备一个列表，只存放“有意义的”（非全零）arrays
++        arrays_to_concat = []
++        for dp in data_list:
++            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
++                arr = dp.non_tensor_batch[key]
++                # 关键改动：检查这一个 array 是否包含非零元素
++                if np.any(arr != 0):
++                    # 如果包含，则将其加入待拼接列表
++                    arrays_to_concat.append(arr)
++
++        # 如果列表不为空，则执行拼接
++        if arrays_to_concat:
++            non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
++
++    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
++
++
++class _JointRewardRunner:
++    def __init__(self, workers: Dict[str, object]):
++        import threading
++
++        self._workers = workers
++        self._reward_results = {name: None for name in workers}
++        self._thread_inputs = {name: None for name in workers}
++        self._ready_events = {name: threading.Event() for name in workers}
++        self._done_events = {name: threading.Event() for name in workers}
++
++        for name, worker in workers.items():
++            t = threading.Thread(target=self._thread_loop, args=(name, worker), daemon=True)
++            t.start()
++
++    def _thread_loop(self, name, worker):
++        while True:
++            self._ready_events[name].wait()  # 等待主线程喂数据
++            self._ready_events[name].clear()
++            # 调用现有 worker 的 compute_rm_score
++            self._reward_results[name] = worker.compute_rm_score(self._thread_inputs[name])
++            self._done_events[name].set()  # 通知主线程完成
++
++    def compute(self, batch: DataProto) -> Dict[str, DataProto]:
++        for name in self._workers:
++            self._thread_inputs[name] = batch
++            self._done_events[name].clear()
++            self._ready_events[name].set()
++
++        for name in self._workers:
++            self._done_events[name].wait()
++
++        return {name: merge_worker_results(self._reward_results[name]) for name in self._workers}
++
++
++class RayDanceGRPOTrainer(RayPPOTrainer):
++    """
++    Note that this trainer runs on the driver process on a single CPU/GPU node.
++    """
++
++    def fit(self):
++        """
++        The training loop of PPO.
++        The driver process only need to call the compute functions of the worker group through RPC
++        to construct the PPO dataflow.
++        The light-weight advantage computation is done on the driver process.
++        """
++        from omegaconf import OmegaConf
++        from pprint import pprint
++        from verl.utils.tracking import Tracking
++
++        logger = Tracking(
++            project_name=self.config.trainer.project_name,
++            experiment_name=self.config.trainer.experiment_name,
++            default_backend=self.config.trainer.logger,
++            config=OmegaConf.to_container(self.config, resolve=True),
++        )
++
++        self.global_steps = 0
++
++        # load checkpoint before doing anything
++        self._load_checkpoint()
++
++        # add tqdm
++        progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
++
++        # we start from step 1
++        self.global_steps += 1
++        last_val_metrics = None
++
++        timing_raw = defaultdict(float)
++        joint_reward_runner = self._maybe_create_joint_reward_runner()
++
++        for epoch in range(self.config.trainer.total_epochs):
++            # ======== 1. 数据 ========
++            for batch_dict in self.train_dataloader:  # self.train_dataloader处理数据
++                metrics = {}
++
++                new_batch: DataProto = DataProto.from_single_dict(batch_dict)
++
++                # pop those keys for generation
++                gen_batch = self._build_gen_batch(new_batch)
++
++                is_last_step = self.global_steps >= self.total_training_steps
++
++                with marked_timer("step", timing_raw):
++                    # generate a batch
++                    with marked_timer("gen", timing_raw):
++                        # gen_batch_output的数据类型是DataProto
++                        # 具体见DiffusionActorRolloutWorker.generate_sequences方法
++                        # 得到的gen_batch_output是聚合所有gpu的结果
++                        gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
++
++                    # 目前用的是 GAE(组间相对优势)，TODO:修改reward计算方法
++                    if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
++                        with marked_timer("gen_max", timing_raw):
++                            gen_baseline_batch = deepcopy(gen_batch)
++                            gen_baseline_batch.meta_info["do_sample"] = False
++                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
++
++                            new_batch = new_batch.union(gen_baseline_output)
++                            reward_baseline_tensor = self.reward_fn(new_batch)
++                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
++
++                            new_batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
++
++                            new_batch.batch["reward_baselines"] = reward_baseline_tensor
++
++                            del gen_baseline_batch, gen_baseline_output
++
++                    new_batch.non_tensor_batch["uid"] = np.array(
++                        [str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object
++                    )
++
++                    # validate
++                    if (
++                        self.val_reward_fn is not None
++                        and self.config.trainer.test_freq > 0
++                        and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0)
++                    ):
++                        with marked_timer("validation", timing_raw):
++                            self._save_validation_videos(gen_batch_output)
++
++                    with marked_timer("reward", timing_raw):
++                        gen_batch_output = self._compute_rewards(gen_batch_output, metrics, joint_reward_runner)
++
++                    with marked_timer("adv", timing_raw):
++                        # compute advantages, executed on the driver process
++                        norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
++                        gen_batch_output = compute_advantage(
++                            gen_batch_output,
++                            adv_estimator=self.config.algorithm.adv_estimator,
++                            gamma=self.config.algorithm.gamma,
++                            lam=self.config.algorithm.lam,
++                            num_repeat=self.config.actor_rollout_ref.rollout.n,
++                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
++                        )
++                        metrics["train/advantage"] = gen_batch_output.batch["advantages"].mean()
++
++                    # implement critic warmup
++                    if self.config.trainer.critic_warmup <= self.global_steps:
++                        # update actor
++                        with marked_timer("update_actor", timing_raw):
++                            gen_batch_output = self.actor_rollout_wg.update_actor(gen_batch_output)
++                        actor_output_metrics = reduce_metrics(gen_batch_output.meta_info["metrics"])
++                        metrics.update(actor_output_metrics)
++
++                    if self.config.trainer.save_freq > 0 and (
++                        is_last_step or self.global_steps % self.config.trainer.save_freq == 0
++                    ):
++                        with marked_timer("save_checkpoint", timing_raw):
++                            self._save_checkpoint()
++
++                # collect metrics
++                metrics.update(compute_timing_metrics(batch=new_batch, timing_raw=timing_raw))
++                print("metrics", metrics)
++                print("=" * 100)
++
++                logger.log(data=metrics, step=self.global_steps)
++                timing_raw = defaultdict(float)
++
++                if is_last_step:
++                    pprint(f"Final validation metrics: {last_val_metrics}")
++                    progress_bar.close()
++                    return
++
++                progress_bar.update(1)
++                self.global_steps += 1
++
++    def _maybe_create_joint_reward_runner(self):
++        if not self.use_rm or self.config.reward_model.type != "joint":
++            return None
++        workers = {
++            "aes": self.aes_rm_wg,
++            "raft": self.raft_rm_wg,
++            "videoclip": self.videoclip_rm_wg,
++            "videophy": self.videophy_rm_wg,
++        }
++        return _JointRewardRunner(workers)
++
++    def _build_gen_batch(self, new_batch: DataProto) -> DataProto:
++        # trainer的类型是diffusion
++        if self.config.trainer.type == "diffusion":
++            gen_batch = new_batch.pop(
++                batch_keys=["context", "context_orig_lengths", "null_context"],
++                non_tensor_batch_keys=["caption"],
++            )
++            self._prepare_diffusion_inputs(new_batch, gen_batch)
++            return gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
++
++        if "multi_modal_data" in new_batch.non_tensor_batch.keys():
++            return new_batch.pop(
++                batch_keys=["input_ids", "attention_mask", "position_ids"],
++                non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
++            )
++
++        return new_batch.pop(
++            batch_keys=["input_ids", "attention_mask", "position_ids"],
++            non_tensor_batch_keys=["raw_prompt_ids"],
++        )
++
++    def _prepare_diffusion_inputs(self, new_batch: DataProto, gen_batch: DataProto) -> None:
++        # 形状与配置
++        batch_size = new_batch.batch.batch_size[0]
++        num_steps = self.config.actor_rollout_ref.sampling_steps
++        num_frames = self.config.actor_rollout_ref.num_frames
++        size = (self.config.actor_rollout_ref.w, self.config.actor_rollout_ref.h)
++        vae_stride = [4, 8, 8]  # VAE
++        latent_shape = (
++            16,  # 这里的16指的是什么
++            (num_frames - 1) // vae_stride[0] + 1,
++            size[1] // vae_stride[1],
++            size[0] // vae_stride[2],
++        )
++
++        # 预分配批量张量
++        input_latents = torch.empty((batch_size, *latent_shape), dtype=torch.float32)
++        sigma_schedule_B = torch.empty((batch_size, num_steps + 1), dtype=torch.float32)
++
++        for i in range(batch_size):
++            sigma_schedule = torch.linspace(1, 0, num_steps + 1)
++            sigma_schedule = self._sd3_time_shift(self.config.actor_rollout_ref.shift, sigma_schedule)
++            sigma_schedule_B[i] = sigma_schedule
++            input_latents[i] = torch.randn(latent_shape, dtype=torch.float32)
++
++        gen_batch.batch["input_latents"] = input_latents
++        gen_batch.batch["sigma_schedule"] = sigma_schedule_B
++
++    @staticmethod
++    def _sd3_time_shift(shift, x):
++        return (shift * x) / (1 + (shift - 1) * x)
++
++    def _save_validation_videos(self, gen_batch_output: DataProto) -> None:
++        from verl.utils.checkpoint.checkpoint_manager import save_video_and_prompt
++
++        video_frames = gen_batch_output.batch["video_frames"]
++        for i in range(video_frames.shape[0]):
++            save_video_and_prompt(video_frames[i], 0, i)
++
++    def _compute_rewards(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner):
++        # compute scores. Support both model and function-based.
++        # We first compute the scores using reward model. Then, we call reward_fn to combine
++        # the results from reward model and rule-based results.
++        if self.use_rm:
++            print("begin to compute reward")
++            with torch.amp.autocast("cuda"):
++                if joint_reward_runner is not None:
++                    return self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
++                if self.config.reward_model.type in ("qwen", "single"):
++                    return self._compute_single_rm_reward(gen_batch_output, metrics)
++                raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
++
++        reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
++        gen_batch_output = gen_batch_output.union(reward_tensor)
++        gen_batch_output.pop(batch_keys=["video_frames"])
++        return gen_batch_output
++
++    def _compute_joint_reward(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner):
++        start_time = time.time()
++
++        rewards = joint_reward_runner.compute(gen_batch_output)
++        aes_tensor = rewards["aes"]
++        raft_tensor = rewards["raft"]
++        videoclip_tensor = rewards["videoclip"]
++        videophy_tensor = rewards["videophy"]
++
++        batch_with_rewards = (
++            gen_batch_output.union(aes_tensor)
++            .union(raft_tensor)
++            .union(videoclip_tensor)
++            .union(videophy_tensor)
++        )
++
++        # 计算平均 reward（可配置权重）
++        avg_reward = (
++            batch_with_rewards.batch["aes_rewards"]
++            + batch_with_rewards.batch["raft_rewards"]
++            + batch_with_rewards.batch["videoclip_rewards"]
++            + batch_with_rewards.batch["videophy_rewards"]
++        )
++
++        # 构造最终 reward DataProto（带平均 reward）
++        from tensordict import TensorDict
++
++        avg_reward_td = TensorDict({"rewards": avg_reward}, batch_size=avg_reward.shape[0])
++        avg_reward_proto = DataProto(batch=avg_reward_td, non_tensor_batch=aes_tensor.non_tensor_batch)
++        final_batch = batch_with_rewards.union(avg_reward_proto)
++
++        # 更新指标
++        metrics["train/rewards"] = avg_reward.mean()
++        metrics["train/log_probs"] = final_batch.batch["log_probs"].mean()
++
++        print(f"reward time: {time.time() - start_time:.2f}s")
++        return final_batch
++
++    def _compute_single_rm_reward(self, gen_batch_output: DataProto, metrics: dict):
++        if self.config.reward_model.type == "qwen":
++            reward_input = gen_batch_output.select(
++                batch_keys=["null_context"],
++                non_tensor_batch_keys=["caption", "video_ids"],
++            )
++            reward_tensor = self.rm_wg.compute_rm_score(reward_input)
++            reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
++            gen_batch_output.pop(non_tensor_batch_keys=["caption", "video_ids"])
++        else:  # "single"
++            reward_input = gen_batch_output.select(
++                batch_keys=["video_frames"],
++                non_tensor_batch_keys=["caption"],
++            )
++            reward_tensor = self.rm_wg.compute_rm_score(reward_input)
++
++        self._debug_proto_batch("gen_batch_output", gen_batch_output)
++        self._debug_proto_batch("reward_tensor", reward_tensor)
++        gen_batch_output = gen_batch_output.union(reward_tensor)
++
++        metrics["train/rewards"] = gen_batch_output.batch["rewards"].mean()
++        metrics["train/log_probs"] = gen_batch_output.batch["log_probs"].mean()
++        return gen_batch_output
++
++    @staticmethod
++    def _debug_proto_batch(name, proto):
++        if proto is None:
++            print(f"[debug] {name} is None")
++            return
++        batch = getattr(proto, "batch", None)
++        if batch is None:
++            non_tensor = getattr(proto, "non_tensor_batch", None) or {}
++            print(f"[debug] {name}.batch is None; non_tensor_keys={list(non_tensor.keys())}")
++            return
++        print(f"[debug] {name}.batch_size={batch.batch_size}")
+diff --git a/verl/workers/rollout/diffusion_rollout.py b/verl/workers/rollout/diffusion_rollout.py
+index 74469793..a48dab0f 100644
+--- a/verl/workers/rollout/diffusion_rollout.py
++++ b/verl/workers/rollout/diffusion_rollout.py
+@@ -18,6 +18,7 @@ Then, get full state_dict and bind the state_dict to the single GPU model. Then,
+ """
+ import contextlib
+ import math
++import random
+ import os
+ 
+ import torch
+@@ -63,6 +64,21 @@ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
+             return guide_scale[0]
+         return guide_scale[1] if t_val >= boundary else guide_scale[0]
+     return guide_scale
++
++
++def _compute_flow_grpo_window(window_size: int, window_range: tuple[int, int], num_steps: int):
++    if window_size <= 0:
++        return None
++    start_min, start_max = window_range
++    start_max = min(start_max, num_steps)
++    if start_max - window_size < start_min:
++        start = start_min
++    else:
++        start = random.randint(start_min, start_max - window_size)
++    end = start + window_size
++    return (start, end)
++
++
+ class DiffusionRollout(BaseRollout):
+ 
+     def __init__(self, module: nn.Module, config):
+@@ -98,6 +114,14 @@ class DiffusionRollout(BaseRollout):
+         all_video_frames = []
+         all_video_ids = []
+ 
++        flow_cfg = self.config.get("flow_grpo", {})
++        if not flow_cfg.get("enable", False):
++            window_size = 0
++        else:
++            window_size = int(flow_cfg.get("sde_window_size", 0) or 0)
++        window_range = tuple(flow_cfg.get("sde_window_range", (0, self.config.sampling_steps)))
++        flow_window = _compute_flow_grpo_window(window_size, window_range, self.config.sampling_steps)
++
+         batch_indices = torch.chunk(torch.arange(B), B // self.config.rollout.ulysses_sequence_parallel_size)
+         
+         grpo_sample = True
+@@ -117,7 +141,7 @@ class DiffusionRollout(BaseRollout):
+             # ---- 打印信息 ----
+ 
+             # with torch.no_grad(): 
+-            _, final_latents, batch_latents, batch_log_probs = self.run_wan_sample_step(
++            wan_outputs = self.run_wan_sample_step(
+                 batch_input_latents,
+                 progress_bar,
+                 sigma_schedule[0],
+@@ -126,10 +150,21 @@ class DiffusionRollout(BaseRollout):
+                 batch_neg_context,
+                 seq_len,
+                 grpo_sample,
++                flow_window=flow_window,
+             )
+ 
++            if len(wan_outputs) == 5:
++                _, final_latents, batch_latents, batch_log_probs, batch_prev_sample_mean = wan_outputs
++            else:
++                _, final_latents, batch_latents, batch_log_probs = wan_outputs
++                batch_prev_sample_mean = None
++
+             all_latents.append(batch_latents.unsqueeze(0))
+             all_log_probs.append(batch_log_probs.unsqueeze(0))
++            if batch_prev_sample_mean is not None:
++                if "all_prev_sample_mean" not in locals():
++                    all_prev_sample_mean = []
++                all_prev_sample_mean.append(batch_prev_sample_mean.unsqueeze(0))
+            
+             
+             # autocast_dtype = torch.float32 #TODO
+@@ -183,12 +218,20 @@ class DiffusionRollout(BaseRollout):
+             all_latents = torch.cat(all_latents, dim=0)
+             all_log_probs = torch.cat(all_log_probs, dim=0)
+             all_video_frames = torch.cat(all_video_frames, dim=0)
++            if "all_prev_sample_mean" in locals():
++                all_prev_sample_mean = torch.cat(all_prev_sample_mean, dim=0)
+         else:
+             all_latents = all_latents[0]
+             all_log_probs = all_log_probs[0]
+             all_video_frames = all_video_frames[0]
++            if "all_prev_sample_mean" in locals():
++                all_prev_sample_mean = all_prev_sample_mean[0]
+ 
+-        timestep_value = [int(sigma * 1000) for sigma in sigma_schedule[0].squeeze()][:self.config.sampling_steps]
++        if flow_window is None:
++            timestep_value = [int(sigma * 1000) for sigma in sigma_schedule[0].squeeze()][:self.config.sampling_steps]
++        else:
++            window_indices = list(range(flow_window[0], flow_window[1]))
++            timestep_value = [int(sigma_schedule[0].squeeze()[i] * 1000) for i in window_indices]
+         
+         timestep_values = [timestep_value[:] for _ in range(B)]
+ 
+@@ -197,20 +240,26 @@ class DiffusionRollout(BaseRollout):
+         latents=all_latents[:, :-1]
+         next_latents=all_latents[:, 1:]
+ 
+-        batch = TensorDict(
+-            {
+-                "context_orig_lengths":context_orig_lengths,
+-                "contexts": context,
+-                "null_context":neg_context,
+-                "latents": latents,
+-                "next_latents": next_latents,
+-                "log_probs": all_log_probs,
+-                "video_frames": all_video_frames,
+-                "sigma_schedule": sigma_schedule,
+-                'timesteps':timesteps[:, :-1]
+-            },
+-            batch_size=B
+-        )
++        batch_dict = {
++            "context_orig_lengths":context_orig_lengths,
++            "contexts": context,
++            "null_context":neg_context,
++            "latents": latents,
++            "next_latents": next_latents,
++            "log_probs": all_log_probs,
++            "video_frames": all_video_frames,
++            "sigma_schedule": sigma_schedule,
++            'timesteps':timesteps[:, :-1]
++        }
++        if "all_prev_sample_mean" in locals():
++            batch_dict["prev_sample_mean"] = all_prev_sample_mean
++        if flow_window is not None:
++            window_indices = list(range(flow_window[0], flow_window[1]))
++            timestep_indices = torch.tensor(window_indices, device=get_device_id(), dtype=torch.long)
++            timestep_indices = timestep_indices.unsqueeze(0).repeat(B, 1)
++            batch_dict["timestep_indices"] = timestep_indices
++
++        batch = TensorDict(batch_dict, batch_size=B)
+ 
+ 
+         non_tensor_batch = prompts.non_tensor_batch
+@@ -227,17 +276,28 @@ class DiffusionRollout(BaseRollout):
+         neg_context,
+         seq_len,
+         grpo_sample,
++        flow_window=None,
+     ):
+         """WAN采样步骤，支持(C,T,H,W)格式输入"""
+         if grpo_sample:
+-            all_latents = latents
++            all_latents = []
+             
+             all_log_probs = []
++            return_prev_sample_mean = bool(
++                self.config.actor.get("grpo_guard", {}).get("ratio_norm", False)
++            )
++            all_prev_sample_mean = [] if return_prev_sample_mean else None
+             B = len(context) if isinstance(context, list) else context.shape[0]
+             # 确保设备一致
+             device = latents[0].device
+             boundary = getattr(self.config, "wan22_boundary", 0.9)
+             base_guide_scale = getattr(self.config, "guide_scale", 5.0)
++
++            if flow_window is None:
++                window_start = 0
++                window_end = self.config.sampling_steps
++            else:
++                window_start, window_end = flow_window
+             
+             for i in progress_bar:
+                 # 使用sigma值计算timestep
+@@ -321,26 +381,58 @@ class DiffusionRollout(BaseRollout):
+                     torch.cuda.empty_cache()
+ 
+                 # WAN的SDE采样步骤
+-                next_latents, pred_original, log_prob = self.wan_step(
+-                    model_output, 
+-                    latents[0].to(torch.float32),  # (16, 7, 64, 64)
+-                    self.config.actor.eta, 
+-                    sigma_schedule,  # 传入sigma_schedule
+-                    i, 
+-                    prev_sample=None, 
+-                    grpo=True, 
+-                    sde_solver=True  # 启用SDE求解器
+-                )
++                in_window = window_start <= i < window_end
++                if i == window_start:
++                    all_latents.append(latents[0])
++
++                if in_window:
++                    if return_prev_sample_mean:
++                        next_latents, pred_original, log_prob, prev_sample_mean = self.wan_step(
++                            model_output, 
++                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
++                            self.config.actor.eta, 
++                            sigma_schedule,  # 传入sigma_schedule
++                            i, 
++                            prev_sample=None, 
++                            grpo=True, 
++                            sde_solver=True,  # 启用SDE求解器
++                            return_prev_sample_mean=True,
++                        )
++                        all_prev_sample_mean.append(prev_sample_mean)
++                    else:
++                        next_latents, pred_original, log_prob = self.wan_step(
++                            model_output, 
++                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
++                            self.config.actor.eta, 
++                            sigma_schedule,  # 传入sigma_schedule
++                            i, 
++                            prev_sample=None, 
++                            grpo=True, 
++                            sde_solver=True  # 启用SDE求解器
++                        )
++                    all_log_probs.append(log_prob)
++                    all_latents.append(next_latents.to(torch.float32))
++                else:
++                    next_latents, pred_original = self.wan_step(
++                        model_output,
++                        latents[0].to(torch.float32),
++                        0.0,
++                        sigma_schedule,
++                        i,
++                        prev_sample=None,
++                        grpo=False,
++                        sde_solver=True,
++                    )
+                 
+                 latents=[next_latents.to(torch.float32)]
+-                all_latents.append(latents[0])  # 存储 (16, 7, 64, 64)
+-                all_log_probs.append(log_prob)  # 存储 log概率
+-            
+             final_latents = pred_original
+ 
+             # 修正：WAN的all_latents维度是 (num_steps+1, 16, 7, 64, 64)
+             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
+             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
++            if return_prev_sample_mean:
++                all_prev_sample_mean = torch.stack(all_prev_sample_mean, dim=0)
++                return latents, final_latents, all_latents, all_log_probs, all_prev_sample_mean
+             
+             return latents, final_latents, all_latents, all_log_probs
+ 
+@@ -354,6 +446,7 @@ class DiffusionRollout(BaseRollout):
+         prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
+         grpo: bool,                  # True时会得到logprob
+         sde_solver: bool,            # 使用SDE求解器
++        return_prev_sample_mean: bool = False,
+     ):
+         """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
+         
+@@ -386,6 +479,10 @@ class DiffusionRollout(BaseRollout):
+ 
+             # 在除batch维度外的所有维度上求平均
+             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
++            if return_prev_sample_mean:
++                return prev_sample, pred_original_sample, log_prob, prev_sample_mean
+             return prev_sample, pred_original_sample, log_prob
+         else:
++            if return_prev_sample_mean:
++                return prev_sample_mean, pred_original_sample, prev_sample_mean
+             return prev_sample_mean, pred_original_sample
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,29 @@
+From 2084c829d4b50101ddde43262f826a636303aea9 Mon Sep 17 00:00:00 2001
+From: qiruoling <850405207@qq.com>
+Date: Fri, 6 Feb 2026 13:21:11 +0800
+Subject: [PATCH 06/20] =?UTF-8?q?=E8=A7=A3=E5=86=B3=E4=BA=86log=5Fprob?=
+ =?UTF-8?q?=E6=B2=A1=E6=9C=89=E5=AF=B9=E9=BD=90=E7=9A=84=E9=97=AE=E9=A2=98?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ recipe/dancegrpo/dp_actor.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/recipe/dancegrpo/dp_actor.py b/recipe/dancegrpo/dp_actor.py
+index 07f5649a..5829556c 100644
+--- a/recipe/dancegrpo/dp_actor.py
++++ b/recipe/dancegrpo/dp_actor.py
+@@ -210,7 +210,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+                 old_log_probs = batch_on_device.batch["log_probs"][:, step_idx]
+                 #  尝试修复
+                 gen_len = old_log_probs.shape[1]
+-                new_log_probs = new_log_probs[:, -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
++                new_log_probs = new_log_probs[..., -gen_len:]  # 取最后生成的log probs部分进行训练，与old_log_probs对齐
+ 
+                 if ratio_norm:
+                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
+-- 
+2.50.1 (Apple Git-155)
+
