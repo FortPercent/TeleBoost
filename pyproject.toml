@@ -12,14 +12,12 @@ build-backend = "setuptools.build_meta"
 # project (PEP 621 metadata)
 # -------------------------------
 [project]
-name = "verl"
-# We'll mark the version as "dynamic" because it's read from the file "verl/version/version" 
-# (PEP 621 calls this "dynamic version"). 
-# The actual version is specified in the [tool.setuptools.dynamic] section below.
-dynamic = ["version", "dependencies", "optional-dependencies", "authors", "urls"]
+name = "teleboost"
+version = "0.1.0"
+dynamic = ["dependencies", "optional-dependencies", "authors", "urls"]
 
-description = "verl: Volcano Engine Reinforcement Learning for LLM"
-license = {file = "LICENSE"}  # or "Apache-2.0", if you prefer an SPDX identifier
+description = "TeleBoost: video-generation RL training stack on top of verl + Wan2.1/2.2"
+license = {file = "LICENSE"}
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.8"
 
@@ -70,18 +68,6 @@ ignore = [
 # This corresponds to `include_package_data=True` in setup.py.
 include-package-data = true
 
-# We read the version from a file in 'verl/version/version'
-[tool.setuptools.dynamic]
-version = {file = "verl/version/version"}
 
-# If you need to mimic `package_dir={'': '.'}`:
 [tool.setuptools.package-dir]
 "" = "."
-
-# If you need to include specific non-Python data (like YAML files or version file):
-# This is the rough equivalent of package_data={'': ['version/*'], 'verl': ['trainer/config/*.yaml']}
-[tool.setuptools.package-data]
-verl = [
-  "version/*",
-  "trainer/config/*.yaml"
-]

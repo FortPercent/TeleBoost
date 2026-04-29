@@ -18,11 +18,10 @@ from pathlib import Path
 
 from setuptools import find_packages, setup
 
-version_folder = os.path.dirname(os.path.join(os.path.abspath(__file__)))
+__version__ = "0.1.0"
 
-with open(os.path.join(version_folder, "verl/version/version")) as f:
-    __version__ = f.read().strip()
-
+# verl is now an external dependency pinned in requirements.txt; the rest are
+# direct deps used by recipe/, wan/, scripts/, etc.
 install_requires = [
     "accelerate",
     "codetiming",
@@ -73,21 +72,15 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
 setup(
-    name="verl",
+    name="teleboost",
     version=__version__,
     package_dir={"": "."},
-    packages=find_packages(where="."),
-    url="https://github.com/volcengine/verl",
+    packages=find_packages(where=".", exclude=["tests", "tests.*"]),
+    url="https://github.com/FortPercent/TeleBoost",
     license="Apache 2.0",
-    author="Bytedance - Seed - MLSys",
-    author_email="zhangchi.usc1992@bytedance.com, gmsheng@connect.hku.hk",
-    description="verl: Volcano Engine Reinforcement Learning for LLM",
+    description="TeleBoost: video-generation RL training stack on top of verl + Wan2.1/2.2",
     install_requires=install_requires,
     extras_require=extras_require,
-    package_data={
-        "": ["version/*"],
-        "verl": ["trainer/config/*.yaml"],
-    },
     include_package_data=True,
     long_description=long_description,
     long_description_content_type="text/markdown",
