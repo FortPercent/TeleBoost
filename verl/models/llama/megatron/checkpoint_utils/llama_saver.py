@@ -21,9 +21,7 @@ from megatron.core.distributed import DistributedDataParallel as LocalDDP
 from megatron.core.transformer.module import Float16Module
 from torch.nn.parallel import DistributedDataParallel as torchDDP
 
-from verl.utils.device import get_device_id, get_torch_device
-from verl.utils.logger import print_rank_0
-from verl.utils.megatron_utils import unwrap_model
+from verl.utils.megatron_utils import print_rank_0, unwrap_model
 
 
 def _megatron_calc_global_rank(tp_rank: int = 0, dp_rank: int = 0, pp_rank: int = 0):
@@ -148,7 +146,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
             weight = torch.empty(
                 tensor_shape,
                 dtype=dtype,
-                device=get_device_id(),
+                device=torch.cuda.current_device(),
                 requires_grad=False,
             )
 
@@ -177,7 +175,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
         buffer_tensor = torch.empty(
             chunk_shape,
             dtype=dtype,
-            device=get_device_id(),
+            device=torch.cuda.current_device(),
             requires_grad=False,
         )
 
@@ -217,7 +215,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
         buffer_tensor = torch.empty(
             chunk_shape,
             dtype=dtype,
-            device=get_device_id(),
+            device=torch.cuda.current_device(),
             requires_grad=False,
         )
 
@@ -266,7 +264,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
         buffer_tensor = torch.empty(
             chunk_shape,
             dtype=dtype,
-            device=get_device_id(),
+            device=torch.cuda.current_device(),
             requires_grad=False,
         )
 
@@ -318,7 +316,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
             state_dict[v_name] = torch.cat(v_weight_list, dim=0)
 
     # empty cache before collecting weights
-    get_torch_device().empty_cache()
+    torch.cuda.empty_cache()
     # Embeddings
     # -------------------
     if dp_rank == 0:
@@ -419,7 +417,7 @@ def merge_megatron_ckpt_llama(wrapped_models, config, dtype, is_value_model=Fals
 
     dist.barrier()
 
-    get_torch_device().empty_cache()
+    torch.cuda.empty_cache()
     if torch.distributed.get_rank() == 0:
         if dtype not in [torch.float16, torch.bfloat16, torch.float32]:
             print(f'Unknown/unsupported dtype to save: {dtype}"')

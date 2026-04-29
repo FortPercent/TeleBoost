@@ -21,6 +21,7 @@ FROM: https://github.com/openai/prm800k/blob/main/prm800k/grading/grader.py
 
 import contextlib
 import math
+import os
 import re
 
 import sympy
@@ -39,7 +40,6 @@ from .grader import math_equal
 BAD_SUBSTRINGS = ["^{", "^("]
 BAD_REGEXES = ["\^[0-9]+\^", "\^[0-9][0-9]+"]
 TUPLE_CHARS = "()[]"
-
 
 def _sympy_parse(expr: str):
     """Parses an expression with sympy."""

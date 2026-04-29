@@ -92,7 +92,7 @@ class vLLMRollout(BaseRollout):
         tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
         assert tensor_parallel_size <= torch.distributed.get_world_size(), "tensor parallel size should be less than or equal to the world size"
         max_num_batched_tokens = self.config.get("max_num_batched_tokens", 8192)
-        print("max_num_batched_tokens",self.config.get("max_num_batched_tokens"))
+
         if kwargs.get("train_tp") is not None:
             # deployed with megatron
             import os
@@ -124,7 +124,7 @@ class vLLMRollout(BaseRollout):
             assert max_position_embeddings >= config.prompt_length + config.response_length, "model context length should be greater than total sequence length"
 
         max_model_len = int(config.max_model_len or config.prompt_length + config.response_length)
-        
+
         if max_num_batched_tokens < max_model_len and self.config.enable_chunked_prefill:
             raise ValueError(
                 "Enable chunked prefill, max_num_batched_tokens is smaller than max_model_len, \
@@ -134,7 +134,11 @@ class vLLMRollout(BaseRollout):
         trust_remote_code = kwargs.get("trust_remote_code", False)
         load_format = "dummy" if config.load_format.startswith("dummy") else config.load_format
 
-        lora_kwargs = kwargs.pop("lora_kwargs", {})
+        limit_mm_per_prompt = None
+        if config.get("limit_images", None):  # support for multi-image data
+            limit_mm_per_prompt = {"image": config.get("limit_images")}
+
+        lora_kwargs = kwargs.pop('lora_kwargs', {})
         self.lora_kwargs = lora_kwargs
         # copy it to avoid secretly modifying the engine config
         engine_kwargs = {} if "engine_kwargs" not in config or "vllm" not in config.engine_kwargs else OmegaConf.to_container(deepcopy(config.engine_kwargs.vllm))
@@ -143,11 +147,6 @@ class vLLMRollout(BaseRollout):
         #    (which can vary across different vLLM versions);
         # - Otherwise it's the desired value we want to explicitly set.
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
-        if config.get("limit_images", None):  # support for multi-image data
-            engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
-            
-        VIDEO_DIRECTORY = "/gemini/space/wuxuaner/Dancegrpo/videos/output" 
-        print("max_model_len",max_model_len,"config.max_model_len",config.max_model_len, "config.prompt_length",config.prompt_length ,"config.response_length", config.response_length)
         self.inference_engine = LLM(
             model=model_path,
             enable_sleep_mode=True,
@@ -158,6 +157,7 @@ class vLLMRollout(BaseRollout):
             gpu_memory_utilization=config.gpu_memory_utilization,
             disable_custom_all_reduce=True,
             disable_mm_preprocessor_cache=True,
+            limit_mm_per_prompt=limit_mm_per_prompt,
             skip_tokenizer_init=False,
             max_model_len=max_model_len,
             load_format=load_format,
@@ -167,7 +167,6 @@ class vLLMRollout(BaseRollout):
             enable_prefix_caching=True,
             trust_remote_code=trust_remote_code,
             seed=config.get("seed", 0),
-            allowed_local_media_path=VIDEO_DIRECTORY,
             **lora_kwargs,
             **engine_kwargs,
         )
@@ -281,8 +280,8 @@ class vLLMRollout(BaseRollout):
         if self.lora_kwargs:
             lora_int_ids = list(self.inference_engine.llm_engine.list_loras())
             if len(lora_int_ids) > 0:
-                lora_int_id = lora_int_ids[0]
-                lora_requests = [LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")] * batch_size
+                lora_int_id=lora_int_ids[0]
+                lora_requests = [LoRARequest(lora_name=f"{lora_int_id}",lora_int_id=lora_int_id,lora_path="/simon-stub-path")] * batch_size
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
@@ -343,7 +342,7 @@ class vLLMRollout(BaseRollout):
                 "prompts": idx,
                 "responses": response,
                 "input_ids": seq,  # here input_ids become the whole sentences
-                "rollout_log_probs": rollout_log_probs,  # we will recompute old log prob with actor
+                'rollout_log_probs': rollout_log_probs, # we will recompute old log prob with actor
                 "attention_mask": attention_mask,
                 "position_ids": position_ids,
             },
