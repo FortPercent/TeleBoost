@@ -19,7 +19,11 @@ class ContextParallelWanDitBlock(ContextParallelMixin, DiTBlock):
         # from ContextParallelMixin
         self.enable_context_parallel(self.self_attn.attn)
 
-    def forward(self, x, context, t_mod, freqs):
+    def forward(self, x, context, t_mod, freqs, cp_origin_length):
+        # forward_attn (monkey-patched onto self.self_attn.attn) reads this
+        # off self to know the OUTER seqs pre-pad length when removing CP
+        # padding from q/k/v.
+        self._cp_origin_length = cp_origin_length
         modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)
         modulation = modulation + t_mod
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = modulation.chunk(6, dim=1)
@@ -147,10 +151,11 @@ class ParallelWanModel(ContextParallelMixin, TransformerGeneralMixin, WanModel):
         ], dim=-1).reshape(f * h * w, 1, -1).to(x.device)
 
         # Split input sequence and rope (with methods from CPMixin), and forward CP transformer blocks
-        x = self.split_input(x, dim=1)
-        freqs = self.split_input(freqs, dim=0)
-        x = self.blocks(x, context, t_mod, freqs)
-        x = self.gather_output(x, dim=1)
+        x, x_origin_length = self.split_input(x, dim=1)
+        freqs, _ = self.split_input(freqs, dim=0)
+        for block in self.blocks:
+            x = block(x, context, t_mod, freqs, cp_origin_length=x_origin_length)
+        x = self.gather_output(x, dim=1, origin_length=x_origin_length)
 
         # Now x is in full shape, just do regular forward
         x = self.head(x, t)

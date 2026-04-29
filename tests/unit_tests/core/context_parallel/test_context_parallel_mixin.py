@@ -31,11 +31,13 @@ def forward_attn(cp_model, cp_size, cp_rank, que):
         x = x.transpose(1, 2).flatten(2, 3).contiguous().cuda()
         
         # cp attn compute result
-        q_split = cp_model.split_input(q_ori, dim=1).cuda()
-        k_split = cp_model.split_input(k_ori, dim=1).cuda()
-        v_split = cp_model.split_input(v_ori, dim=1).cuda()
+        q_split, q_origin = cp_model.split_input(q_ori, dim=1)
+        k_split, _ = cp_model.split_input(k_ori, dim=1)
+        v_split, _ = cp_model.split_input(v_ori, dim=1)
+        q_split, k_split, v_split = q_split.cuda(), k_split.cuda(), v_split.cuda()
+        cp_model._cp_origin_length = q_origin  # forward_attn reads this off self
         output_split = cp_model.forward_attn(q_split, k_split, v_split).cuda()
-        output = cp_model.gather_output(output_split, dim=1)
+        output = cp_model.gather_output(output_split, dim=1, origin_length=q_origin)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{x.shape}, {cp_size}")
     if torch.all(x == output):
@@ -56,7 +58,7 @@ def gather_output(cp_model, cp_size, cp_rank, q):
         output = torch.cat(x_list, dim=1).cuda()
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{output.shape}, {cp_size}")
-    input_gather = cp_model.gather_output(input, dim=1)
+    input_gather = cp_model.gather_output(input, dim=1, origin_length=output.shape[1])
     if torch.all(input_gather == output):
         global GATHER_SUCCESS
         q.put(f"{GATHER_SUCCESS}{cp_rank}")
@@ -73,7 +75,7 @@ def split_input(cp_model, cp_size, cp_rank, q):
         x = torch.cat(x_list, dim=1)
         # use logging.info to print things to the terminal instead of print(), print stdout will be eaten by pytest
         logging.info(f"{x.shape}, {cp_size}")
-    x_split = cp_model.split_input(x, dim=1)
+    x_split, _ = cp_model.split_input(x, dim=1)
     if torch.all(x_split == x_list[cp_rank]):
         global SPLIT_SUCCESS
         q.put(f"{SPLIT_SUCCESS}{cp_rank}")

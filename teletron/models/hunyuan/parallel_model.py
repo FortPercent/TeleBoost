@@ -80,10 +80,11 @@ class HunyuanVideoDoubleAttnProcessor2_0:
         query = SeqAllToAll.apply(cp_group, query, 1, 2)
         key = SeqAllToAll.apply(cp_group, key,  1, 2)
         value = SeqAllToAll.apply(cp_group, value,  1, 2)
-        query, key ,value = map(
-                lambda x: ContextParallelMixin.remove_pad_for_context_parallel(x, dim=2),
-                [query, key, value]
-            )
+        cp_origin = attn._cp_origin_length
+        query, key, value = (
+            ContextParallelMixin.remove_pad_for_context_parallel(t, dim=2, origin_length=cp_origin)
+            for t in (query, key, value)
+        )
         
         added_query = split_forward_gather_backward(encoder_query, cp_group, dim=1)
         added_key = split_forward_gather_backward(encoder_key, cp_group, dim=1)
@@ -109,7 +110,7 @@ class HunyuanVideoDoubleAttnProcessor2_0:
         )
         
         # 6. Output projection
-        hidden_states = ContextParallelMixin.pad_for_context_parallel(hidden_states, 1)
+        hidden_states, _ = ContextParallelMixin.pad_for_context_parallel(hidden_states, 1)
         hidden_states = SeqAllToAll.apply(cp_group, hidden_states, 1, 2)
         encoder_hidden_states = gather_forward_split_backward(encoder_hidden_states, cp_group, 2)
         
@@ -187,10 +188,12 @@ class HunyuanVideoSingleAttnProcessor2_0:
         value = torch.cat([value, added_value], dim=2)
 
         del added_query, added_key, added_value
-        query, key ,value = map(
-                lambda x: ContextParallelMixin.remove_pad_with_encoder_for_context_parallel(x, encoder_length, dim=2),
-                [query, key, value]
-            )
+        cp_origin = attn._cp_origin_length
+        query, key, value = (
+            ContextParallelMixin.remove_pad_with_encoder_for_context_parallel(
+                t, encoder_length, dim=2, origin_length=cp_origin
+            ) for t in (query, key, value)
+        )
         ### 
         if attention_mask is not None:
             attention_mask = attention_mask.unsqueeze(dim=1)
@@ -205,7 +208,7 @@ class HunyuanVideoSingleAttnProcessor2_0:
         )
 
         # 6. Output projection
-        hidden_states = ContextParallelMixin.pad_for_context_parallel(hidden_states, 1)
+        hidden_states, _ = ContextParallelMixin.pad_for_context_parallel(hidden_states, 1)
         hidden_states = SeqAllToAll4D.apply(cp_group, hidden_states, 1, 2)
         encoder_hidden_states = gather_forward_split_backward(encoder_hidden_states, cp_group, 2)
         
@@ -336,9 +339,16 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
                 ] = True
 
         # 4. Transformer blocks
-        hidden_states = self.split_input(hidden_states, dim=1)
-        freqs_cos = self.split_input(freqs_cos, dim=0)
-        freqs_sin = self.split_input(freqs_sin, dim=0)
+        hidden_states, hs_origin_length = self.split_input(hidden_states, dim=1)
+        freqs_cos, _ = self.split_input(freqs_cos, dim=0)
+        freqs_sin, _ = self.split_input(freqs_sin, dim=0)
+        # Stash outer seq pre-pad length on each attn module so the
+        # HunyuanVideoDouble/SingleAttnProcessor2_0 can read it during
+        # remove_pad_* calls (they receive ``attn`` but no kwargs path).
+        for blk in self.transformer_blocks:
+            blk.attn._cp_origin_length = hs_origin_length
+        for blk in self.single_transformer_blocks:
+            blk.attn._cp_origin_length = hs_origin_length
 
         image_rotary_emb = (freqs_cos, freqs_sin)
         hidden_states, encoder_hidden_states = self.transformer_blocks(
@@ -355,7 +365,7 @@ class ParallelHunyuanVideoModel(ContextParallelMixin, TransformerGeneralMixin, H
             attention_mask,
             image_rotary_emb,
         )
-        hidden_states = self.gather_output(hidden_states, dim=1)
+        hidden_states = self.gather_output(hidden_states, dim=1, origin_length=hs_origin_length)
 
         # 5. Output projection
         hidden_states = self.norm_out(hidden_states, temb)
