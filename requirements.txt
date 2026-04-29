@@ -1,5 +1,10 @@
 # requirements.txt records the full set of dependencies for development.
-# verl is vendored under verl/; no external pin needed.
+#
+# X3 stage 2: pin upstream verl. The verl/ tree in this repo only contains the
+# 103 files that actually diverge from this upstream pin (see git history at
+# stage 2 commit). Stage 3 will move those diffs into teleboost.patches.* so
+# the verl/ overlay can be deleted entirely.
+verl @ git+https://github.com/volcengine/verl.git@v0.4.0
 
 accelerate
 codetiming
