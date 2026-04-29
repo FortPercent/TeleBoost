@@ -280,8 +280,11 @@ class CompareImageEmbedFromVideo:
         if self.compare_limit > 0 and self.compare_count >= self.compare_limit:
             return
         try:
+            # mpu raises if model-parallel state isn't initialized — typical
+            # when running outside a torchrun/megatron context (e.g. plain
+            # data-prep utility). Fall back to rank 0.
             cp_rank = mpu.get_tensor_context_parallel_rank()
-        except Exception:
+        except (AssertionError, RuntimeError, AttributeError):
             cp_rank = 0
         if cp_rank != 0:
             return
@@ -430,8 +433,11 @@ class PreprocessVideoToTensor:
         if self.compare_limit > 0 and self.compare_count >= self.compare_limit:
             return
         try:
+            # mpu raises if model-parallel state isn't initialized — typical
+            # when running outside a torchrun/megatron context (e.g. plain
+            # data-prep utility). Fall back to rank 0.
             cp_rank = mpu.get_tensor_context_parallel_rank()
-        except Exception:
+        except (AssertionError, RuntimeError, AttributeError):
             cp_rank = 0
         if cp_rank != 0:
             return

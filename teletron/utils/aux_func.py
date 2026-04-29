@@ -16,7 +16,8 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = ""
 
 
 
-def validate_yaml(args, defaults={}):
+def validate_yaml(args, defaults=None):
+    defaults = dict(defaults) if defaults is not None else {}
     
     # This is for legacy script env var setting
     if type(args.data_path) is str:
@@ -350,7 +351,8 @@ def validate_yaml(args, defaults={}):
     return args
 
 
-def validate_args(args, defaults={}):
+def validate_args(args, defaults=None):
+    defaults = dict(defaults) if defaults is not None else {}
 
     # Tensor model parallel size.
     args.tensor_model_parallel_size = min(

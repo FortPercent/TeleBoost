@@ -21,7 +21,8 @@ def is_seq_of(seq, expected_type):
 
 
 class PackInputs:
-    def __init__(self, image_keys, embedding_keys=[], mean=0.5, std=0.5, deterministic=False) -> None:
+    def __init__(self, image_keys, embedding_keys=None, mean=0.5, std=0.5, deterministic=False) -> None:
+        embedding_keys = list(embedding_keys) if embedding_keys is not None else []
         self.image_keys = image_keys
         self.embedding_keys = embedding_keys
         self.mean = mean
