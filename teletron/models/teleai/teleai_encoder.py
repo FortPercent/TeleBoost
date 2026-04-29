@@ -292,7 +292,6 @@ class TeleaiEncoder(BaseEncoder):
             res_batch = self._encode_single(raw_batch)
         else:
             res_batch = self._encode_dpo(raw_batch)
-        # from my_utils import get_dumper
         # dumper = get_dumper()
         # dumper.dump(stage="teleai_encoder_output", obj=res_batch, data_id=None)
         return res_batch
