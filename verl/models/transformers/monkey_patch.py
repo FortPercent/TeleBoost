@@ -301,23 +301,15 @@ def apply_monkey_patch(
         return
 
     if model.config.model_type == "t2v":
-        from verl.utils.ulysses import register_cp_grad_reduce_hook
-        from verl.utils.fsdp_utils import patched_post_backward_hook
         from wan.modules.model import Head
         if ulysses_sp_size > 1:
             patch_diffusion_for_ulysses_input_slicing(model)
             patch_diffusion_for_ulysses_head_gather(Head)
-            # register_cp_grad_reduce_hook(model)
 
-            from wan.modules.model import WanSelfAttention,WanI2VCrossAttention
+            from wan.modules.model import WanSelfAttention, WanI2VCrossAttention
             from .wan import ulysses_self_flash_attn_forward
 
             WanSelfAttention.forward = ulysses_self_flash_attn_forward
-
-            import torch.distributed.fsdp._runtime_utils
-            torch.distributed.fsdp._runtime_utils._post_backward_hook = patched_post_backward_hook
-            
-            # WanI2VCrossAttention.forward = ulysses_cross_flash_attn_forward
         return
     # TODO: VLM models only, unify monkey patch to LLM models.
     if model.config.model_type == "qwen2_5_vl":

@@ -495,33 +495,3 @@ def layered_summon_lora_params(fsdp_module) -> OrderedDict:
                 get_torch_device().empty_cache()
     return lora_params
 
-from torch.distributed.fsdp._runtime_utils import _post_backward_hook as original_post_hook
-from typing import no_type_check, Any
-
-@no_type_check
-@torch.no_grad()
-def patched_post_backward_hook(
-    state,
-    handle,
-    flat_param,
-    *unused: Any,
-):
-    # --- 自定义：开始前打印 ---
-    views_grads=handle._get_unflat_views(handle.flat_param.grad)
-    for i, (view, (param_name, module, module_name)) in enumerate(
-            zip(views_grads, handle.flat_param._param_infos)
-        ):
-        if view is None:
-            continue  # 该 param 本步没有 grad
-        if "modulation" in param_name.lower():
-            # 就地缩放，避免新分配；确保是浮点类型再做缩放
-            if view.is_floating_point():
-                view.mul_(0.5)  # 等价于除以 2
-            else:
-                # 若是整型/量化（极少见于可训练权重），跳过或显式转换
-                pass
-
-            # print("modulation",param_name,view.float().norm().item())
-            # exit(0)
-    
-    original_post_hook(state, handle, flat_param, *unused)

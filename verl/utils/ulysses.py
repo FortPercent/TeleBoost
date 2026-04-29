@@ -311,12 +311,10 @@ def register_cp_grad_reduce_hook(model):
             return grad
 
     for name, param in model.named_parameters():
-        # if ("patch_embedding" in name or
-        #     "time" in name or
-        #     "head" in name or
-        #     "modulation" in name):
-        if "blocks" in name:
-            # print("in register cp",name)
+        # modulation params are already SUM-allreduced inside
+        # ModulateWithCPGradReduce / GateWithGradReduce backward; skipping here
+        # avoids double-reduce that would scale the grad by sp_size.
+        if "blocks" in name and "modulation" not in name.lower():
             param.register_hook(cp_grad_reduce)
 
        
