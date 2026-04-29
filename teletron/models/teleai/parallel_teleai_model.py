@@ -37,10 +37,10 @@ class ParallelTeleaiDitBlock(TensorParallelMixin, ContextParallelMixin, DiTBlock
         self.enable_self_attn_tensor_parallel(self.self_attn, config)
         self.enable_cross_attn_tensor_parallel(self.cross_attn, config)
         
-    def forward(self, x, context, t_mod, freqs, cp_origin_length=None):
-        if cp_origin_length is not None:
-            ContextParallelMixin.origin_length = cp_origin_length
-            
+    def forward(self, x, context, t_mod, freqs, cp_origin_length):
+        # forward_attn reads this off self to know the OUTER seq pre-pad length.
+        self._cp_origin_length = cp_origin_length
+
         modulation = self.modulation.to(dtype=t_mod.dtype, device=t_mod.device)
         modulation = modulation + t_mod
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = modulation.chunk(6, dim=1)
@@ -185,16 +185,16 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         freqs = torch.cat([freq_f, freq_h, freq_w], dim=-1)
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
-        x = self.split_input(x, dim=1)
+        x, x_origin_length = self.split_input(x, dim=1)
         # dump_tensor_shape(x, debug_path, "x_after_split_input")
         # 预分配alltoall buffer
         set_global_all_to_all_buffer(x.numel())
-        freqs = self.split_input(freqs, dim=0)
+        freqs, _ = self.split_input(freqs, dim=0)
         # freqs = self.split_input(freqs, dim=-1)
-        
+
         for block in self.blocks:
-            x = block(x, context_emb, t_mod, freqs, cp_origin_length)
-        x = self.gather_output(x, dim=1)
+            x = block(x, context_emb, t_mod, freqs, cp_origin_length=x_origin_length)
+        x = self.gather_output(x, dim=1, origin_length=x_origin_length)
         # dump_tensor_shape(x, debug_path, "x_after_gather_output")
 
         # Now x is in full shape, just do regular forward
