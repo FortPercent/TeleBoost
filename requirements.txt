@@ -27,6 +27,7 @@ func_timeout==4.3.5
 tensordict
 etcd3
 peft
+deepspeed==0.18.9
 # Note: do NOT pin numpy here — it must follow whatever the NGC torch
 # build links against, otherwise the torch <-> numpy ABI breaks.
 # Note: setuptools is provided by the NGC base image; pinning it here

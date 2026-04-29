@@ -6,7 +6,6 @@ from typing import Tuple, Optional
 from einops import rearrange
 from dataclasses import dataclass
 from typing import Tuple, Union, Dict, Any
-from teletron.core.cuda.fused_rmsnorm import Fused_RMSNorm
 import os
 from teletron.utils import get_args
 
@@ -119,13 +118,10 @@ class RMSNorm(nn.Module):
 
 
 
-def switch_rmsnorm(dim,eps=1e-6):
-    # args = get_args()
-    # if args.use_fused_rmsnorm:
-        # return Fused_RMSNorm(dim,eps)
-    # else:
-    return RMSNorm(dim,eps)
-    
+def switch_rmsnorm(dim, eps=1e-6):
+    return RMSNorm(dim, eps)
+
+
 class AttentionModule(nn.Module):
     def __init__(self, num_heads):
         super().__init__()

@@ -1,40 +1,26 @@
 _GLOBAL_ARGS=None
 _GLOBAL_NUM_MICROBATCHES_CALCULATOR = None
-_GLOBAL_TOKENIZER = None
 _GLOBAL_WANDB_WRITER = None
 _GLOBAL_TENSORBOARD_WRITER = None
 _GLOBAL_TIMERS = None
 
-# from megatron.core import Timers
 from .timers import Timers
 from .config import set_config
 from teletron.utils.microbatches import build_num_microbatches_calculator
-from teletron.utils.tokenizer import build_tokenizer
 
 def set_global_args(args):
     assert args is not None
     global _GLOBAL_ARGS
     _GLOBAL_ARGS = args
 
-def set_args(args, build_tokenizer=True):
+def set_args(args):
     assert args is not None
     global _GLOBAL_ARGS
     _ensure_var_is_not_initialized(_GLOBAL_ARGS, 'args')
     _build_num_microbatches_calculator(args)
     _GLOBAL_ARGS = args
-    if build_tokenizer:
-        _ = _build_tokenizer(args)
     _set_timers(args)
     _set_tensorboard_writer(args)
-#     if args.exit_signal_handler:
-#         _set_signal_handler()
-
-def _build_tokenizer(args):
-    """Initialize tokenizer."""
-    global _GLOBAL_TOKENIZER
-    _ensure_var_is_not_initialized(_GLOBAL_TOKENIZER, 'tokenizer')
-    _GLOBAL_TOKENIZER = build_tokenizer(args)
-    return _GLOBAL_TOKENIZER
 
 def get_timers():
     """Return timers."""

@@ -1,4 +1,6 @@
-import os 
+import os
+import dataclasses
+from typing import Tuple
 import torch
 from unittest import TestCase
 from unittest.mock import patch, Mock
@@ -8,10 +10,22 @@ import logging
 logging.basicConfig(level=logging.DEBUG,
 format='%(asctime)s - %(levelname)s - %(message)s')
 
+
+@dataclasses.dataclass
 class WanParams:
-    num_attention_heads: int = 40
-    hidden_size: int = 5120
+    """12 kwargs that internal WanModel.__init__ expects (matches the wan_inputs.pt fixture)."""
+    dim: int = 5120
+    in_dim: int = 36
+    ffn_dim: int = 13824
+    out_dim: int = 16
+    text_dim: int = 4096
+    freq_dim: int = 256
+    eps: float = 1e-6
+    patch_size: Tuple[int, int, int] = (1, 2, 2)
+    num_heads: int = 40
     num_layers: int = 1
+    has_image_input: bool = True
+    has_image_pos_emb: bool = False
 
 
 WAN_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
@@ -19,25 +33,31 @@ WAN_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
 WAN_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
 WAN_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 
+@patch("teletron.models.wan.parallel_wan_model.set_config")
 @patch("teletron.utils.get_args")
-def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
+def parallel_wan_model_testing(rank, world_size, q, mock_teletron, mock_set_config):
     from teletron.models.wan import ParallelWanModel, WanModel
-    from teletron.core.parallel_state import initialize_model_parallel_base 
+    from teletron.core.parallel_state import initialize_model_parallel_base
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 1
     args.activation_offload = True
-    args.num_layers = 1 
+    args.num_layers = 1
     args.num_attention_heads = 40
     args.distributed_vae = False
     mock_teletron.return_value = args
     args.consumer_models_num = 1
 
+    wanConfig = WanParams()
+    mock_set_config.return_value = {
+        "model_config": {"dit": {"config": dataclasses.asdict(wanConfig)}}
+    }
+
     cp_size = world_size
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
     torch.cuda.set_device(rank)
-    
+
     initialize_model_parallel_base(
             tensor_model_parallel_size = 1,
             pipeline_model_parallel_size = 1,
@@ -49,22 +69,17 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron):
             nccl_communicator_config_path = None,
             distributed_timeout_minutes = 30,
         )
-    wanConfig = WanParams()
     torch.manual_seed(1234)
-    wan_model = WanModel(wanConfig).cuda().to(torch.bfloat16)
+    wan_model = WanModel(**dataclasses.asdict(wanConfig)).cuda().to(torch.bfloat16)
     torch.manual_seed(1234)
     parallel_wan_model = ParallelWanModel(wanConfig).cuda().to(torch.bfloat16)
 
     parallel_wan_model.load_state_dict(wan_model.state_dict())
-    # wan_params = dict(wan_model.named_parameters())
-    # wan_parallel_params = dict(parallel_wan_model.named_parameters())
 
-    # from tensorwatch import watch_module_forward_backward, TensorWatch
-    # watch_module_forward_backward(parallel_wan_model)
-
-    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
+    fixture_path = os.path.join(os.path.dirname(__file__), "wan_inputs.pt")
+    input_dict = torch.load(fixture_path, map_location=f"cuda:{rank}")
     wan_model_output = wan_model(**input_dict)
-    input_dict = torch.load("/nvfile-heatstorage/teleai-infra/litian/teletron-refactor/test/test_data/transformer_inputs.pt", map_location=f"cuda:{rank}")
+    input_dict = torch.load(fixture_path, map_location=f"cuda:{rank}")
     parallel_wan_model_output = parallel_wan_model(**input_dict)
     if is_close_by_normalized_euclid_dist(wan_model_output, parallel_wan_model_output):
         q.put(f"{WAN_MODEL_FWD_SUCCESS} rank{rank}")

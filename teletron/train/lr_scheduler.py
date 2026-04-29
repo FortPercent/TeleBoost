@@ -6,10 +6,37 @@ from megatron.core import mpu
 from megatron.core.optimizer import (
     OptimizerConfig,
     _get_param_groups,
-    _update_min_and_max_lr_in_param_groups,
     _get_megatron_optimizer_based_on_param_groups,
     ChainedOptimizer,
 )
+
+
+def _build_param_groups(model, config, no_weight_decay_cond, scale_lr_cond, lr_mult):
+    """mc 0.16.1 adapter for the old _get_param_groups + _update_min_and_max_lr_in_param_groups
+    pattern.
+
+    The new mc 0.16.1 ``_get_param_groups(model_chunks, config, config_overrides=None)``
+    already populates ``max_lr=config.lr`` and ``min_lr=config.min_lr`` in each returned
+    param_group, and with ``config_overrides=None`` falls back to
+    ``get_standard_config_overrides(config)`` — which gives bias / 1-D parameters
+    weight_decay=0, identical to the old ``no_weight_decay_cond=None`` default behavior.
+
+    The legacy ``no_weight_decay_cond`` / ``scale_lr_cond`` / ``lr_mult`` arguments map
+    onto ``config_overrides`` in the new API. teletron has no caller that passes
+    non-default values for these, so we refuse non-defaults rather than silently
+    degrading; users that need them should construct ``config_overrides`` directly.
+    """
+    if no_weight_decay_cond is not None or scale_lr_cond is not None or lr_mult != 1.0:
+        raise NotImplementedError(
+            "mc 0.16.1 migrated _get_param_groups: pass these via config_overrides "
+            "(Dict[ParamKey, ParamGroupOverride]); legacy no_weight_decay_cond / "
+            "scale_lr_cond / lr_mult kwargs no longer wired through."
+        )
+    return _get_param_groups(
+        model_chunks=model,
+        config=config,
+        config_overrides=None,
+    )
 from megatron.core.transformer.module import MegatronModule
 from apex.optimizers import FusedAdam as Adam
 from apex.optimizers import FusedSGD as SGD
@@ -349,20 +376,8 @@ class SchedulerMixin:
                         scale_lr_cond: Optional[Callable] = None, 
                         lr_mult: float = 1.0,):
         args = get_args()
-        # Collect param groups.
-        param_groups = _get_param_groups(
-            model,
-            no_weight_decay_cond,
-            scale_lr_cond,
-            lr_mult,
-            use_decoupled_learning_rate=config.decoupled_lr is not None,
-        )
-        param_groups = _update_min_and_max_lr_in_param_groups(
-            param_groups,
-            lr=config.lr,
-            min_lr=config.min_lr,
-            decoupled_lr=config.decoupled_lr,
-            decoupled_min_lr=config.decoupled_min_lr,
+        param_groups = _build_param_groups(
+            model, config, no_weight_decay_cond, scale_lr_cond, lr_mult,
         )
         if config.optimizer == 'adam':
             base_optimizer = Adam(
@@ -440,20 +455,8 @@ class SchedulerMixin:
         if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
             logger.info(f'Setting up optimizer with {config}')
 
-        # Collect param groups.
-        param_groups = _get_param_groups(
-            model,
-            no_weight_decay_cond,
-            scale_lr_cond,
-            lr_mult,
-            use_decoupled_learning_rate=config.decoupled_lr is not None,
-        )
-        param_groups = _update_min_and_max_lr_in_param_groups(
-            param_groups,
-            lr=config.lr,
-            min_lr=config.min_lr,
-            decoupled_lr=config.decoupled_lr,
-            decoupled_min_lr=config.decoupled_min_lr,
+        param_groups = _build_param_groups(
+            model, config, no_weight_decay_cond, scale_lr_cond, lr_mult,
         )
 
         # Collect grad buffers for distributed optimizer.

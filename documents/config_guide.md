@@ -47,8 +47,8 @@ dataset=dict(
 
 ```python
 data_path_list=[
-    "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
-    "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_1.json",
+    "/path/to/istock_dataset/istock_0.json",
+    "/path/to/istock_dataset/istock_1.json",
     # 更多数据文件...
 ]
 ```
@@ -144,7 +144,7 @@ transforms=[
 ```python
 eval=dict(
     data_path_list=[
-        "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+        "/path/to/istock_dataset/istock_0.json",
     ],
 )
 ```
@@ -233,7 +233,7 @@ encoder=dict(
 #### VAE配置
 ```python
 vae=dict(
-    path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+    path="/path/to/Wan2.1-I2V-14B-480P/Wan2.1_VAE.pth",
     tiler_kwargs=dict(
         tiled=False,           # 是否使用分块编码
         tile_size=(34, 34),    # 分块大小
@@ -258,15 +258,15 @@ vae=dict(
 #### 文本编码器配置
 ```python
 text_encoder=dict(
-    path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
-    tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
+    path="/path/to/Wan2.1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+    tokenizer_path="/path/to/Wan2.1-I2V-14B-480P/google/umt5-xxl",
 )
 ```
 
 #### 图像编码器配置
 ```python
 image_encoder=dict(
-    path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+    path="/path/to/Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
     torch_compile = False
 )
 ```
@@ -275,7 +275,7 @@ image_encoder=dict(
 #### 深度模型配置
 ```python
 depth_model=dict(
-    path="/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth",
+    path="/path/to/ckpts/video_depth_anything_vitl.pth",
 )
 ```
 

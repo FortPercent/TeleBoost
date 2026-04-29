@@ -20,22 +20,29 @@ class BaseModel(nn.Module):
                 self.denoising_step_list = timesteps[1000 - self.denoising_step_list]
 
     def _initialize_models(self, args, device):
-        self.real_model_name = getattr(args, "real_name", "Wan2.1-T2V-1.3B")
-        self.fake_model_name = getattr(args, "fake_name", "Wan2.1-T2V-1.3B")
-
-        self.generator = WanDiffusionWrapper(**getattr(args, "model_kwargs", {}), is_causal=True)
+        # All wrapper paths come from args (filled by the launcher / config), no hardcoded paths.
+        gen_kwargs = getattr(args, "model_kwargs", {})
+        self.generator = WanDiffusionWrapper(**gen_kwargs, is_causal=True)
         self.generator.model.requires_grad_(True)
 
-        self.real_score = WanDiffusionWrapper(model_name=self.real_model_name, is_causal=False)
+        real_kwargs = getattr(args, "real_score_kwargs", gen_kwargs)
+        self.real_score = WanDiffusionWrapper(**real_kwargs, is_causal=False)
         self.real_score.model.requires_grad_(False)
 
-        self.fake_score = WanDiffusionWrapper(model_name=self.fake_model_name, is_causal=False)
+        fake_kwargs = getattr(args, "fake_score_kwargs", gen_kwargs)
+        self.fake_score = WanDiffusionWrapper(**fake_kwargs, is_causal=False)
         self.fake_score.model.requires_grad_(True)
 
-        self.text_encoder = WanTextEncoder()
+        text_kwargs = getattr(args, "text_encoder_kwargs", None)
+        if text_kwargs is None:
+            raise ValueError("args.text_encoder_kwargs missing; expected dict with 'weights_path' and 'tokenizer_path'.")
+        self.text_encoder = WanTextEncoder(**text_kwargs)
         self.text_encoder.requires_grad_(False)
 
-        self.vae = WanVAEWrapper()
+        vae_kwargs = getattr(args, "vae_kwargs", None)
+        if vae_kwargs is None:
+            raise ValueError("args.vae_kwargs missing; expected dict with 'weights_path'.")
+        self.vae = WanVAEWrapper(**vae_kwargs)
         self.vae.requires_grad_(False)
 
         self.scheduler = self.generator.get_scheduler()

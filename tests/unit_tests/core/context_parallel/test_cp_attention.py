@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from megatron.core import mpu
 from einops import rearrange
-from teletron.core.context_parallel.mappings import SeqAllToAll, set_global_all_to_all_buffer, split_forward_gather_backward, gather_forward_split_backward
+from teletron.core.context_parallel.mappings import SeqAllToAll, split_forward_gather_backward, gather_forward_split_backward
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -70,7 +70,6 @@ class CPAttn(Attn, ):
     def forward(self, x):
         cp_group = mpu.get_context_parallel_group()
         x = split_forward_gather_backward(x, cp_group, dim=1, grad_scale="none")
-        set_global_all_to_all_buffer(x.numel())
         q = self.q_linear(x)
         k = self.k_linear(x)
         v = self.v_linear(x)
@@ -78,9 +77,9 @@ class CPAttn(Attn, ):
         k = rearrange(k, "b s (n d) -> b s n d", n=40)
         v = rearrange(v, "b s (n d) -> b s n d", n=40)
         if mpu.get_context_parallel_world_size() > 1:
-            q = SeqAllToAll.apply(cp_group, q, 2, 1, True)
-            k = SeqAllToAll.apply(cp_group, k, 2, 1, True)
-            v = SeqAllToAll.apply(cp_group, v, 2, 1, True)
+            q = SeqAllToAll.apply(cp_group, q, 2, 1)
+            k = SeqAllToAll.apply(cp_group, k, 2, 1)
+            v = SeqAllToAll.apply(cp_group, v, 2, 1)
             # qkv: b s n/CP d
 
         if FLASH_ATTN_3_AVAILABLE:
@@ -92,9 +91,7 @@ class CPAttn(Attn, ):
             v = v.transpose(1, 2).contiguous()
             x = F.scaled_dot_product_attention(q, k, v)
         if mpu.get_context_parallel_world_size() > 1:
-            x = SeqAllToAll.apply(
-                cp_group, x, 2, 1, True
-            )  # b img_seq sub_n d
+            x = SeqAllToAll.apply(cp_group, x, 2, 1)  # b img_seq sub_n d
             # x: b n s/CP d
         x = x.transpose(1, 2).flatten(2, 3).contiguous()
         # x: b s h

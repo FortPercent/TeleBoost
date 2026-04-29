@@ -2,35 +2,11 @@
 
 
 from typing import Optional, List, Any
-import itertools
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from megatron.core import mpu
-
-
-ALL_TO_ALL_BUFFER = None
-# Sequence counter used by the hang-locate prints in SeqAllToAll.backward.
-_CP_A2A_SEQ = itertools.count()
-
-def set_global_all_to_all_buffer(buffer_numel):
-    global ALL_TO_ALL_BUFFER
-    cp_size = mpu.get_context_parallel_world_size()
-    # define all_to_all input buffer
-    buffer_numel = buffer_numel // cp_size
-    ALL_TO_ALL_BUFFER = [torch.zeros(buffer_numel, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
-
-def get_all_to_all_buffer(loca_input):
-    global ALL_TO_ALL_BUFFER
-    # resize ALL_TO_ALL_BUFFER
-    cp_size = mpu.get_context_parallel_world_size()
-    input_numel = loca_input.numel() // cp_size
-    if input_numel > ALL_TO_ALL_BUFFER[0].numel():
-        ALL_TO_ALL_BUFFER = None
-        ALL_TO_ALL_BUFFER = [torch.zeros(input_numel, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
-    all_to_all_buffer = [t[:input_numel] for t in ALL_TO_ALL_BUFFER]
-    return all_to_all_buffer
 
 
 class SeqAllToAll(torch.autograd.Function):
@@ -41,66 +17,53 @@ class SeqAllToAll(torch.autograd.Function):
         local_input: Tensor,
         scatter_dim: int,
         gather_dim: int,
-        use_buffer: bool = False,
         async_op: bool = False,
     ) -> Tensor:
         ctx.group = group
         ctx.scatter_dim = scatter_dim
         ctx.gather_dim = gather_dim
         ctx.async_op = async_op
-        ctx.use_buffer = use_buffer
-        return all_to_all_tensor(local_input, scatter_dim, gather_dim, use_buffer, group, async_op)
+        return all_to_all_tensor(local_input, scatter_dim, gather_dim, group, async_op)
 
     @staticmethod
-    def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
-        rank = torch.distributed.get_rank()
-        seq = next(_CP_A2A_SEQ)
-        input_t = torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous() if ctx.async_op else grad_output[0]
-        print(
-            f"[SeqAllToAll.backward] seq={seq} rank={rank} BEFORE all_to_all_tensor, "
-            f"shape={list(input_t.shape)}, scatter_dim={ctx.gather_dim}, gather_dim={ctx.scatter_dim}",
-            flush=True,
+    def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
+        input_t = (
+            torch.cat(grad_output[1:], dim=ctx.gather_dim).contiguous()
+            if ctx.async_op else grad_output[0]
         )
-        result = all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.use_buffer, ctx.group, False)
-        print(f"[SeqAllToAll.backward] seq={seq} rank={rank} AFTER all_to_all_tensor", flush=True)
-        return (
-            None,
-            result,
-            None,
-            None,
-            None,
-            None,
-        )
+        result = all_to_all_tensor(input_t, ctx.gather_dim, ctx.scatter_dim, ctx.group, False)
+        return None, result, None, None, None
+
 
 def all_to_all_tensor(
     local_input: Tensor,
     scatter_dim: int,
     gather_dim: int,
-    use_buffer: bool,
     group: Optional[dist.ProcessGroup] = None,
     async_op: bool = False,
 ):
+    """All-to-all on ``scatter_dim``, gather along ``gather_dim``.
+
+    Replaces an earlier global-buffer-pool optimization that turned out to be
+    a 28% pessimization vs. just relying on PyTorch's caching allocator
+    (benchmarked on H800, cp_size=4, Wan-realistic shapes). See git history
+    for the previous ``ALL_TO_ALL_BUFFER`` machinery.
+    """
     group = mpu.get_context_parallel_group() if group is None else group
     cp_size = dist.get_world_size(group)
     input_shape = list(local_input.shape)
     input_shape[scatter_dim] = input_shape[scatter_dim] // cp_size
 
-    if use_buffer:
-        all_to_all_buffer = get_all_to_all_buffer(local_input)
-        all_to_all_input = list(torch.tensor_split(local_input, cp_size, scatter_dim))
-        input_list = [a.copy_(b.reshape(-1)) for a,b in zip(all_to_all_buffer, all_to_all_input)]
-    else:
-        input_list = [t.contiguous() for t in torch.tensor_split(local_input, cp_size, scatter_dim)]
-    
-    # 创建输出buffer
-    output_list = [torch.empty(input_shape, device=torch.cuda.current_device(), dtype=torch.bfloat16) for _ in range(cp_size)]
+    input_list = [t.contiguous() for t in torch.tensor_split(local_input, cp_size, scatter_dim)]
+    output_list = [
+        torch.empty(input_shape, device=torch.cuda.current_device(), dtype=local_input.dtype)
+        for _ in range(cp_size)
+    ]
     comm = dist.all_to_all(output_list, input_list, group=group, async_op=async_op)
     if async_op:
-
         def wait():
             comm.wait()
             return torch.cat(output_list, dim=gather_dim).contiguous()
-
         return wait
     return torch.cat(output_list, dim=gather_dim).contiguous()
 

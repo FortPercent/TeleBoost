@@ -50,8 +50,7 @@ teletron = ["**/*.yml", "**/*.sh"]
 dependencies = {file = ["requirements.txt"]}
 
 [tool.uv]
-link-mode = "copy" 
-index-url = "http://pypi.chinatelecom.ai/simple/"
+link-mode = "copy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

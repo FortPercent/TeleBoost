@@ -305,37 +305,3 @@ class CLIPTextWithProjectionTransform:
             text_features = text_features.contiguous().cpu().numpy()
             pooled_text_features = pooled_text_features.contiguous().cpu().numpy()
         return text_features, pooled_text_features
-
-
-if __name__ == "__main__":
-    model_path = "/nvfile-heatstorage/model_zoo/huggingface/hunyuan/hunyuanvideo_13b/text_encoder_2"
-
-    # 1. 使用 CLIPTextTransform 提取 pooled_text_features
-    text_transform = CLIPTextTransform(model_path)
-    text = "这是一个测试句子。"
-    pooled_text_features1 = text_transform(text, mode="after_pool", to_numpy=False)
-    print(
-        "CLIPTextTransform 提取的 pooled_text_features 形状：",
-        pooled_text_features1.shape,
-    )
-
-    # 加载分词器和文本编码器
-    tokenizer = CLIPTokenizer.from_pretrained(model_path)
-    text_model = CLIPTextModel.from_pretrained(model_path)
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
-    outputs = text_model(input_ids=inputs.input_ids)
-    pooled_text_features2 = outputs.pooler_output
-    print("pooled_text_features2 形状：", pooled_text_features2.shape)
-    print(f"IsEqual = {torch.equal(pooled_text_features1, pooled_text_features2)}")
-
-    text_transform = CLIPTextTransform(model_path)
-    texts = ["这是一个测试句子。", "这是第二个测试句子。", "这是第三个测试句子。"]
-    pooled_text_features3 = text_transform(texts, mode="after_pool", to_numpy=False)
-    print(
-        "CLIPTextTransform 提取的 pooled_text_featuress 形状：",
-        pooled_text_features3.shape,
-    )
-
-    from IPython import embed
-
-    embed()

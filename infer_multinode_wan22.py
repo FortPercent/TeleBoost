@@ -18,10 +18,10 @@ from prompts.vfx_fl2v_prompt import PROMPT_CONFIGS
 # from prompts.continue_t2v_first import PROMPT_CONFIGS
 
 
-LOW_NOISE_CKPT_PATH = "/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/init/low_noise_I2V/release/mp_rank_00/model_optim_rng.pt"
-HIGH_NOISE_CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/align_dpo_i2v_480_49_new_after_400/iter_0000500/mp_rank_00/model_optim_rng.pt"
-# HIGH_NOISE_CKPT_PATH = "/nvfile-heatstorage/AIGC_H100/basemodel_exp/ckpts/ljq/Teletron/sft_arena_4k_01_debug/iter_0001800/mp_rank_00/ema_model.pt"
-SAVEDIR = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/examples/teleai/results/synthetic/wan22_dpo_500/fps8"
+LOW_NOISE_CKPT_PATH = os.environ["LOW_NOISE_CKPT_PATH"]
+HIGH_NOISE_CKPT_PATH = os.environ["HIGH_NOISE_CKPT_PATH"]
+SAVEDIR = os.environ.get("INFER_SAVEDIR", "./results/wan22_infer")
+WAN2_1_I2V_14B_480P = os.environ["WAN2_1_I2V_14B_480P"]
 
 # 使用环境变量获取节点信息
 NODE_INDEX = int(os.environ.get('GEMINI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX', 0))
@@ -83,7 +83,7 @@ PIPELINE_CONFIG = dict(
         encoder=dict(
             vae=dict(
                 type="TeleaiVideoVAE_2_1",
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "Wan2.1_VAE.pth"),
                 tiler_kwargs=dict(
                     tiled=False,
                     tile_size=(34, 34),
@@ -91,11 +91,11 @@ PIPELINE_CONFIG = dict(
                 ),
             ),
             text_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
-                tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "models_t5_umt5-xxl-enc-bf16.pth"),
+                tokenizer_path=os.path.join(WAN2_1_I2V_14B_480P, "google/umt5-xxl"),
             ),
             image_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"),
             ),
         ),
     ),

@@ -81,8 +81,10 @@ class WanVideoEncoder(BaseEncoder):
         self.vae.model.load_state_dict(torch.load(self.vae_path, map_location='cpu'), strict=True)
 
         print(f"加载 Text Encoder 模型... {self.text_encoder_path}")
-        self.text_encoder = WanTextEncoder().to(device=self.device, dtype=torch.bfloat16)
-        self.text_encoder.load_state_dict(torch.load(self.text_encoder_path, map_location='cpu', weights_only=False), strict=True)
+        self.text_encoder = WanTextEncoder(
+            weights_path=self.text_encoder_path,
+            tokenizer_path=self.tokenizer_path,
+        ).to(device=self.device, dtype=torch.bfloat16)
         self.prompter = WanPrompter()
         self.prompter.fetch_models(self.text_encoder)
         self.prompter.fetch_tokenizer(self.tokenizer_path)

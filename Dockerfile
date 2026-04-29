@@ -59,13 +59,6 @@ RUN find /usr/local/lib/python3*/dist-packages -maxdepth 2 -name cv2 -type d -ex
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# ─── build fused_rmsnorm CUDA kernel ──────────────────────────────────
-# Compiled into site-packages so the .so is available regardless of
-# how the user later mounts source. Optional at runtime (gated by the
-# `--use-fused-rmsnorm` training flag).
-COPY teletron/core/cuda/fused_rmsnorm /tmp/fused_rmsnorm
-RUN cd /tmp/fused_rmsnorm && bash install.sh && rm -rf /tmp/fused_rmsnorm
-
 WORKDIR /workspace
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]

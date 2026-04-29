@@ -25,8 +25,6 @@ class _A: num_attention_heads = NUM_HEADS
 tu.get_args = lambda: _A()
 
 from teletron.core.context_parallel.context_parallel_mixin import ContextParallelMixin
-from teletron.core.context_parallel.mappings import set_global_all_to_all_buffer
-set_global_all_to_all_buffer(1024 * 1024)
 
 
 class RefBlock(nn.Module):

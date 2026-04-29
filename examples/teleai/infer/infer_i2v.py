@@ -10,8 +10,9 @@ from prompts.HardPrompt import PROMPT_CONFIGS
 from prompts.i2v150Prompt import PROMPT_CONFIGS
 from prompts.flf2vPrompt import PROMPT_CONFIGS
 
-CKPT_PATH = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/high_noise_teletron/release/mp_rank_00/model_optim_rng.pt" # ema_model.pt
-SAVEDIR = "/nvfile-heatstorage/ai_infra/code/fanyk1/yp/high_noise_teletron/release/results"
+CKPT_PATH = os.environ["CKPT_PATH"]  # path to model_optim_rng.pt or ema_model.pt
+SAVEDIR = os.environ.get("INFER_SAVEDIR", "./results/infer_i2v")
+WAN2_1_I2V_14B_480P = os.environ["WAN2_1_I2V_14B_480P"]
 
 GPU_IDS = [0]
 
@@ -48,7 +49,7 @@ PIPELINE_CONFIG = dict(
         ),
         encoder=dict(
             vae=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "Wan2.1_VAE.pth"),
                 tiler_kwargs=dict(
                     tiled=False,
                     tile_size=(34, 34),
@@ -56,11 +57,11 @@ PIPELINE_CONFIG = dict(
                 ),
             ),
             text_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
-                tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "models_t5_umt5-xxl-enc-bf16.pth"),
+                tokenizer_path=os.path.join(WAN2_1_I2V_14B_480P, "google/umt5-xxl"),
             ),
             image_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                path=os.path.join(WAN2_1_I2V_14B_480P, "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"),
             ),
         ),
     ),

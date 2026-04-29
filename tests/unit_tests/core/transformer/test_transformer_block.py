@@ -36,7 +36,8 @@ def get_model(mock_teletron):
             self.enable_activation_checkpointing(self.blocks)
 
         def forward(self, x):
-            x = self.blocks(x)
+            for block in self.blocks:
+                x = block(x)
             return x
 
     test_config = TestConfig()

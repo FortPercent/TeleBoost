@@ -1,13 +1,12 @@
-import os 
+import os
+import logging
 from dataclasses import dataclass, asdict
-import torch
 from typing import Tuple
 from unittest import TestCase
 from unittest.mock import patch, Mock
+import torch
 from unit_tests.test_utils import spawn
 from megatron.core import mpu
-import logging
-import os
 
 TELEAI_MODEL_FWD_SUCCESS = "Parallel Wan model forward test success"
 TELEAI_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
@@ -63,7 +62,7 @@ def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
         try:
             TensorWatch.run_name = run_tag
         except Exception:
-            passvscode-remote://k8s-container%2Bcontext%3Ddefault%2Bpodname%3Def280315711c1b782108c6361af45d1b-taskrole1-0%2Bnamespace%3Ddefault%2Bname%3Dapp%2Bimage%3Dstorage-docker-registry-agent.gemini-comp%253a5004%252ftuvsnor8hhlv%252fmyk%253aomni/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/tests/tensorwatch_data/teleai_tp1_cp1/rank_0/step_0/tensorwatch.json vscode-remote://k8s-container%2Bcontext%3Ddefault%2Bpodname%3Def280315711c1b782108c6361af45d1b-taskrole1-0%2Bnamespace%3Ddefault%2Bname%3Dapp%2Bimage%3Dstorage-docker-registry-agent.gemini-comp%253a5004%252ftuvsnor8hhlv%252fmyk%253aomni/nvfile-heatstorage/ai_infra/code/fanyk1/yp/Teletron-dpo/tests/unit_tests/models/test_parallel_teleai_model.py
+            pass
 
     watch_module_forward_backward(model, use_megatron=False, use_deepspeed=False)
     if hasattr(TensorWatch, "is_save_tensor"):
@@ -157,7 +156,11 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     
     
     parallel_teleai_model.load_state_dict(tp_load_state_dict(teleai_model))
-    input_dict = torch.load("/nvfile-heatstorage/ai_infra/data/lit117/teletron-testing/test_data/saved_inputs_360/input_dict_iter0_rank0.pt", map_location=f"cuda:{cuda_rank}")
+    fixture_path = os.environ.get("TELEAI_TEST_FIXTURE")
+    if not fixture_path:
+        q.put("SKIP: set TELEAI_TEST_FIXTURE env var to a saved input_dict_iter0_rank0.pt")
+        return
+    input_dict = torch.load(fixture_path, map_location=f"cuda:{cuda_rank}")
    
     teleai_model_output = teleai_model(x=input_dict['noisy_latents'],
                                        timestep=input_dict['timestep'],

@@ -362,75 +362,6 @@ class WanDistBatchLoader(BaseBatchLoader):
         
         return batch
 
-class HunyuanDistBatchLoader(BaseBatchLoader):
-    """
-    `get_batch_on_this_tp_cp_rank_Hunyuan_dist` 的实现。
-    """
-    def _prepare_batch_on_rank_zero(self):
-        if self.data_iterator is not None:
-            # 虽然 next(data_iterator) 在原代码中存在，但其结果未使用
-            # 我们保留这个调用以保持与原始逻辑的一致性
-            _ = next(self.data_iterator, None)
-
-        comm_pair = get_comm_pair()
-        
-        sizes_info = torch.empty((15), device=torch.cuda.current_device(), dtype=torch.int32)
-        req = dist.irecv(sizes_info, comm_pair.producer, tag=0)
-        req.wait()
-
-        transformer_embedding_size = sizes_info[0]*sizes_info[1]*sizes_info[2]
-        clip_embedding_size = sizes_info[3]*sizes_info[4]
-        first_img_embedding_size = sizes_info[5]*sizes_info[6]*sizes_info[7]*sizes_info[8]*sizes_info[9]
-        video_embedding_size = sizes_info[10]*sizes_info[11]*sizes_info[12]*sizes_info[13]*sizes_info[14]
-
-        total_size = transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-        recv_tensor = torch.empty((total_size), device=torch.cuda.current_device(), dtype=torch.bfloat16)
-
-        intervals = [
-            0, 
-            transformer_embedding_size,
-            transformer_embedding_size + clip_embedding_size,
-            transformer_embedding_size + clip_embedding_size + first_img_embedding_size,
-            transformer_embedding_size + clip_embedding_size + first_img_embedding_size + video_embedding_size
-        ]
-        
-        req = dist.irecv(recv_tensor, comm_pair.producer, tag=0)
-        req.wait()
-
-        tf_embed, clip_embed, img_embed, latents = unpack_tensors(recv_tensor, intervals)
-        
-        batch = {
-            'prompt_embeds': tf_embed.view(sizes_info[0], sizes_info[1], sizes_info[2]),
-            'clip_text_embed': clip_embed.view(sizes_info[3], sizes_info[4]),
-            'first_ref_image': img_embed.view(sizes_info[5], sizes_info[6], sizes_info[7], sizes_info[8], sizes_info[9]),
-            'latents': latents.view(sizes_info[10], sizes_info[11], sizes_info[12], sizes_info[13], sizes_info[14])
-        }
-
-        return batch
-
-class HunyuanOriginBatchLoader(BaseBatchLoader):
-    """
-    `get_batch_on_this_tp_cp_rank_Hunyuan_origin` 的实现。
-    """
-    def _prepare_batch_on_rank_zero(self):
-        if self.data_iterator is None:
-            return None
-        
-        try:
-            data = next(self.data_iterator)
-        except StopIteration:
-            return None # 返回 None 以向基类发出迭代结束的信号
-
-        batch = {
-            'images': data["images"].cuda(non_blocking=True),
-            'first_ref_image': data["first_ref_image"].cuda(non_blocking=True) if "first_ref_image" in data else None,
-            'prompt_embeds': data["prompt_embeds"].cuda(non_blocking=True),
-            'clip_text_embed': data["clip_text_embed"].cuda(non_blocking=True) if "clip_text_embed" in data else None
-        }
-        
-        return batch
-
-
 class CausalWanOriginalBatchLoader(BaseBatchLoader):
     def _prepare_batch_on_rank_zero(self):
         if self.data_iterator is None:
@@ -524,13 +455,6 @@ def create_batch_loader(args, data_iterator):
             return WanDistBatchLoader(data_iterator)
         else:
             raise NotImplementedError("A non-distributed VAE loader for VastModel is not implemented.")        
-    elif 'hunyuan' in model_name_lower:
-        if is_distributed_vae:
-            print("Info: Creating HunyuanDistBatchLoader.")
-            return HunyuanDistBatchLoader(data_iterator)
-        else:
-            print("Info: Creating HunyuanOriginBatchLoader.")
-            return HunyuanOriginBatchLoader(data_iterator)
     elif 'causal' in model_name_lower:
         if is_distributed_vae:
             print("Info: Creating CausalWanBatchLoader.")

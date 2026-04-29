@@ -96,9 +96,9 @@ class ContextParallelMixin:
         v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
 
         if mpu.get_context_parallel_world_size() > 1:
-            q = SeqAllToAll.apply(cp_group, q, 2, 1, True)
-            k = SeqAllToAll.apply(cp_group, k, 2, 1, True)
-            v = SeqAllToAll.apply(cp_group, v, 2, 1, True)
+            q = SeqAllToAll.apply(cp_group, q, 2, 1)
+            k = SeqAllToAll.apply(cp_group, k, 2, 1)
+            v = SeqAllToAll.apply(cp_group, v, 2, 1)
             q, k, v = (
                 self.remove_pad_for_context_parallel(t, 1, origin_length) for t in (q, k, v)
             )
@@ -114,7 +114,7 @@ class ContextParallelMixin:
 
         if mpu.get_context_parallel_world_size() > 1:
             x, _ = self.pad_for_context_parallel(x, 2)
-            x = SeqAllToAll.apply(cp_group, x, 2, 1, True)
+            x = SeqAllToAll.apply(cp_group, x, 2, 1)
 
         x = x.transpose(1, 2).flatten(2, 3).contiguous()
         return x

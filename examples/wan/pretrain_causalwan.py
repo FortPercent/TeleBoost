@@ -43,7 +43,7 @@ def extra_args(parser):
     group2.add_argument("--encoder_tokenizer_path", type=str, default=
                        "/workspace/Wan2___1-I2V-14B-480P/google/umt5-xxl")
     group.add_argument("--depth-model-path", type=str, default=
-                        "/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth")
+                        "/path/to/ckpts/video_depth_anything_vitl.pth")
 
     return parser
 

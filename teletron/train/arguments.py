@@ -35,10 +35,6 @@ class UnifiedArguments:
         default="./checkpoint",
         metadata={"help": "Path to the dataset"}
     )
-    merge_file: str = field(
-        default="",
-        metadata={"help": "Path to merge file"}
-    )
 
     model_type: str = field(
         default="ModelType.encoder_or_decoder",
@@ -95,9 +91,7 @@ class UnifiedArguments:
     num_attention_heads: int = field(default=40,)
     seq_length: int = field(default=512,)
     max_position_embeddings: int = field(default=4096,)
-    tokenizer_type: str = field(default="NullTokenizer",)
-    vocab_size: int = field(default=0,)
-    vocab_file: Optional[str] = field(default=None,)
+    padded_vocab_size: int = field(default=0,)
 
     tensor_model_parallel_size: int = field(default=1,)
     context_parallel_size: int = field(default=1,)
@@ -131,14 +125,6 @@ class UnifiedArguments:
             }
         )
     lora_task_type: str = field(default="FEATURE_EXTRACTION")
-
-    # diffusion config, used for vast.hunyuan
-    vae_slicing: bool = field(default=False,)
-    vae_tiling: bool = field(default=False,)
-    flow_resolution_shifting: bool = field(default=False,)
-    flow_base_image_seq_len: int = field(default=256,)
-    flow_max_image__seq_len: int = field(default=4096,)
-    flow_base_shift: float = field(default=0.5,)
     flow_max_shift: float = field(default=1.15,)
     flow_shift: float = field(default=1.0,)
     flow_weighting_scheme: str = field(default="none",)

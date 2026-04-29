@@ -6,7 +6,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from megatron.core import mpu
 
-from teletron.core.context_parallel.mappings import set_global_all_to_all_buffer
 from teletron.core.context_parallel import ContextParallelMixin
 from teletron.core.tensor_parallel import TensorParallelMixin
 from teletron.core.transformer import TransformerGeneralMixin
@@ -186,9 +185,6 @@ class ParallelTeleaiModel(ContextParallelMixin, TensorParallelMixin, Transformer
         freqs = freqs.reshape(f * h * w, 1, -1).to(x.device)
 
         x, x_origin_length = self.split_input(x, dim=1)
-        # dump_tensor_shape(x, debug_path, "x_after_split_input")
-        # 预分配alltoall buffer
-        set_global_all_to_all_buffer(x.numel())
         freqs, _ = self.split_input(freqs, dim=0)
         # freqs = self.split_input(freqs, dim=-1)
 

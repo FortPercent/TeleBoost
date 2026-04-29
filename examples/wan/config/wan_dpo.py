@@ -11,7 +11,7 @@ config = dict(
 
         # === 原来 args 里的 ===
         dataset_base_path="",
-        dataset_metadata_path="/nvfile-heatstorage/AIGC_H100/jiangshiqi/DiffSynth-Studio-main/data/prompt_video_pairs_matched_image.csv",
+        dataset_metadata_path="/path/to/dpo_data/prompt_video_pairs_matched_image.csv",
         dataset_repeat=2,
 
         # === DPO 语义 ===
@@ -34,7 +34,7 @@ config = dict(
     ),
     eval=dict(
         data_path_list=[
-            "/nvfile-heatstorage/cjf/share/export_to_clipdataset/istock/istock_0.json",
+            "/path/to/istock_dataset/istock_0.json",
         ],
         eval_time_steps=[200,400,600,800,1000]
     ),
@@ -96,7 +96,7 @@ config = dict(
             type="teleai_encoder", # teleai_encoder
             encoder_schema=['context', 'img_clip_feature', 'img_emb_y', 'latents'],
             vae=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/Wan2.1_VAE.pth",
+                path="/path/to/Wan2.1-I2V-14B-480P/Wan2.1_VAE.pth",
                 tiler_kwargs=dict(
                     tiled=False,
                     tile_size=(34, 34),
@@ -105,15 +105,15 @@ config = dict(
                 torch_compile=False
             ),
             text_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
-                tokenizer_path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/google/umt5-xxl",
+                path="/path/to/Wan2.1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+                tokenizer_path="/path/to/Wan2.1-I2V-14B-480P/google/umt5-xxl",
             ),
             image_encoder=dict(
-                path="/nvfile-heatstorage/model_zoo/Wan2___1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                path="/path/to/Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
                 torch_compile=True
             ),
             depth_model=dict(
-                path="/nvfile-heatstorage/ai_infra/ckpts/lit117/qiuyang/video_depth_anything_vitl.pth",
+                path="/path/to/ckpts/video_depth_anything_vitl.pth",
             ),
         ),
 
