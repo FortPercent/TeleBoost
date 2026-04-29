@@ -15,6 +15,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+# Apply TeleBoost patches first - injects gate_with_cp_grad_reduce,
+# modulate_with_cp_grad_reduce, and the fixed register_cp_grad_reduce_hook
+# into verl.utils.ulysses (none of which exist in upstream v0.4.0).
+import teleboost  # noqa: F401
+
 from verl.utils.ulysses import (
     modulate_with_cp_grad_reduce,
     gate_with_cp_grad_reduce,
