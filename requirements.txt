@@ -1,10 +1,9 @@
-# requirements.txt records the full set of dependencies for development.
+# Plain pip deps for TeleBoost. Install via:
+#   pip install -r requirements.txt
 #
-# X3 stage 2: pin upstream verl. The verl/ tree in this repo only contains the
-# 103 files that actually diverge from this upstream pin (see git history at
-# stage 2 commit). Stage 3 will move those diffs into teleboost.patches.* so
-# the verl/ overlay can be deleted entirely.
-verl @ git+https://github.com/volcengine/verl.git@v0.4.0
+# Note: `verl` itself is NOT listed here. It is pinned to volcengine/verl@v0.4.0
+# but must be installed with `--no-deps` to avoid pip upgrading torch/cuda/ray.
+# See INSTALL.md or requirements-verl.txt for the verl install line.
 
 accelerate
 codetiming
@@ -24,7 +23,6 @@ ray[default]
 tensordict<=0.6.2
 torchdata
 transformers
-# vllm==0.8.4
 wandb
 packaging>=20.0
 uvicorn

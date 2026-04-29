@@ -1,0 +1,7 @@
+# Upstream verl framework. Install with `--no-deps` to avoid pip upgrading
+# torch/cuda/ray/etc. (verl's setup.py declares loose pins that conflict with
+# pre-built environments like vllm wheels).
+#
+#   pip install --no-deps -r requirements-verl.txt
+#
+verl @ git+https://github.com/volcengine/verl.git@v0.4.0
