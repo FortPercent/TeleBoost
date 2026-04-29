@@ -35,9 +35,16 @@ def apply() -> None:
 
     # verl.utils.device
     import verl.utils.device as _vudev
-    from teleboost.utils.device import get_device_id
-    if not hasattr(_vudev, "get_device_id"):
-        _vudev.get_device_id = get_device_id
+    from teleboost.utils.device import get_device_id, get_nccl_backend
+    for name, value in [("get_device_id", get_device_id), ("get_nccl_backend", get_nccl_backend)]:
+        if not hasattr(_vudev, name):
+            setattr(_vudev, name, value)
+
+    # verl.utils.model
+    import verl.utils.model as _vum
+    from teleboost.utils.model_extras import convert_weight_keys
+    if not hasattr(_vum, "convert_weight_keys"):
+        _vum.convert_weight_keys = convert_weight_keys
 
     # verl.workers.reward_manager
     import verl.workers.reward_manager as _vrm
