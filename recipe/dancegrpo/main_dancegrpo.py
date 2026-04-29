@@ -11,6 +11,11 @@ import logging
 import os
 from typing import Dict, Optional, Tuple, Any
 
+# Apply TeleBoost patches over upstream verl (cp grad fix, etc.) BEFORE any
+# verl import below: subsequent `from verl.X import Y` then resolves to the
+# patched symbols.
+import teleboost  # noqa: F401
+
 import hydra
 import ray
 from omegaconf import DictConfig, OmegaConf
