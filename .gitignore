@@ -28,3 +28,10 @@ profile
 logs/*
 experiment/*
 *.json
+
+*.pth
+*.whl
+*.deb
+model_dumps/
+log_memory/
+latest_checkpointed_iteration.txt
