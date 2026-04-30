@@ -62,7 +62,11 @@ total_training_steps="${TOTAL_TRAINING_STEPS:-2}"
 height="${VIDEO_HEIGHT:-256}"
 width="${VIDEO_WIDTH:-256}"
 num_frames="${NUM_FRAMES:-9}"
-sampling_steps="${SAMPLING_STEPS:-1}"
+# Default sampling_steps=4: the rollout drops the final sigma->0 step
+# (numerically unstable for log-prob), so train_timesteps = max(1,
+# int((sampling_steps-1) * timestep_fraction)).  sampling_steps in {1, 2}
+# would silently no-op the policy update for the default fraction=0.6.
+sampling_steps="${SAMPLING_STEPS:-4}"
 
 max_prompt_length="${MAX_PROMPT_LENGTH:-2048}"
 max_response_length="${MAX_RESPONSE_LENGTH:-20480}"

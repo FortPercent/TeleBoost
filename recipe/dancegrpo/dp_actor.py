@@ -2,7 +2,6 @@ import logging
 import math
 import os
 
-import numpy as np
 import torch
 
 from verl import DataProto
@@ -137,7 +136,20 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             permute_keys.append("timestep_indices")
         self._reorder_batch_by_perms(data, perms, permute_keys)
 
-        train_timesteps = int(len(data.batch["timesteps"][0]) * self.config.timestep_fraction)
+        # Number of denoising steps to train per minibatch. The diffusion
+        # rollout already trims the final step (sigma -> 0 yields a peaked
+        # log-prob and produces NaN gradients), so the available pool is
+        # ``len(timesteps) = sampling_steps - 1``.  Use ``max(1, ...)`` so
+        # that small smoke configs (sampling_steps=2,3) still execute at
+        # least one policy-gradient step instead of silently no-op'ing.
+        timestep_count = len(data.batch["timesteps"][0])
+        if timestep_count <= 0:
+            raise RuntimeError(
+                "No trainable timesteps in batch. The rollout produced "
+                "len(timesteps)=0; bump actor_rollout_ref.sampling_steps to "
+                ">=2 (the rollout drops the final sigma->0 step)."
+            )
+        train_timesteps = max(1, int(timestep_count * self.config.timestep_fraction))
         grad_norm = None
 
         select_keys = [

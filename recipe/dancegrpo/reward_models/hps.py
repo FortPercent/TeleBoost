@@ -11,7 +11,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 
 from .base import BaseRewardModel, RewardConfig
@@ -95,25 +94,27 @@ class HPSRewardModel(BaseRewardModel):
             raise
     
     def compute_single_score(
-        self, 
-        video_frames: torch.Tensor, 
+        self,
+        video_frames: torch.Tensor,
         caption: str
     ) -> float:
         """
         Compute HPS score for a video frame.
-        
+
         Uses the first frame of the video for scoring.
-        
+
         Args:
-            video_frames: Video tensor, shape (T, C, H, W)
+            video_frames: Video tensor, shape (T, C, H, W). This is the layout
+                produced by ``split_video_frames(permute_to_tchw=True)`` and matches
+                the other reward models (see ``aesthetic.py``).
             caption: Text caption to evaluate alignment with
-            
+
         Returns:
             HPS score (higher = better alignment with human preferences)
         """
-        # Take first frame
-        frame = video_frames[0]  # (C, H, W)
-        
+        # Take first frame: (T, C, H, W) -> (C, H, W).
+        frame = video_frames[0]
+
         # Convert to PIL Image
         frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
         frame_np = (frame_np * 255).astype(np.uint8)
