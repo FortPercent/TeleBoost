@@ -273,3 +273,21 @@ PY
    reward variance goes to ~0, and `actor/grad_norm` is exactly 0 — looks
    like the loop runs but the model is not training. Generate via
    `data_preprocess/prepare_wan_data.py` before any real run.
+
+9. **HPSv2 returns `nan` on near-noise videos.** The default smoke runs
+   `actor_rollout_ref.sampling_steps=1`, which leaves the rollout output
+   essentially as noise. HPSv2 is trained on clean images and produces
+   `nan` on such inputs, which propagates to `train/rewards=nan`,
+   `train/advantage=nan`, `actor/grad_norm=0.0`. The smoke loop still runs
+   end-to-end (good for shape/integration testing), but no learning happens.
+   Fix when verifying gradients: `SAMPLING_STEPS=4` (HPS minimum to return
+   finite scores) or `SAMPLING_STEPS=10` (production). Joint and Qwen-VL
+   rewards return finite values even at `SAMPLING_STEPS=1`.
+
+10. **`init_same_noise=True` collapses reward variance.** The smoke launcher
+    sets it for deterministic outputs. With `n_resp_per_prompt>1` it makes
+    every response within a prompt start from the same noise; combined with
+    a small number of sampling steps the responses end up near-identical
+    and GRPO advantage = `(reward - mean) / std` ≈ 0 even when rewards are
+    finite. For a real-gradient smoke, override
+    `actor_rollout_ref.init_same_noise=False`.

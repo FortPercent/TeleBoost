@@ -78,40 +78,90 @@ checkpoint files).
 
 ### 2.2 Run a smoke
 
-After install + checkpoint downloads + data prep, override the paths and run:
+The unified launcher `run_dancegrpo_smoke.sh` covers every algorithm variant
+via env vars — pick one and go:
 
 ```bash
 TRAIN_FILE=/path/to/processed_wan_prompt.json \
 TEST_FILE=/path/to/processed_wan_prompt.json \
-CKPTS_DIR=/tmp/dancegrpo_smoke_ckpt \
-bash recipe/dancegrpo/run_dancegrpo_single_4gpu_smoke.sh
+WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B \
+WAN_VERSION=wan21 \
+WAN_VAE_PATH=/path/to/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth \
+REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
+TELEBOOST_METHOD=baseline \
+bash recipe/dancegrpo/run_dancegrpo_smoke.sh
 ```
 
-Smoke variants (all run a complete rollout + reward + actor.update + save loop in 2 steps):
+Switch algorithm via `TELEBOOST_METHOD`:
 
-| Script | Actor | Reward | World × SP |
-|---|---|---|---|
-| `run_dancegrpo_1p3B_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | HPSv2 | 4 × 1 |
-| `run_dancegrpo_1p3B_qwen_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | Qwen-VL-7B | 4 × 1 |
-| `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | 4-reward joint | 4 × 1 |
-| `run_dancegrpo_single_4gpu_smoke.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 1 |
-| `run_dancegrpo_single_4gpu_smoke_sp2.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 2 |
-| `run_dancegrpo_single_4gpu_joint_smoke.sh` | Wan2.2-T2V-A14B | 4-reward joint | 4 × 1 |
-| `run_dancegrpo_single_4gpu_qwen_smoke.sh` | Wan2.2-T2V-A14B | Qwen-VL-7B | 4 × 1 |
-| `run_dancegrpo_single_8gpu_smoke_sp8.sh` | Wan2.2-T2V-A14B | HPSv2 | 8 × 8 |
+| Method | Behavior | Required env vars (in addition to the 4 core ones) |
+|---|---|---|
+| `baseline` (default) | plain GRPO | — |
+| `bgpo` | GRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field |
+| `vipo` | GRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
+| `bgpo_vipo` | both | both |
+| `joint` | 4-reward joint (aesthetic + raft + videoclip + videophy) | `JOINT_AESTHETIC_CLIP_PATH`, `JOINT_AESTHETIC_MODEL_PATH`, `JOINT_RAFT_MODEL_PATH`, `JOINT_VIDEOCLIP_MODEL_PATH`, `JOINT_VIDEOPHY_MODEL_PATH` |
 
-Replace the actor / VAE / reward paths inside each script for your
-environment.
+Common knobs (env vars):
+
+| Env var | Default | Notes |
+|---|---|---|
+| `N_GPUS_PER_NODE` | 4 | per-node world size |
+| `SAMPLING_STEPS` | 1 | denoising steps in rollout — see *gotchas* below |
+| `TOTAL_TRAINING_STEPS` | 2 | smoke = 2; bump for real training |
+| `VIDEO_HEIGHT`, `VIDEO_WIDTH`, `NUM_FRAMES` | 256, 256, 9 | resolution & frame count |
+| `TRAIN_PROMPT_BSZ`, `N_RESP_PER_PROMPT` | 2, 2 | batch shape (real_batch = bsz × n_resp) |
+| `WAN_VERSION` | wan21 | `wan22` for Wan2.2 dual-model A14B |
+| `VAL_BEFORE_TRAIN` | False | run validation before step 0 |
+| `TELEBOOST_OUTPUT_DIR` | `./outputs` | parent for `checkpoints/` and `tensorboard/` |
+
+**Gotchas — smoke ≠ training**:
+
+1. `SAMPLING_STEPS=1` (the default) is fast but the actor produces near-noise videos. **HPSv2 returns `nan` on near-noise inputs**, so `train/rewards` shows `nan` and `actor/grad_norm` ends up exactly 0 — the loop runs end-to-end but no actual training happens. Bump `SAMPLING_STEPS=4` (minimum for HPS to give finite values) or `SAMPLING_STEPS=10` (matches production) once you want to verify gradients flow. Joint and Qwen-VL rewards return finite values even at `SAMPLING_STEPS=1`; HPS is uniquely sensitive.
+2. The launcher hard-codes `init_same_noise=True` (smoke determinism). With `n_resp_per_prompt=2`, the two responses share starting noise → near-identical generations → reward variance ≈ 0 → advantage ≈ 0 even when reward is finite. For a real-gradient smoke, edit the script (or override on the command line) to `actor_rollout_ref.init_same_noise=False`.
+3. `total_training_steps=2` exits before the LR scheduler / GRPO statistics warm up. Bump to 5+ to see meaningful loss curves.
+
+Orthogonal flags layer on top of `TELEBOOST_METHOD` (combine freely):
+
+| Env var | Effect |
+|---|---|
+| `SP_SIZE=2` (or 4, 8) | Wan Ulysses sequence parallel; needs world_size divisible by `SP_SIZE` |
+| `INIT_SAME_NOISE=False` | per-prompt responses get different starting noise — required for non-zero reward variance when measuring real gradients |
+| `ENABLE_GRPOGUARD=True` | GRPO-Guard ratio_norm + grad_reweight |
+| `ENABLE_FLOWGRPO=True` | flow-grpo SDE solver path; auto-bumps `SAMPLING_STEPS` to 4 if it was 1 |
+| `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
+| `VAL_BEFORE_TRAIN=True` | run validation before step 0 |
+
+Example — 8-GPU sp=8 BGPO+VIPO with non-zero gradient variance:
+
+```bash
+TELEBOOST_METHOD=bgpo_vipo  N_GPUS_PER_NODE=8  SP_SIZE=8 \
+SAMPLING_STEPS=10  INIT_SAME_NOISE=False  TOTAL_TRAINING_STEPS=10 \
+TRAIN_FILE=...  TEST_FILE=...  WAN_MODEL_PATH=...  REWARD_MODEL_PATH=... \
+bash recipe/dancegrpo/run_dancegrpo_smoke.sh
+```
 
 ### 2.3 Production training
 
-Production scripts (8 GPUs, 480×832 resolution, full denoising + 1000 training steps):
+Production = same launcher, just bigger numbers. Example for 8-GPU 480×832
+1000-step run with HPSv2 reward:
 
+```bash
+TELEBOOST_METHOD=baseline \
+N_GPUS_PER_NODE=8 \
+TOTAL_TRAINING_STEPS=1000 \
+SAMPLING_STEPS=10 \
+VIDEO_HEIGHT=480  VIDEO_WIDTH=832  NUM_FRAMES=49 \
+INIT_SAME_NOISE=False \
+TRAIN_FILE=/path/to/processed_wan_prompt.json \
+TEST_FILE=/path/to/processed_wan_prompt.json \
+WAN_MODEL_PATH=/path/to/Wan2.2-T2V-A14B \
+WAN_VERSION=wan22 \
+WAN_VAE_PATH=/path/to/Wan2.2-T2V-A14B/Wan2.1_VAE.pth \
+REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
+bash recipe/dancegrpo/run_dancegrpo_smoke.sh
 ```
-recipe/dancegrpo/run_dancegrpo_single.sh        # single HPSv2 reward
-recipe/dancegrpo/run_dancegrpo_qwen.sh          # Qwen-VL reward
-recipe/dancegrpo/run_dancegrpo_joint.sh         # 4-reward joint
-```
+
 
 ---
 
@@ -126,7 +176,7 @@ recipe/dancegrpo/                     Recipe (entry point + workers + scripts)
 ├── unified_reward_worker.py              plugin-style reward worker
 ├── reward_models/                        reward registry + 5 plugins + composite + dynamic_joint
 ├── config/dancegrpo_trainer.yaml         Hydra config (grpo_guard, flow_grpo, joint.* fields)
-└── run_dancegrpo_*.sh                    smoke + production launch scripts
+└── run_dancegrpo_smoke.sh                unified env-driven launcher (smoke + production)
 
 teleboost/                            TeleBoost-only extensions
 ├── models/transformers/wan.py            Wan Ulysses SP forward + helper patches

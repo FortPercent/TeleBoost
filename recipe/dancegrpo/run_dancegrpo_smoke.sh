@@ -13,6 +13,18 @@ set -euo pipefail
 #   TELEBOOST_METHOD=baseline|bgpo|vipo|bgpo_vipo|joint
 #   WAN_VERSION=wan21|wan22
 #   WAN_VAE_PATH=/path/to/Wan2.1_VAE.pth
+#
+# Orthogonal flags (any combination, on top of TELEBOOST_METHOD):
+#   SP_SIZE=1|2|4|8                          (Wan Ulysses sequence parallel)
+#   INIT_SAME_NOISE=True|False               (False = real reward variance for grad checks)
+#   ENABLE_GRPOGUARD=True|False              (turns on GRPO-Guard ratio_norm + grad_reweight)
+#   ENABLE_FLOWGRPO=True|False               (turns on flow-grpo SDE; also bumps SAMPLING_STEPS to >=4)
+#   ADV_ESTIMATOR=grpo|remax                 (algorithm.adv_estimator override)
+#   SAMPLING_STEPS=N                         (rollout denoise steps; HPS needs >=4 to avoid nan)
+#   TOTAL_TRAINING_STEPS=N
+#   N_GPUS_PER_NODE=N
+#   N_RESP_PER_PROMPT=N  TRAIN_PROMPT_BSZ=N  PPO_MINI_BATCH_SIZE=N
+#   VIDEO_HEIGHT=N  VIDEO_WIDTH=N  NUM_FRAMES=N
 
 : "${TRAIN_FILE:?Set TRAIN_FILE=/path/to/processed_wan_prompt.json}"
 : "${TEST_FILE:?Set TEST_FILE=/path/to/processed_wan_prompt.json}"
@@ -70,6 +82,19 @@ if [[ "${method}" == "vipo" || "${method}" == "bgpo_vipo" ]]; then
   pixel_weight_enable=True
 fi
 
+# Orthogonal flags (independent of TELEBOOST_METHOD).
+sp_size="${SP_SIZE:-1}"
+init_same_noise="${INIT_SAME_NOISE:-True}"
+enable_grpoguard="${ENABLE_GRPOGUARD:-False}"
+enable_flowgrpo="${ENABLE_FLOWGRPO:-False}"
+adv_estimator="${ADV_ESTIMATOR:-grpo}"
+
+# flow-grpo's SDE solver needs more than one denoising step; auto-bump if user
+# left SAMPLING_STEPS at the default of 1.
+if [[ "${enable_flowgrpo}" == "True" && "${sampling_steps}" -le 1 ]]; then
+  sampling_steps=4
+fi
+
 if [[ "${method}" == "joint" ]]; then
   reward_type=joint
   : "${JOINT_AESTHETIC_CLIP_PATH:?Set JOINT_AESTHETIC_CLIP_PATH for joint reward smoke runs}"
@@ -89,7 +114,7 @@ overrides=(
   "data.train_batch_size=${train_prompt_bsz}"
   "data.max_prompt_length=${max_prompt_length}"
   "data.max_response_length=${max_response_length}"
-  "algorithm.adv_estimator=grpo"
+  "algorithm.adv_estimator=${adv_estimator}"
   "algorithm.use_kl_in_reward=False"
   "algorithm.kl_ctrl.kl_coef=0.0"
   "algorithm.bgpo.enable=${enable_bgpo}"
@@ -121,7 +146,12 @@ overrides=(
   "actor_rollout_ref.use_hpsv2=True"
   "actor_rollout_ref.shift=${SHIFT:-5}"
   "actor_rollout_ref.actor.timestep_fraction=${TIMESTEP_FRACTION:-0.6}"
-  "actor_rollout_ref.init_same_noise=True"
+  "actor_rollout_ref.init_same_noise=${init_same_noise}"
+  "actor_rollout_ref.actor.grpo_guard.enable=${enable_grpoguard}"
+  "actor_rollout_ref.actor.grpo_guard.ratio_norm=${enable_grpoguard}"
+  "actor_rollout_ref.actor.grpo_guard.grad_reweight=${enable_grpoguard}"
+  "actor_rollout_ref.flow_grpo.enable=${enable_flowgrpo}"
+  "actor_rollout_ref.flow_grpo.sde_window_size=${FLOWGRPO_SDE_WINDOW_SIZE:-2}"
   "actor_rollout_ref.actor.clip_range=1e-4"
   "actor_rollout_ref.actor.adv_clip_max=5.0"
   "actor_rollout_ref.actor.use_kl_loss=False"
@@ -155,10 +185,10 @@ overrides=(
   "actor_rollout_ref.actor.entropy_coeff=0"
   "actor_rollout_ref.actor.grad_clip=1.0"
   "actor_rollout_ref.actor.loss_agg_mode=token-mean"
-  "actor_rollout_ref.actor.ulysses_sequence_parallel_size=1"
+  "actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp_size}"
   "actor_rollout_ref.ref.fsdp_config.param_offload=${FSDP_OFFLOAD:-True}"
-  "actor_rollout_ref.ref.ulysses_sequence_parallel_size=1"
-  "actor_rollout_ref.rollout.ulysses_sequence_parallel_size=1"
+  "actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size}"
+  "actor_rollout_ref.rollout.ulysses_sequence_parallel_size=${sp_size}"
   "actor_rollout_ref.rollout.gpu_memory_utilization=${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.7}"
   "actor_rollout_ref.rollout.tensor_model_parallel_size=${ROLLOUT_TP_SIZE:-1}"
   "actor_rollout_ref.rollout.enable_chunked_prefill=True"
