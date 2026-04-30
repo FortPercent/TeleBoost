@@ -79,7 +79,11 @@ def _row_complete(row: dict) -> bool:
 
 def _build_t5(wan_model_path: Path, device: torch.device):
     """Lazy: only called when something actually needs encoding."""
-    # Imported lazily — wan + transformers are heavy.
+    # Apply teleboost runtime patches BEFORE importing wan — wan/modules/model.py
+    # consumes `verl.utils.ulysses.{gate_with_cp_grad_reduce, modulate_with_cp_grad_reduce}`,
+    # which teleboost.patches.ulysses_cp_fix injects. Without this import,
+    # `from wan...` raises ImportError.
+    import teleboost  # noqa: F401
     from wan.configs import t2v_1_3B
     from wan.modules.t5 import T5EncoderModel
 
