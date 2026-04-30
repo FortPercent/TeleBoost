@@ -1,125 +1,180 @@
-# DanceGRPO — Wan video diffusion + GRPO
+# TeleBoost — DanceGRPO for Wan video diffusion
 
-基于 [verl](https://github.com/volcengine/verl) 框架的视频生成 RL 训练栈，actor 走 Wan2.1 / Wan2.2 文生视频模型，reward 支持 HPSv2 / Qwen-VL / 4-reward joint 三种方案，算法以 GRPO 为基线并扩展 GRPO-Guard / flow-grpo。
+A video-generation RL training stack built on top of upstream
+[`volcengine/verl`](https://github.com/volcengine/verl) v0.4.0. The actor is a
+Wan2.1 / Wan2.2 text-to-video diffusion backbone; the reward signal can come
+from HPSv2, Qwen-VL, or a four-model joint setup (aesthetic + RAFT + VideoCLIP
++ videophy). The base RL algorithm is GRPO, with optional GRPO-Guard and
+flow-grpo extensions.
 
-> 本仓库由 `verl_0902` 上游版本与 wxe 业务代码合并而来。完整决策与合并历史见 `docs/merge_records/`。
+This repo is the *recipe* + Wan integration; verl itself is consumed as a
+plain pip dependency, not vendored. Wan-specific behaviour that doesn't
+belong in upstream verl (model loader, FSDP wrap, Ulysses SP patches,
+checkpoint compatibility) lives under [`teleboost/`](teleboost/) and is
+applied at import time.
 
 ---
 
-## 1. 当前能力速览
+## 1. Capability matrix
 
-| 维度 | Verified | 仅代码在（未验证） |
+| Dimension | Verified | Code present (untested) |
 |---|---|---|
-| Actor | Wan2.2-T2V-A14B (wan22), Wan2.1-T2V-1.3B (wan21) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
-| Reward | HPSv2, Qwen-VL-7B, Joint(aesthetic+raft+videoclip+videophy) | Qwen-VL-32B, custom callable |
-| Algorithm | GRPO | GRPO-Guard, flow-grpo SDE 路径, GAE/RLOO 等上游 |
-| Rollout | diffusion (actor), vllm (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
-| 部署 | 单机 4×H800 80G | 单机 8 GPU, 多机 |
-
-完整 verified vs untested 矩阵：[`docs/review/feature_coverage.md`](docs/review/feature_coverage.md)
+| Actor    | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
+| Reward   | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + raft + videoclip + videophy) | Qwen-VL-32B, custom callable |
+| Algorithm | GRPO | GRPO-Guard, flow-grpo SDE path, GAE / RLOO (upstream) |
+| Rollout  | Diffusion (actor), vLLM (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
+| Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, smoke + CP grad bit-exact at fp32) | other Ulysses configs |
+| Hardware | 4×H800 80 GB, 8×H800 80 GB | 8 GPU multi-host |
 
 ---
 
-## 2. 快速开始（4×H800 80G 测试机）
+## 2. Quickstart
 
-### 2.1 环境一次性补丁
+If you already have a verl-compatible Docker image (e.g. `verlai/verl:vllm017.latest`):
+see [`INSTALL.md`](INSTALL.md) — three pip commands plus an import-smoke check.
 
-```bash
-pip install hpsv2 decord
-# HPSv2 pip 包遗漏 BPE 词表，从源码 cp 一份
-cp $REPO_ROOT/recipe/dancegrpo/../HPSv2/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz \
-   $(python3 -c "import hpsv2,os;print(os.path.dirname(hpsv2.__file__))")/src/open_clip/
-```
+If you're starting from a bare GPU host:
+see [`docs/install_from_scratch.md`](docs/install_from_scratch.md) — full
+recipe including the flash-attn wheel, hpsv2 packaging fixes, and the
+gotchas you'll otherwise hit.
 
-### 2.2 跑 smoke
+### 2.1 Run a smoke
 
-四个 4 卡缩水版 smoke 脚本（`n_gpus=4, steps=2, h=w=256, num_frames=9`），都在 `recipe/dancegrpo/`：
-
-| 脚本 | 用途 |
-|---|---|
-| `run_dancegrpo_single_4gpu_smoke.sh` | 14B + HPSv2 |
-| `run_dancegrpo_1p3B_4gpu_smoke.sh` | 1.3B + HPSv2 |
-| `run_dancegrpo_1p3B_qwen_4gpu_smoke.sh` | 1.3B + Qwen-VL-7B |
-| `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | 1.3B + 4-reward joint |
-
-启动：
+After install + checkpoint downloads, override the paths and run:
 
 ```bash
 TRAIN_FILE=/path/to/processed_wan_prompt.json \
 TEST_FILE=/path/to/processed_wan_prompt.json \
-bash recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke.sh
+CKPTS_DIR=/tmp/dancegrpo_smoke_ckpt \
+bash recipe/dancegrpo/run_dancegrpo_single_4gpu_smoke.sh
 ```
 
-测试机模型/数据真实路径见 [`docs/inventory/test_box_models.md`](docs/inventory/test_box_models.md)。
+Smoke variants (all run a complete rollout + reward + actor.update + save loop in 2 steps):
 
-### 2.3 完整生产训练
+| Script | Actor | Reward | World × SP |
+|---|---|---|---|
+| `run_dancegrpo_1p3B_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | HPSv2 | 4 × 1 |
+| `run_dancegrpo_1p3B_qwen_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | Qwen-VL-7B | 4 × 1 |
+| `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | 4-reward joint | 4 × 1 |
+| `run_dancegrpo_single_4gpu_smoke.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 1 |
+| `run_dancegrpo_single_4gpu_smoke_sp2.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 2 |
+| `run_dancegrpo_single_8gpu_smoke_sp8.sh` | Wan2.2-T2V-A14B | HPSv2 | 8 × 8 |
 
-参考 wxe 原版脚本（写死 8 卡 + 14B + 完整分辨率）：
-- `recipe/dancegrpo/run_dancegrpo_single.sh`
-- `recipe/dancegrpo/run_dancegrpo_qwen.sh`
-- `recipe/dancegrpo/run_dancegrpo_joint.sh`
+Replace the actor / VAE / reward paths inside each script for your
+environment. The `*_wxe.sh` scripts referenced in older docs were removed
+during the open-source cleanup — use the variants above as your starting
+point.
 
-⚠️ 上线前需 `data_preprocess/preprocess_wan_data.py` 重新生成含 `context_null_path` 的训练 JSON（smoke 用 zeros 占位会导致 reward = nan）。
+### 2.2 Production training
+
+Production scripts (8 GPUs, 480×832 resolution, full denoising + 1000 training steps):
+
+```
+recipe/dancegrpo/run_dancegrpo_single.sh        # single HPSv2 reward
+recipe/dancegrpo/run_dancegrpo_qwen.sh          # Qwen-VL reward
+recipe/dancegrpo/run_dancegrpo_joint.sh         # 4-reward joint
+```
+
+Before kicking these off, regenerate the training JSON via
+`data_preprocess/preprocess_wan_data.py` so each row has a `context_null_path`
+field (smoke scripts fall back to a zero placeholder, which produces `nan`
+rewards that aren't useful for training).
 
 ---
 
-## 3. 仓库导航
+## 3. Repository layout
 
 ```
-recipe/dancegrpo/                       业务核心
-├── main_dancegrpo.py                       入口
-├── dancegrpo_ray_trainer.py                 RayPPOTrainer 子类
-├── dp_actor.py                              DataParallelPPOActor 子类
-├── dancegrpo_fsdp_worker.py                 7 个内嵌 Reward worker (Qwen/Diffusion/Aesthetic/RAFT/Videoclip/Videophy/Multi)
-├── unified_reward_worker.py                 wxe 插件式 reward worker
-├── reward_models/                           reward 插件注册表 (registry + 5 个插件 + composite + dynamic_joint)
-├── config/dancegrpo_trainer.yaml            完整 hydra 配置 (含 grpo_guard, flow_grpo, joint.* 字段)
-├── run_dancegrpo_*.sh                       生产 + smoke 启动脚本
-└── ...
+recipe/dancegrpo/                     Recipe (entry point + workers + scripts)
+├── main_dancegrpo.py                     Hydra entry; spawns Ray workers
+├── dancegrpo_ray_trainer.py              RayPPOTrainer subclass
+├── dp_actor.py                           DataParallelPPOActor subclass
+├── dancegrpo_fsdp_worker.py              7 reward workers + DiffusionActorRolloutRefWorker subclass
+├── unified_reward_worker.py              plugin-style reward worker
+├── reward_models/                        reward registry + 5 plugins + composite + dynamic_joint
+├── config/dancegrpo_trainer.yaml         Hydra config (grpo_guard, flow_grpo, joint.* fields)
+└── run_dancegrpo_*.sh                    smoke + production launch scripts
 
-verl/                                   上游 verl 框架 (持续 rebase 自 verl 0.4.0.dev)
-wan/                                    Wan 模型实现
-qwen_reward/                            verl_0902 老的 Qwen reward 独立服务方案 (孤立, 不走主流程)
-data_preprocess/                        数据预处理 pipeline
-prompts/, models/, distill/, examples/  辅助资源
-docs/                                   文档 (见下)
+teleboost/                            TeleBoost-only extensions
+├── models/transformers/wan.py            Wan Ulysses SP forward + helper patches
+├── models/transformers/wan22.py          Wan2.2 dual-model wrapper
+├── workers/rollout/diffusion_rollout.py  diffusion rollout (replaces vllm rollout)
+├── workers/sharding_manager/diffusion.py FSDP sharding manager for diffusion rollout
+├── utils/diffusion_ulysses.py            SP > 1 split/gather autograd Functions
+└── patches/                              runtime monkey-patches over verl
+    ├── ulysses_cp_fix.py                 CP grad reduce fix (modulation params)
+    ├── wan_ulysses.py                    inject Wan SP helpers into verl.utils.ulysses
+    ├── wan_save_compat.py                FrozenDict.save_pretrained no-op for save_checkpoint
+    └── debug_extras.py                   marked_timer / simple_timer / ProfilerConfig backports
+
+wan/                                  Wan2.1 / Wan2.2 backbone (vendored, lightly patched)
+data_preprocess/                      umT5 prompt-embedding preprocessor + helper shells
+prompts/                              prompt lists for preprocess
+docs/                                 docs (see §4)
+tests/special_distributed/            distributed regression tests (CP grad reduce)
 ```
+
+`teleboost/__init__.py` runs `teleboost.patches.apply()` at import time, so
+any process that does `import teleboost` (or imports anything under
+`recipe.dancegrpo.*`, which imports teleboost) ends up with the patches
+applied automatically.
 
 ---
 
-## 4. 文档
+## 4. Documentation
 
-- [`docs/merge_records/merge_wxe_into_verl_0902.md`](docs/merge_records/merge_wxe_into_verl_0902.md) — 完整合并决策、4 次翻转历史、所有 patch 的来由、smoke 进度记录、4 卡资源估算
-- [`docs/merge_records/wxe_reference/`](docs/merge_records/wxe_reference/) — 7 个 wxe 原版 Tier A 文件归档（cherry-pick 参考）
-- [`docs/merge_records/wxe_patches/`](docs/merge_records/wxe_patches/) — wxe 独有 22 个 commits 的 patch 文件
-- [`docs/inventory/test_box_models.md`](docs/inventory/test_box_models.md) — 测试机所有 actor / VAE / T5 / reward / data 路径与 size
-- [`docs/review/feature_coverage.md`](docs/review/feature_coverage.md) — 功能 verified vs untested 完整矩阵 + 脆弱点分析
-
----
-
-## 5. 分支结构（TeleBoost）
-
-| 分支 | 内容 |
+| File | Topic |
 |---|---|
-| `main` | **本分支**。verl_0902 + wxe 合并产物 + smoke 脚本 + 2 个代码 patch + 完整 docs |
-| `hiahei_snapshot_20260417` | hiahei 在测试机 `/gfs/.../wxe/Dance-grpo` 的工作快照（含 21 个未提交改动） |
+| [`INSTALL.md`](INSTALL.md) | Fast install path on a verl-ready Docker image |
+| [`docs/install_from_scratch.md`](docs/install_from_scratch.md) | Bare-host install + every gotcha |
+| [`requirements-pinned.txt`](requirements-pinned.txt) | Full pin file (every transitive dep) |
 
 ---
 
-## 6. 已知 wxe 业务代码 patch（在 main 上）
+## 5. Tests
 
-| Commit | 文件 | 修复 |
-|---|---|---|
-| `2167b04` | `recipe/dancegrpo/dancegrpo_ray_trainer.py:741` | reward 后清理 batch 时改为 defensive pop（原代码硬要 `caption/video_ids/video_frames` 三个 key 都在）|
-| `b045935` | 同上文件 :752 | reward worker 输出 `{model_name}_rewards`，下游 alias 为 `rewards`（原代码硬编码读 `rewards` 会 KeyError）|
+```bash
+# Imports — must print 8/8 OK
+python3 - <<'PY'
+import importlib
+mods = [
+    "recipe.dancegrpo.main_dancegrpo",
+    "recipe.dancegrpo.dancegrpo_ray_trainer",
+    "recipe.dancegrpo.dancegrpo_fsdp_worker",
+    "recipe.dancegrpo.dp_actor",
+    "recipe.dancegrpo.unified_reward_worker",
+    "teleboost.workers.reward_manager.dancegrpo",
+    "teleboost.workers.rollout.diffusion_rollout",
+    "teleboost.workers.sharding_manager.diffusion",
+]
+ok = sum(bool(importlib.import_module(m)) for m in mods)
+print(f"{ok}/{len(mods)} pass")
+PY
 
-两个 patch 让真实数据训练也更健壮（不只是 smoke 数据需要）。
+# CP grad reduce regression — should print "PASS rel_err=0" at fp32 sp=4 / sp=8
+torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
+DTYPE=bf16 torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
+torchrun --nproc_per_node=8 tests/special_distributed/test_cp_grad_reduce.py
+```
 
 ---
 
-## 附录：FLUX 训练经验（来自原 hiahei README）
+## 6. License & acknowledgments
 
-> 以下内容来自项目早期 FLUX 训练经验（已不再是当前主线，actor 已切到 Wan）。
+Apache 2.0 (see [`LICENSE`](LICENSE) and [`Notice.txt`](Notice.txt)).
+
+Built on top of:
+- [volcengine/verl](https://github.com/volcengine/verl) — RLHF framework
+- [Wan-Video/Wan2.1](https://github.com/Wan-Video/Wan2.1) and Wan-Video/Wan2.2 — diffusion backbones
+- [tgxs002/HPSv2](https://github.com/tgxs002/HPSv2), [alibaba-pai/VideoCLIP-XL](https://huggingface.co/alibaba-pai/VideoCLIP-XL), [LAION-AI/aesthetic-predictor](https://github.com/LAION-AI/aesthetic-predictor), [princeton-vl/RAFT](https://github.com/princeton-vl/RAFT), [videophysics/videocon_physics](https://huggingface.co/videophysics/videocon_physics) — reward models
+
+---
+
+## 7. FLUX training notes (legacy)
+
+Earlier iterations of this codebase trained FLUX, not Wan. The notes below
+were valid for that path; they're recorded here for reference but do not
+apply to the current Wan-on-verl mainline.
 
 1. We set the inference batch size to 1 because we observed differences in probability outputs when it exceeds the training batch size.
 2. A stronger SFT stage can suppress exploration during the GRPO phase.
