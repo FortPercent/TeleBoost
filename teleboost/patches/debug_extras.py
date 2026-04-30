@@ -53,3 +53,9 @@ def apply() -> None:
         _vrm.register = register
     if not hasattr(_vrm, "get_reward_manager_cls"):
         _vrm.get_reward_manager_cls = get_reward_manager_cls
+
+    # verl.utils.dataset.rl_dataset (wan-specific extras)
+    import verl.utils.dataset.rl_dataset as _vrl_ds
+    from teleboost.utils.dataset._wan_collate import wan_preprocessed_collate_function
+    if not hasattr(_vrl_ds, "wan_preprocessed_collate_function"):
+        _vrl_ds.wan_preprocessed_collate_function = wan_preprocessed_collate_function
