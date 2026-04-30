@@ -36,3 +36,14 @@ class Wan22DualModel(nn.Module):
             t = args[1]
         model = self._select_model(t)
         return model(*args, **kwargs)
+
+    def can_generate(self) -> bool:
+        """Required by upstream verl FSDPCheckpointManager.save_checkpoint.
+
+        Upstream's checkpoint manager calls `unwrap_model.can_generate()` to decide whether
+        to save an HF `generation_config.json` next to the weights. Wan diffusion models are
+        not HF generation models, so always return False — this skips the generation_config
+        save path. Pre-X3 worked around this by commenting out the call inside the in-tree
+        verl fork; this is the same fix moved to the model side.
+        """
+        return False

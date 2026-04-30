@@ -392,6 +392,12 @@ class WanModel(ModelMixin, ConfigMixin):
     ]
     _no_split_modules = ['WanAttentionBlock']
 
+    def can_generate(self) -> bool:
+        # Required by upstream verl FSDPCheckpointManager.save_checkpoint, which gates the
+        # HF generation_config dump on this. Wan is a diffusion backbone, not an HF
+        # generation model, so always False. Mirror of Wan22DualModel.can_generate.
+        return False
+
     @register_to_config
     def __init__(self,
                  model_type='t2v',
