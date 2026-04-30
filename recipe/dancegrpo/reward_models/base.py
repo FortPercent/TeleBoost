@@ -105,17 +105,36 @@ class MPSConfig:
 def zscore_normalize(values: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """
     Apply z-score normalization to a tensor.
-    
+
+    Degenerate cases:
+
+    * fewer than 2 elements: returns ``values`` unchanged.  This is the
+      common case when ``compute_batch_score`` runs under
+      ``Dispatch.DP_COMPUTE_PROTO`` with B/world_size==1 — each rank
+      sees a single sample, and per-rank normalization would
+      irrecoverably zero the signal (``x - x.mean() == 0``).  The
+      driver-side advantage computation already z-scores across the
+      full gathered batch, so a per-rank passthrough is semantically
+      correct and avoids the silent ``std()`` NaN that Bessel's
+      correction emits when ``n <= 1``.
+    * std == 0: returns ``values - mean`` so equal-valued inputs collapse
+      to all zeros instead of dividing by ``eps`` and producing huge
+      values that look like outliers.
+
     Args:
         values: Input tensor
         eps: Small value to prevent division by zero
-        
+
     Returns:
-        Normalized tensor with mean 0 and std 1
+        Normalized tensor (or original when n <= 1).
     """
+    if values.numel() <= 1:
+        return values
     mean = values.mean()
-    std = values.std() + eps
-    return (values - mean) / std
+    std = values.std()
+    if not torch.isfinite(std) or float(std.item()) == 0.0:
+        return values - mean
+    return (values - mean) / (std + eps)
 
 
 def split_batch_for_dp(

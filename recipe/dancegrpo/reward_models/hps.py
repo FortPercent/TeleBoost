@@ -119,29 +119,29 @@ class HPSRewardModel(BaseRewardModel):
         frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
         frame_np = (frame_np * 255).astype(np.uint8)
         frame_pil = Image.fromarray(frame_np)
-        
+
         # Preprocess
         image = self.preprocess(frame_pil).unsqueeze(0)
         text = self.tokenizer([caption])
-        
+
         # Move to device
         image = image.to(self.get_device())
         text = text.to(self.get_device())
         self.hps_model.to(self.get_device())
-        
+
         try:
             with torch.no_grad():
                 with torch.amp.autocast('cuda'):
                     outputs = self.hps_model(image, text)
                     image_features = outputs["image_features"]
                     text_features = outputs["text_features"]
-                    
+
                     # Compute similarity
                     logits = image_features @ text_features.T
                     score = torch.diagonal(logits).item()
-            
+
             logger.debug(f"HPS score: {score:.4f}")
             return score
-            
+
         finally:
             self.hps_model.to("cpu")
