@@ -263,17 +263,22 @@ class RLHFDataset(Dataset):
             context_numpy = np.load(row_dict['context_path'])
             context = torch.from_numpy(context_numpy)  # shape: (L, C)
             row_dict['context']=context
-            # `context_null_path` is optional. When the preprocess pipeline
-            # didn't emit it (smoke datasets, older JSONs), fall back to a
-            # zero-tensor of the same shape — matches the documented
-            # "smoke uses zero placeholder" behavior. Real training should regenerate
-            # the JSON via `data_preprocess/preprocess_wan_data.py`.
+            # `context_null_path` is REQUIRED. Pre-X3 / older fork variants
+            # silently fell back to a zero tensor when missing, which produces
+            # broken CFG (cond + scale*(cond - 0) = (1+scale)*cond) and
+            # collapses reward variance to ~0 (advantage=0, grad_norm=0). That
+            # was a silent training-killer; fail loudly instead.
             null_path = row_dict.get('context_null_path')
-            if null_path:
-                null_context_numpy = np.load(null_path)
-                null_context = torch.from_numpy(null_context_numpy)
-            else:
-                null_context = torch.zeros_like(context)
+            if not null_path:
+                raise KeyError(
+                    "Training row is missing `context_null_path`. Regenerate the "
+                    "JSON via `python data_preprocess/prepare_wan_data.py "
+                    "--input <prompts.txt|prompts.json> --output_dir <out> "
+                    "--wan_model_path <Wan checkpoint dir>` so every row carries "
+                    "a shared negative-prompt umT5 embedding."
+                )
+            null_context_numpy = np.load(null_path)
+            null_context = torch.from_numpy(null_context_numpy)
             row_dict['null_context']=null_context
         else:
             if self.processor is not None:

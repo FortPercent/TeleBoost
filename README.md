@@ -38,9 +38,47 @@ see [`docs/install_from_scratch.md`](docs/install_from_scratch.md) — full
 recipe including the flash-attn wheel, hpsv2 packaging fixes, and the
 gotchas you'll otherwise hit.
 
-### 2.1 Run a smoke
+### 2.1 Prepare data
 
-After install + checkpoint downloads, override the paths and run:
+Every training row must carry both `context_path` (positive prompt umT5
+embedding) and `context_null_path` (a single shared negative-prompt umT5
+embedding for CFG). The dataset loader fails fast if `context_null_path`
+is missing — without it CFG collapses to `(1+scale) * cond` and reward
+variance vanishes (advantage=0, grad_norm=0; documented training-killer
+in the pre-X3 fork).
+
+One unified, idempotent prep script handles both flat prompt lists and
+existing JSON layouts:
+
+```bash
+# from a plain prompts.txt (one prompt per line)
+python data_preprocess/prepare_wan_data.py \
+  --input prompts/hard_50.txt \
+  --output_dir data/processed/ \
+  --wan_model_path /path/to/Wan2.1-T2V-1.3B
+
+# patching an existing JSON that's missing context_null_path
+python data_preprocess/prepare_wan_data.py \
+  --input data/processed/processed_wan_prompt.json \
+  --output_dir data/processed/ \
+  --wan_model_path /path/to/Wan2.1-T2V-1.3B
+```
+
+The script:
+- accepts `.txt` (one prompt per line) or `.json` (`[{"caption": ...}, ...]`);
+- only loads the umT5 encoder if something actually needs encoding;
+- per row, skips T5 if `context_path` already points at an existing `.npy`;
+- produces `processed_wan_prompt.json` with all three fields populated, plus
+  per-row `context_<i>.npy` and a single shared `context_null.npy`;
+- the negative prompt defaults to Wan's official Chinese template; override
+  with `--negative_prompt "..."` if you need a different one.
+
+Same `--wan_model_path` works for 1.3B and 14B (the script only uses its umT5
+checkpoint files).
+
+### 2.2 Run a smoke
+
+After install + checkpoint downloads + data prep, override the paths and run:
 
 ```bash
 TRAIN_FILE=/path/to/processed_wan_prompt.json \
@@ -58,14 +96,14 @@ Smoke variants (all run a complete rollout + reward + actor.update + save loop i
 | `run_dancegrpo_1p3B_joint_4gpu_smoke.sh` | Wan2.1-T2V-1.3B | 4-reward joint | 4 × 1 |
 | `run_dancegrpo_single_4gpu_smoke.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 1 |
 | `run_dancegrpo_single_4gpu_smoke_sp2.sh` | Wan2.2-T2V-A14B | HPSv2 | 4 × 2 |
+| `run_dancegrpo_single_4gpu_joint_smoke.sh` | Wan2.2-T2V-A14B | 4-reward joint | 4 × 1 |
+| `run_dancegrpo_single_4gpu_qwen_smoke.sh` | Wan2.2-T2V-A14B | Qwen-VL-7B | 4 × 1 |
 | `run_dancegrpo_single_8gpu_smoke_sp8.sh` | Wan2.2-T2V-A14B | HPSv2 | 8 × 8 |
 
 Replace the actor / VAE / reward paths inside each script for your
-environment. The `*_wxe.sh` scripts referenced in older docs were removed
-during the open-source cleanup — use the variants above as your starting
-point.
+environment.
 
-### 2.2 Production training
+### 2.3 Production training
 
 Production scripts (8 GPUs, 480×832 resolution, full denoising + 1000 training steps):
 
@@ -74,11 +112,6 @@ recipe/dancegrpo/run_dancegrpo_single.sh        # single HPSv2 reward
 recipe/dancegrpo/run_dancegrpo_qwen.sh          # Qwen-VL reward
 recipe/dancegrpo/run_dancegrpo_joint.sh         # 4-reward joint
 ```
-
-Before kicking these off, regenerate the training JSON via
-`data_preprocess/preprocess_wan_data.py` so each row has a `context_null_path`
-field (smoke scripts fall back to a zero placeholder, which produces `nan`
-rewards that aren't useful for training).
 
 ---
 
@@ -108,7 +141,7 @@ teleboost/                            TeleBoost-only extensions
     └── debug_extras.py                   marked_timer / simple_timer / ProfilerConfig backports
 
 wan/                                  Wan2.1 / Wan2.2 backbone (vendored, lightly patched)
-data_preprocess/                      umT5 prompt-embedding preprocessor + helper shells
+data_preprocess/prepare_wan_data.py   umT5 prompt-embedding prep (idempotent)
 prompts/                              prompt lists for preprocess
 docs/                                 docs (see §4)
 tests/special_distributed/            distributed regression tests (CP grad reduce)

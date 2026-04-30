@@ -133,25 +133,34 @@ first, then atomic rename).
 
 ## 5. Training data preprocess
 
-Each training prompt needs an embedded `context_path` (umT5-XXL prompt
-embedding, used to skip text-encoder forward at training time) and
-`context_null_path` (negative-prompt embedding for CFG).
+Every training row must carry:
+- `context_path` — umT5-XXL embedding of the positive prompt (skips text-encoder forward at training time);
+- `context_null_path` — umT5-XXL embedding of a single shared negative prompt (CFG).
 
-Generate from a prompt list (see `prompts/hard_50.txt` or `prompts/istock_2000.txt`):
+Use the unified, idempotent `prepare_wan_data.py`:
 
 ```bash
-INPUT_TXT=prompts/hard_50.txt \
-  bash data_preprocess/preprocess_wan_rl_embeddings_1p3B.sh
+python data_preprocess/prepare_wan_data.py \
+  --input prompts/hard_50.txt \
+  --output_dir data/processed/ \
+  --wan_model_path /path/to/Wan2.1-T2V-1.3B
 ```
 
-Use `data_preprocess/preprocess_wan_data.py` if you want both the positive
-and null embeddings in a single pass — the `*_fromlist.py` variant only
-emits the positive embedding and you must add the null path separately.
+It accepts `.txt` (one prompt per line) or `.json` (a list of `{caption, ...}`),
+loads the umT5 encoder lazily, and produces:
 
-If `context_null_path` is missing from the JSON, the dataset falls back to a
-zero-tensor (matches the documented "smoke uses zero placeholder" behavior),
-but rewards on real training will be `nan` until you regenerate the JSON
-with the null embedding present.
+- `data/processed/processed_wan_prompt.json` — list of `{caption, context_path, context_null_path}`
+- `data/processed/context_<i>.npy` — per-prompt positive embedding
+- `data/processed/context_null.npy` — single shared negative-prompt embedding
+
+Re-runs are safe: per-row encodes are skipped if `context_path` already points
+at an existing file, and the negative-prompt encode is skipped if
+`context_null.npy` already exists. To use a different negative prompt, pass
+`--negative_prompt "..."`.
+
+The dataset loader fails fast if `context_null_path` is missing — without
+it, CFG collapses to `(1+scale) * cond` and reward variance vanishes
+(grad_norm=0 across every smoke). That used to be a silent footgun.
 
 ---
 
@@ -258,6 +267,9 @@ PY
    processes show as `Sl` with no IO and no TCP. Always serialize pip on a
    given venv.
 
-8. **`context_null_path` must exist for non-`nan` rewards.** The dataset
-   falls back to zeros when it's missing, but RL is undefined under zero
-   negative-context. Regenerate the JSON before real training.
+8. **`context_null_path` must exist on every training row.** The dataset
+   raises a `KeyError` with a fix-it command if a row is missing it. Without
+   the negative-prompt embedding, CFG collapses to `(1+scale) * cond`,
+   reward variance goes to ~0, and `actor/grad_norm` is exactly 0 — looks
+   like the loop runs but the model is not training. Generate via
+   `data_preprocess/prepare_wan_data.py` before any real run.
