@@ -6,6 +6,7 @@ does it implicitly) to apply every patch. Patches are idempotent.
 from teleboost.patches.debug_extras import apply as _apply_debug_extras
 from teleboost.patches.ulysses_cp_fix import apply as _apply_cp_fix
 from teleboost.patches.wan_save_compat import apply as _apply_wan_save_compat
+from teleboost.patches.wan_ulysses import apply as _apply_wan_ulysses
 
 _APPLIED = False
 
@@ -24,4 +25,5 @@ def apply() -> None:
     _apply_debug_extras()
     _apply_cp_fix()
     _apply_wan_save_compat()
+    _apply_wan_ulysses()
     _APPLIED = True

@@ -272,15 +272,11 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                     # Upstream verl's `apply_monkey_patch` reads `model.config.num_attention_heads`,
                     # which fails for Wan (FrozenDict, no such attr). Pre-X3's in-tree fork instead
                     # checked `model.config.model_type == "t2v"` and applied Wan-specific Ulysses
-                    # patches only when sp_size > 1. For sp_size == 1 it's a no-op, so we skip the
-                    # call entirely. TODO: re-add Wan-specific Ulysses monkey-patches under
-                    # teleboost.patches when sp_size > 1 paths need to run.
+                    # patches only when sp_size > 1. We mirror that here: skip the upstream call
+                    # entirely, and install our own Ulysses patches when SP > 1.
                     if self.ulysses_sequence_parallel_size > 1:
-                        raise NotImplementedError(
-                            "Wan + ulysses_sequence_parallel_size > 1 currently requires the in-tree "
-                            "verl monkey_patch fork. Port `patch_diffusion_for_ulysses_*` to "
-                            "teleboost.patches before enabling SP > 1 for Wan."
-                        )
+                        from teleboost.models.transformers.wan import apply_wan_ulysses_patches
+                        apply_wan_ulysses_patches(model)
                     model = self._enable_compile(model, compile_export_mode)
                     model.to(torch_dtype)
                     if enable_gradient_checkpointing:
@@ -303,13 +299,11 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                     from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
                     _apply_liger_kernel_to_instance(model=actor_module)
 
-                # See note in build_wan_model branch above. Skip apply_monkey_patch for Wan.
+                # See note in build_wan_model branch above. Skip apply_monkey_patch for Wan
+                # and install our own Ulysses patches when SP > 1.
                 if self.ulysses_sequence_parallel_size > 1:
-                    raise NotImplementedError(
-                        "Wan + ulysses_sequence_parallel_size > 1 currently requires the in-tree "
-                        "verl monkey_patch fork. Port `patch_diffusion_for_ulysses_*` to "
-                        "teleboost.patches before enabling SP > 1 for Wan."
-                    )
+                    from teleboost.models.transformers.wan import apply_wan_ulysses_patches
+                    apply_wan_ulysses_patches(actor_module)
 
                 actor_module = self._enable_compile(actor_module, compile_export_mode)
                 actor_module.to(torch_dtype)
