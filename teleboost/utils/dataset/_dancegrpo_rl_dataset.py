@@ -260,12 +260,20 @@ class RLHFDataset(Dataset):
         model_inputs = {}
 
         if self.config.type=="diffusion":
-            # 加载numpy文件并转换为tensor
             context_numpy = np.load(row_dict['context_path'])
-            null_context_numpy = np.load(row_dict['context_null_path'])
             context = torch.from_numpy(context_numpy)  # shape: (L, C)
-            null_context = torch.from_numpy(null_context_numpy)  # shape: (L, C)
             row_dict['context']=context
+            # `context_null_path` is optional. When the preprocess pipeline
+            # didn't emit it (smoke datasets, older JSONs), fall back to a
+            # zero-tensor of the same shape — matches the README's documented
+            # "smoke 用 zeros 占位" behavior. Real training should regenerate
+            # the JSON via `data_preprocess/preprocess_wan_data.py`.
+            null_path = row_dict.get('context_null_path')
+            if null_path:
+                null_context_numpy = np.load(null_path)
+                null_context = torch.from_numpy(null_context_numpy)
+            else:
+                null_context = torch.zeros_like(context)
             row_dict['null_context']=null_context
         else:
             if self.processor is not None:
