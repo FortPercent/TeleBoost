@@ -264,21 +264,23 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             if actor_module_class.__name__ == "WanModel" and use_wan22:
                 from teleboost.models.transformers.wan22 import Wan22DualModel
 
-                fused_kernel_options = self.config.model.get("fused_kernel_options", None)
-                fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
-
                 def build_wan_model(path):
                     model = actor_module_class.from_pretrained(path, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code)
                     if use_liger:
                         from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
                         _apply_liger_kernel_to_instance(model=model)
-                    apply_monkey_patch(
-                        model=model,
-                        use_remove_padding=use_remove_padding,
-                        ulysses_sp_size=self.ulysses_sequence_parallel_size,
-                        use_fused_kernels=use_fused_kernels,
-                        fused_kernels_backend=fused_kernels_backend,
-                    )
+                    # Upstream verl's `apply_monkey_patch` reads `model.config.num_attention_heads`,
+                    # which fails for Wan (FrozenDict, no such attr). Pre-X3's in-tree fork instead
+                    # checked `model.config.model_type == "t2v"` and applied Wan-specific Ulysses
+                    # patches only when sp_size > 1. For sp_size == 1 it's a no-op, so we skip the
+                    # call entirely. TODO: re-add Wan-specific Ulysses monkey-patches under
+                    # teleboost.patches when sp_size > 1 paths need to run.
+                    if self.ulysses_sequence_parallel_size > 1:
+                        raise NotImplementedError(
+                            "Wan + ulysses_sequence_parallel_size > 1 currently requires the in-tree "
+                            "verl monkey_patch fork. Port `patch_diffusion_for_ulysses_*` to "
+                            "teleboost.patches before enabling SP > 1 for Wan."
+                        )
                     model = self._enable_compile(model, compile_export_mode)
                     model.to(torch_dtype)
                     if enable_gradient_checkpointing:
@@ -301,15 +303,13 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                     from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
                     _apply_liger_kernel_to_instance(model=actor_module)
 
-                fused_kernel_options = self.config.model.get("fused_kernel_options", None)
-                fused_kernels_backend = fused_kernel_options.get("impl_backend", None) if fused_kernel_options is not None else None
-                apply_monkey_patch(
-                    model=actor_module,
-                    use_remove_padding=use_remove_padding,
-                    ulysses_sp_size=self.ulysses_sequence_parallel_size,
-                    use_fused_kernels=use_fused_kernels,
-                    fused_kernels_backend=fused_kernels_backend,
-                )
+                # See note in build_wan_model branch above. Skip apply_monkey_patch for Wan.
+                if self.ulysses_sequence_parallel_size > 1:
+                    raise NotImplementedError(
+                        "Wan + ulysses_sequence_parallel_size > 1 currently requires the in-tree "
+                        "verl monkey_patch fork. Port `patch_diffusion_for_ulysses_*` to "
+                        "teleboost.patches before enabling SP > 1 for Wan."
+                    )
 
                 actor_module = self._enable_compile(actor_module, compile_export_mode)
                 actor_module.to(torch_dtype)
@@ -373,7 +373,7 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                 mixed_precision=mixed_precision,
                 sync_module_states=True,
                 device_mesh=self.device_mesh,
-                forward_prefetch=self.config.actor.fsdp_config.forward_prefetch,
+                forward_prefetch=fsdp_config.get("forward_prefetch", False),
             )
             from verl.utils.ulysses import register_cp_grad_reduce_hook
             register_cp_grad_reduce_hook(actor_module_fsdp)
@@ -660,7 +660,10 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                 optimizer=self.actor.actor_optimizer,
                 lr_scheduler=self.actor_lr_scheduler,
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
-                checkpoint_contents=self.config.actor.checkpoint,
+                # Upstream verl 0.4.0 expects a list (`["model", "optimizer", "extra"]`); pre-X3
+                # accepted the wrapping `{contents: [...]}` dict. Pass the inner list to satisfy
+                # FSDPCheckpointManager's `"model" in checkpoint_contents` assertion.
+                checkpoint_contents=self.config.actor.checkpoint.contents,
             )
 
         if not self._is_actor and self._is_rollout:
@@ -693,7 +696,42 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
                 prompts = self.rollout_sharding_manager.postprocess_data(prompts)
                 log_gpu_memory_usage("After rollout generation", logger=logger)
         return output
- 
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    def update_actor(self, data: DataProto):
+        """Wan-aware actor update.
+
+        Diverges from upstream `ActorRolloutRefWorker.update_actor` in two ways:
+        - data is left on CPU (the actor moves it onto GPU per micro-batch inside
+          update_policy; diffusion DataProto is too large to fit a whole batch on
+          one device);
+        - skip the FLOPs / mfu metrics block: it depends on `meta_info["global_token_num"]`,
+          which is set by LM rollouts but not by `DiffusionRollout`. We just step the
+          scheduler and return the inner update_policy metrics.
+        """
+        data = data.to("cpu")
+
+        assert self._is_actor
+        if self._is_offload_param:
+            load_fsdp_model_to_gpu(self.actor_module_fsdp)
+        if self._is_offload_optimizer:
+            load_fsdp_optimizer(optimizer=self.actor_optimizer, device_id=get_device_id())
+
+        with self.ulysses_sharding_manager:
+            data = self.ulysses_sharding_manager.preprocess_data(data=data)
+            metrics = self.actor.update_policy(data=data)
+            self.actor_lr_scheduler.step()
+
+            output = DataProto(meta_info={"metrics": metrics})
+            output = output.to("cpu")
+
+        if self._is_offload_param:
+            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+        if self._is_offload_optimizer:
+            offload_fsdp_optimizer(optimizer=self.actor_optimizer)
+        return output
+
+
 class QwenRewardModelWorker(RewardModelWorker):
     """
     Qwen VLM-based Reward Model Worker.
