@@ -8,7 +8,6 @@ multiple GPU workers.
 """
 
 import logging
-import os
 import time
 import uuid
 from collections import defaultdict
@@ -21,14 +20,18 @@ from tqdm import tqdm
 
 from verl import DataProto
 from verl.trainer.ppo.metric_utils import reduce_metrics
+from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
+from verl.utils.debug import marked_timer
+
+logger = logging.getLogger(__name__)
 
 
 def _save_video_and_prompt(video_frames: torch.Tensor, rank: int, index: int) -> None:
     """Write a (C, T, H, W) tensor to ./videos/output/wan_video_batch_<ts>_<index>.mp4.
 
-    Pre-X3 lived as `verl.utils.checkpoint.checkpoint_manager.save_video_and_prompt` in the
-    in-tree fork; moved here since it's purely a recipe-level validation preview helper and
-    has no place in upstream verl.
+    Pre-X3 lived as `verl.utils.checkpoint.checkpoint_manager.save_video_and_prompt`
+    in the in-tree fork; moved here since it's purely a recipe-level validation
+    preview helper and has no place in upstream verl.
     """
     from datetime import datetime
     import cv2
@@ -39,8 +42,9 @@ def _save_video_and_prompt(video_frames: torch.Tensor, rank: int, index: int) ->
     video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()
     video_np = (video_np * 255).astype(np.uint8)
     video_filename = f"wan_video_batch_{timestamp}_{index}.mp4"
-    video_path = os.path.join("./videos/output", video_filename)
-    os.makedirs("videos/output", exist_ok=True)
+    import os as _os
+    video_path = _os.path.join("./videos/output", video_filename)
+    _os.makedirs("videos/output", exist_ok=True)
     out = cv2.VideoWriter(
         video_path,
         fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
@@ -60,19 +64,16 @@ def _save_video_and_prompt(video_frames: torch.Tensor, rank: int, index: int) ->
 def _compute_timing_metrics_diffusion(batch: DataProto, timing_raw: Dict[str, float]) -> Dict[str, Any]:
     """Diffusion-friendly timing metrics.
 
-    Upstream verl 0.4.0 `compute_timing_metrics` requires `batch["responses"]` (LM token shape)
-    to derive per-token throughput. Diffusion batches don't carry that — they have latents.
-    Pre-X3's in-tree fork of metric_utils.py commented out the per-token block and emitted only
-    raw `timing_s/{name}` entries; mirror that here.
+    Upstream verl 0.4.0 `compute_timing_metrics` requires `batch["responses"]`
+    (LM token shape) to derive per-token throughput. Diffusion batches don't
+    carry that — they have latents. Pre-X3's in-tree fork commented out the
+    per-token block and emitted only raw `timing_s/{name}` entries; mirror
+    that here.
     """
     return {f"timing_s/{name}": value for name, value in timing_raw.items()}
 
 
 compute_timing_metrics = _compute_timing_metrics_diffusion
-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
-from verl.utils.debug import marked_timer
-
-logger = logging.getLogger(__name__)
 
 # Default configuration values
 DEFAULT_VAE_STRIDE = [4, 8, 8]
@@ -89,16 +90,49 @@ def compute_advantage(
     norm_adv_by_std_in_grpo=True,
     config=None,
 ):
-    datas = data.pop(
-        batch_keys=["rewards"],
-    )
-    advantages = torch.zeros_like(datas.batch["rewards"])
+    rewards = data.batch["rewards"]
+    advantages = torch.zeros_like(rewards)
     # TODO: when batchsize not equal to 1
-    group_mean = datas.batch["rewards"].mean()
-    group_std = datas.batch["rewards"].std() + 1e-8
-    advantages = (datas.batch["rewards"] - group_mean) / group_std
+    group_mean = rewards.mean()
+    group_std = rewards.std() + 1e-8
+    advantages = (rewards - group_mean) / group_std
     data.batch["advantages"] = advantages
     return data
+
+
+def compute_joint_task_weights(advantages: torch.Tensor) -> torch.Tensor:
+    """Compute per-sample convex weights from multi-reward advantages."""
+    if advantages.numel() == 0:
+        return torch.zeros_like(advantages)
+    if advantages.dim() != 2:
+        raise ValueError(f"advantages must be 2D, got shape {tuple(advantages.shape)}")
+
+    weights = torch.zeros_like(advantages)
+    for i in range(advantages.shape[0]):
+        a = advantages[i].detach().cpu().numpy().astype(np.float32)
+        n = int(a.shape[0])
+        if n == 0:
+            continue
+
+        if a.min() <= 0 <= a.max():
+            idx_lo, idx_hi = int(np.argmin(a)), int(np.argmax(a))
+            if np.isclose(a[idx_hi], a[idx_lo]):
+                c = np.ones(n, dtype=np.float32) / n
+            else:
+                t = -a[idx_lo] / (a[idx_hi] - a[idx_lo])
+                c = np.zeros(n, dtype=np.float32)
+                c[idx_lo] = 1.0 - t
+                c[idx_hi] = t
+        elif a.min() > 0:
+            c = np.zeros(n, dtype=np.float32)
+            c[int(np.argmin(a))] = 1.0
+        else:
+            c = np.zeros(n, dtype=np.float32)
+            c[int(np.argmax(a))] = 1.0
+
+        weights[i] = torch.from_numpy(c).to(device=advantages.device, dtype=advantages.dtype)
+
+    return weights
 
 
 def merge_worker_results(
@@ -222,7 +256,7 @@ class _JointRewardRunner:
         while True:
             self._ready_events[name].wait()  # wait for main thread to push data
             self._ready_events[name].clear()
-            # call the worker's compute_rm_score
+            # call worker.compute_rm_score
             self._reward_results[name] = worker.compute_rm_score(self._thread_inputs[name])
             self._done_events[name].set()  # notify main thread of completion
 
@@ -275,6 +309,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
 
         timing_raw = defaultdict(float)
         joint_reward_runner = self._maybe_create_joint_reward_runner()
+        # Running accumulator used by the CVPR-std adaptive-weight mode.
+        self._std_running_accumulation = 0.0
 
         for epoch in range(self.config.trainer.total_epochs):
             # ======== 1. Data ========
@@ -287,6 +323,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 gen_batch = self._build_gen_batch(new_batch)
 
                 is_last_step = self.global_steps >= self.total_training_steps
+                # When joint precompute path fires we must skip the
+                # default reward + advantage blocks below (they would recompute).
+                joint_adv_precomputed = False
 
                 with marked_timer("step", timing_raw):
                     # generate a batch
@@ -325,20 +364,44 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                         with marked_timer("validation", timing_raw):
                             self._save_validation_videos(gen_batch_output)
 
+                    # Joint mode: pre-compute per-reward advantages + joint weights
+                    # BEFORE the reward timer so the downstream block can skip.
+                    if self.use_rm and self.config.reward_model.type == "joint":
+                        gen_batch_output, joint_adv_precomputed = self._precompute_joint_advantages(
+                            gen_batch_output,
+                            gen_batch,
+                            metrics,
+                            joint_reward_runner,
+                        )
+
                     with marked_timer("reward", timing_raw):
-                        gen_batch_output = self._compute_rewards(gen_batch_output, metrics, joint_reward_runner)
+                        if not joint_adv_precomputed:
+                            gen_batch_output = self._compute_rewards(
+                                gen_batch_output, metrics, joint_reward_runner, gen_batch
+                            )
 
                     with marked_timer("adv", timing_raw):
-                        # compute advantages, executed on the driver process
-                        norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
-                        gen_batch_output = compute_advantage(
-                            gen_batch_output,
-                            adv_estimator=self.config.algorithm.adv_estimator,
-                            gamma=self.config.algorithm.gamma,
-                            lam=self.config.algorithm.lam,
-                            num_repeat=self.config.actor_rollout_ref.rollout.n,
-                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
-                        )
+                        if not joint_adv_precomputed:
+                            # compute advantages, executed on the driver process
+                            norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
+                            gen_batch_output = compute_advantage(
+                                gen_batch_output,
+                                adv_estimator=self.config.algorithm.adv_estimator,
+                                gamma=self.config.algorithm.gamma,
+                                lam=self.config.algorithm.lam,
+                                num_repeat=self.config.actor_rollout_ref.rollout.n,
+                                norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                            )
+                        # Scale advantages before optional VIPO broadcasting.
+                        if self._is_bgpo_enabled():
+                            gen_batch_output = self._apply_bgpo_on_advantages(
+                                gen_batch_output, gen_batch, metrics
+                            )
+                        # Broadcast scalar advantages to dense pixel-weighted maps.
+                        if self._is_pixel_weight_enabled():
+                            gen_batch_output = self._apply_vipo_broadcast(
+                                gen_batch_output, metrics
+                            )
                         metrics["train/advantage"] = gen_batch_output.batch["advantages"].mean()
 
                     # implement critic warmup
@@ -423,11 +486,15 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         return None
 
     def _build_gen_batch(self, new_batch: DataProto) -> DataProto:
-        # trainer.type == "diffusion"
+        # trainer.type == 'diffusion'
         if self.config.trainer.type == "diffusion":
+            non_tensor_keys = ["caption"]
+            for optional_key in ("prior", "index_prompt", "id"):
+                if optional_key in new_batch.non_tensor_batch:
+                    non_tensor_keys.append(optional_key)
             gen_batch = new_batch.pop(
                 batch_keys=["context", "context_orig_lengths", "null_context"],
-                non_tensor_batch_keys=["caption"],
+                non_tensor_batch_keys=non_tensor_keys,
             )
             self._prepare_diffusion_inputs(new_batch, gen_batch)
             return gen_batch.repeat(self.config.actor_rollout_ref.rollout.n)
@@ -503,33 +570,167 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         for i in range(video_frames.shape[0]):
             _save_video_and_prompt(video_frames[i], 0, i)
 
-    def _compute_rewards(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner):
+    def _compute_rewards(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner, source_batch: DataProto = None):
         # compute scores. Support both model and function-based.
         # We first compute the scores using reward model. Then, we call reward_fn to combine
         # the results from reward model and rule-based results.
+        #
+        bgpo_enabled = self._is_bgpo_enabled() and source_batch is not None
+
         if self.use_rm:
-            print("begin to compute reward")
+            logger.debug("Computing reward")
             with torch.amp.autocast("cuda"):
                 # If using driver-side joint reward runner (deprecated)
                 if joint_reward_runner is not None:
-                    return self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
-                
-                # All three reward types route through `self.rm_wg.compute_rm_score`.
-                # - "single": rm_wg holds one worker (e.g. UnifiedRewardModelWorker -> HPS).
-                # - "qwen":   rm_wg holds QwenRewardModelWorker (vLLM-backed Qwen-VL scoring).
-                # - "joint":  rm_wg holds JointRewardModelWorker which fans out to the
-                #             aesthetic / raft / videoclip / videophy sub-rewards
-                #             internally and returns aggregated scores.
-                if self.config.reward_model.type in ("qwen", "single", "joint"):
-                    return self._compute_single_rm_reward(gen_batch_output, metrics)
+                    reward_output = self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
+                    if bgpo_enabled:
+                        return self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
+                    return reward_output
+
+                # Joint mode: parallel computation using multiple worker groups
+                if self.config.reward_model.type == "joint":
+                    reward_output = self._compute_joint_parallel_reward(gen_batch_output, metrics)
+                    if bgpo_enabled:
+                        return self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
+                    return reward_output
+
+                # Single/Qwen mode: use single rm_wg
+                if self.config.reward_model.type in ("qwen", "single"):
+                    reward_output = self._compute_single_rm_reward(gen_batch_output, metrics)
+                    if bgpo_enabled:
+                        return self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
+                    return reward_output
 
                 raise ValueError(f"Unsupported reward model type: {self.config.reward_model.type}")
 
         reward_tensor = self.reward_fn(gen_batch_output, return_dict=True)
         gen_batch_output = gen_batch_output.union(reward_tensor)
         gen_batch_output.pop(batch_keys=["video_frames"])
+        if bgpo_enabled:
+            return self._apply_bgpo_on_rewards(gen_batch_output, source_batch, metrics)
         return gen_batch_output
     
+    def _compute_joint_parallel_reward(self, gen_batch_output: DataProto, metrics: dict) -> DataProto:
+        """
+        Compute joint rewards using multiple worker groups in parallel.
+        
+        Each reward model has its own worker group. We use Python threading
+        to call them in parallel and aggregate the results.
+        """
+        import threading
+        import time
+        from tensordict import TensorDict
+        
+        start_time = time.time()
+        
+        # Get model weights from config
+        joint_cfg = self.config.reward_model.get("joint", {})
+        models_cfg = joint_cfg.get("models", {})
+        if isinstance(models_cfg, (list, tuple)):
+            weights = {m.get("name"): m.get("weight", 1.0) for m in models_cfg if m.get("name")}
+        else:
+            weights = {k: v.get("weight", 1.0) for k, v in models_cfg.items()}
+        
+        # Threading infrastructure
+        reward_results = {}
+        thread_inputs = {}
+        ready_events = {}
+        done_events = {}
+        
+        def thread_loop(name, worker_group):
+            while True:
+                ready_events[name].wait()
+                ready_events[name].clear()
+                try:
+                    reward_results[name] = worker_group.compute_rm_score(thread_inputs[name])
+                except Exception as e:
+                    logger.error(f"Error computing {name} reward: {e}")
+                    reward_results[name] = None
+                done_events[name].set()
+        
+        # Start threads for each reward model worker group
+        threads = []
+        for name, wg in self.reward_model_wgs.items():
+            reward_results[name] = None
+            thread_inputs[name] = None
+            ready_events[name] = threading.Event()
+            done_events[name] = threading.Event()
+            t = threading.Thread(target=thread_loop, args=(name, wg), daemon=True)
+            t.start()
+            threads.append(t)
+        
+        # Prepare input for all workers
+        reward_input = gen_batch_output.select(
+            batch_keys=['video_frames'],
+            non_tensor_batch_keys=['caption'],
+        )
+        
+        # Dispatch to all workers
+        for name in self.reward_model_wgs:
+            thread_inputs[name] = reward_input
+            done_events[name].clear()
+            ready_events[name].set()
+        
+        # Wait for all to complete
+        for name in self.reward_model_wgs:
+            done_events[name].wait()
+        
+        # Collect and merge results
+        batch_with_rewards = gen_batch_output
+        combined_reward = None
+        
+        for name, result in reward_results.items():
+            if result is None:
+                logger.warning(f"No result from {name} reward model")
+                continue
+            
+            # Find the reward tensor using model-specific key
+            reward_key = f"{name}_rewards"
+            rewards = None
+            
+            if reward_key in result.batch.keys():
+                rewards = result.batch[reward_key]
+            else:
+                # Try to find any key containing 'reward'
+                for key in result.batch.keys():
+                    if 'reward' in key.lower():
+                        rewards = result.batch[key]
+                        break
+            
+            if rewards is None:
+                logger.warning(f"No reward key found in {name} result, keys: {list(result.batch.keys())}")
+                continue
+            
+            # Add to batch with model-specific name
+            batch_with_rewards.batch[reward_key] = rewards
+            
+            # Add to combined reward
+            weight = weights.get(name, 1.0)
+            weighted_reward = rewards * weight
+            if combined_reward is None:
+                combined_reward = weighted_reward
+            else:
+                combined_reward = combined_reward + weighted_reward
+            
+            # Log individual metrics
+            metrics[f"train/rewards_{name}"] = rewards.mean().item()
+        
+        if combined_reward is None:
+            raise RuntimeError("No valid rewards computed from any model")
+        
+        # Add aggregated reward directly to batch
+        batch_with_rewards.batch["rewards"] = combined_reward
+        
+        # Log overall metrics
+        metrics["train/rewards"] = combined_reward.mean().item()
+        if "log_probs" in batch_with_rewards.batch.keys():
+            metrics["train/log_probs"] = batch_with_rewards.batch["log_probs"].mean().item()
+        
+        elapsed = time.time() - start_time
+        logger.info(f"Joint parallel reward computation took {elapsed:.2f}s")
+        
+        return batch_with_rewards
+
     def _compute_joint_reward(
         self, 
         gen_batch_output: DataProto, 
@@ -656,35 +857,23 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
             )
             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
             reward_tensor.pop(non_tensor_batch_keys=["caption", "video_ids"])
-
-        else:  # "single" or "joint"
+        
+        else:  # "single"
             reward_input = gen_batch_output.select(
                 batch_keys=["video_frames"],
                 non_tensor_batch_keys=["caption"],
             )
             reward_tensor = self.rm_wg.compute_rm_score(reward_input)
-            # JointRewardModelWorker.compute_rm_score is registered with
-            # `Dispatch.ALL_TO_ALL`, so verl returns a list of per-rank DataProtos.
-            # Each rank already allgathers full rewards internally, so all entries
-            # are equivalent — take the first.
-            if isinstance(reward_tensor, list):
-                reward_tensor = reward_tensor[0]
 
-        # [smoke-patch] defensively pop only keys that exist (original wxe code assumed all 3 present)
         _keys_to_pop = [k for k in ("caption", "video_ids", "video_frames")
                         if k in gen_batch_output.non_tensor_batch]
         if _keys_to_pop:
-            gen_batch_output.pop(non_tensor_batch_keys=_keys_to_pop)  # reward done — drop the large tensors
-        # Clean the original batch (drop large tensors)
+            gen_batch_output.pop(non_tensor_batch_keys=_keys_to_pop)
 
         self._debug_proto_batch("gen_batch_output", gen_batch_output)
         self._debug_proto_batch("reward_tensor", reward_tensor)
         gen_batch_output = gen_batch_output.union(reward_tensor)
 
-        # [smoke-patch] In single-reward mode, the reward key is "{model_name}_rewards"
-        # (e.g. hps_rewards), but downstream code (compute_advantage / metrics) hardcodes
-        # "rewards". Alias *_rewards into "rewards" without removing the source key so
-        # joint / other consumers still work.
         if "rewards" not in gen_batch_output.batch:
             _src_key = next((k for k in gen_batch_output.batch.keys() if k.endswith("_rewards")), None)
             if _src_key is None:
@@ -697,11 +886,370 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
     @staticmethod
     def _debug_proto_batch(name, proto):
         if proto is None:
-            print(f"[debug] {name} is None")
+            logger.debug("%s is None", name)
             return
         batch = getattr(proto, "batch", None)
         if batch is None:
             non_tensor = getattr(proto, "non_tensor_batch", None) or {}
-            print(f"[debug] {name}.batch is None; non_tensor_keys={list(non_tensor.keys())}")
+            logger.debug("%s.batch is None; non_tensor_keys=%s", name, list(non_tensor.keys()))
             return
-        print(f"[debug] {name}.batch_size={batch.batch_size}")
+        logger.debug("%s.batch_size=%s", name, batch.batch_size)
+
+    # ================================================================
+    # BGPO: Bayesian-Prior Group Optimization
+    # ================================================================
+
+    def _get_bgpo_config(self) -> Dict[str, Any]:
+        """Return the ``algorithm.bgpo`` config block."""
+        algorithm_cfg = self.config.get("algorithm", {})
+        return algorithm_cfg.get("bgpo", {}) or {}
+
+    def _is_bgpo_enabled(self) -> bool:
+        return bool(self._get_bgpo_config().get("enable", False))
+
+    def _precompute_joint_advantages(
+        self,
+        gen_batch_output: DataProto,
+        source_batch: DataProto,
+        metrics: dict,
+        joint_reward_runner,
+    ) -> Tuple[DataProto, bool]:
+        """Pre-compute joint-mode advantages before the reward timer block.
+
+        Reward extraction follows the existing joint paths:
+        - driver-side runner: ``_compute_joint_reward``
+        - worker-group parallel: ``_compute_joint_parallel_reward``
+
+        Returns
+        -------
+        (DataProto, bool)
+            Tuple of updated batch and a flag indicating whether a
+            multi-head precompute actually happened.  When the flag is
+            False the caller must run the standard reward+advantage path.
+        """
+        if joint_reward_runner is not None:
+            reward_output = self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
+        else:
+            reward_output = self._compute_joint_parallel_reward(gen_batch_output, metrics)
+
+        reward_keys = [k for k in reward_output.batch.keys() if k.endswith("_rewards")]
+        if not reward_keys:
+            return reward_output, False
+
+        per_task_rewards = [reward_output.batch[k].float() for k in reward_keys]
+        per_task_advantages = []
+
+        for reward_key in reward_keys:
+            reward_tensor = reward_output.batch[reward_key].float()
+            mean = reward_tensor.mean()
+            std = reward_tensor.std() + 1e-8
+            adv = (reward_tensor - mean) / std
+            task_name = reward_key[:-8]
+            reward_output.batch[f"{task_name}_advantages"] = adv
+            metrics[f"train/{task_name}_advantages"] = adv.mean().item()
+            per_task_advantages.append(adv)
+
+        adv_matrix = torch.stack(per_task_advantages, dim=-1)
+        weight_matrix = compute_joint_task_weights(adv_matrix)
+
+        reward_output.batch["task_weights"] = weight_matrix
+        reward_output.batch["rewards"] = (weight_matrix * torch.stack(per_task_rewards, dim=-1)).sum(dim=-1)
+        reward_output.batch["advantages"] = (weight_matrix * adv_matrix).sum(dim=-1)
+
+        if self._is_bgpo_enabled():
+            reward_output = self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
+            if self._get_bgpo_config().get("use_rerange", False):
+                rewards = reward_output.batch["rewards"].float()
+                reward_output.batch["advantages"] = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+
+        for idx, reward_key in enumerate(reward_keys):
+            task_name = reward_key[:-8]
+            metrics[f"train/task_weight_{task_name}"] = weight_matrix[:, idx].mean().item()
+
+        metrics["train/rewards"] = reward_output.batch["rewards"].mean().item()
+        return reward_output, True
+
+    @staticmethod
+    def _rerange_group_rewards(
+        group_rewards: torch.Tensor,
+        prior: float,
+        method: str,
+        a: float,
+        temperature: float,
+        exp_clamp: float = 30.0,
+    ) -> torch.Tensor:
+        """Rearrange rewards with the binary prior-threshold method."""
+        if method != "binary":
+            return group_rewards
+
+        flag = group_rewards - prior
+        positive_sign = torch.clamp(torch.sign(flag), min=0.0)
+        numerator = a * flag + positive_sign
+        exponent = torch.clamp(-group_rewards / max(temperature, 1e-8), min=-exp_clamp, max=exp_clamp)
+        denom = 1.0 + torch.exp(exponent)
+        coef = numerator / denom
+        return coef * group_rewards
+
+    def _calculate_adaptive_weight(self, group_rewards: torch.Tensor, prior: float, step: int) -> float:
+        """Compute adaptive weight using methods compatible with dancegrpo-combine."""
+        bgpo_cfg = self._get_bgpo_config()
+
+        method = bgpo_cfg.get("adaptive_weight_method", "no")
+        if method == "no":
+            return 0.0
+        if method == "random":
+            return torch.rand(1).item() * 2 - 1
+        if method == "bayes":
+            n = int(group_rewards.shape[0])
+            if n <= 1:
+                sample_var = torch.tensor(1.0, device=group_rewards.device, dtype=group_rewards.dtype)
+            else:
+                sample_var = group_rewards.var(unbiased=True) + 1e-8
+
+            prior_var = float(bgpo_cfg.get("prior_var", 1.0))
+            weight_range = bgpo_cfg.get("bayes_weight_range", [0.5, 1.5])
+            if len(weight_range) != 2:
+                weight_range = [0.5, 1.5]
+            w_min, w_max = float(weight_range[0]), float(weight_range[1])
+
+            sample_mean = group_rewards.mean()
+            posterior_var = 1.0 / (n / sample_var + 1.0 / prior_var)
+            posterior_mean = posterior_var * (n * sample_mean / sample_var + prior / prior_var)
+            posterior_std = torch.sqrt(posterior_var)
+            z = (prior - posterior_mean) / posterior_std
+            sqrt_2 = torch.sqrt(torch.tensor(2.0, device=group_rewards.device, dtype=group_rewards.dtype))
+            prob_better = 1.0 - 0.5 * (1 + torch.erf(z / sqrt_2))
+            weight = w_min + (w_max - w_min) * prob_better
+
+            # Keep compatibility with dancegrpo-combine behavior.
+            return float(weight.item() - 1.0)
+
+        if method == "cvpr":
+            discriminate_method = bgpo_cfg.get("adaptive_weight_discriminate_method", "normal")
+            weight_method = bgpo_cfg.get("adaptive_weight_weight_method", "std_pos")
+            fixed_weight = float(bgpo_cfg.get("adaptive_weight_fix_weight", 0.0))
+
+            group_mean = float(group_rewards.mean().item())
+            if discriminate_method == "normal":
+                sign = 1.0 if group_mean > prior else -1.0
+            elif discriminate_method == "reverse":
+                sign = 1.0 if group_mean < prior else -1.0
+            else:
+                raise ValueError(f"Unsupported adaptive_weight_discriminate_method: {discriminate_method}")
+
+            if weight_method == "fix":
+                magnitude = fixed_weight
+            elif weight_method == "random":
+                magnitude = torch.rand(1).item()
+            elif "std" in weight_method:
+                use_running_mean = bool(bgpo_cfg.get("use_std_runningmean", False))
+                std_group = float(group_rewards.std().item() + 1e-8)
+                self._std_running_accumulation += std_group
+                std = self._std_running_accumulation / max(step, 1) if use_running_mean else std_group
+                if weight_method == "std_pos":
+                    magnitude = std
+                elif weight_method == "std_neg":
+                    neg_base = float(bgpo_cfg.get("neg_base", 1.005))
+                    scale_neg = float(bgpo_cfg.get("scale_neg", 0.01))
+                    magnitude = neg_base ** (scale_neg / max(std, 1e-8)) - 1
+                else:
+                    raise ValueError(f"Unsupported adaptive_weight_weight_method: {weight_method}")
+            else:
+                raise ValueError(f"Unsupported adaptive_weight_weight_method: {weight_method}")
+
+            return float(sign * magnitude)
+
+        raise ValueError(f"Unsupported adaptive_weight_method: {method}")
+
+    def _get_prior_array(self, source_batch: DataProto) -> Optional[np.ndarray]:
+        """Return one prior per prompt group."""
+        if source_batch is None or "prior" not in source_batch.non_tensor_batch:
+            return None
+        prior_arr = np.asarray(source_batch.non_tensor_batch["prior"]).reshape(-1).astype(np.float32)
+        rollout_n = max(int(self.config.actor_rollout_ref.rollout.n), 1)
+        if prior_arr.size >= rollout_n and prior_arr.size % rollout_n == 0:
+            prior_arr = prior_arr[::rollout_n]
+        return prior_arr
+
+    def _apply_bgpo_on_rewards(
+        self,
+        gen_batch_output: DataProto,
+        source_batch: DataProto,
+        metrics: dict,
+    ) -> DataProto:
+        """Apply BGPO reward re-arrangement (CRT branch)."""
+        if "rewards" not in gen_batch_output.batch:
+            return gen_batch_output
+
+        prior_arr = self._get_prior_array(source_batch)
+        if prior_arr is None:
+            logger.warning("BGPO enabled but 'prior' is missing in dataset; skipping BGPO reward postprocess")
+            return gen_batch_output
+
+        bgpo_cfg = self._get_bgpo_config()
+        rewards = gen_batch_output.batch["rewards"]
+        rollout_n = max(int(self.config.actor_rollout_ref.rollout.n), 1)
+
+        num_groups = int(prior_arr.shape[0])
+        max_groups_by_reward = int(rewards.shape[0] // rollout_n)
+        num_groups = min(num_groups, max_groups_by_reward)
+        if num_groups <= 0:
+            return gen_batch_output
+
+        group_rewards_len = num_groups * rollout_n
+        rewards_for_groups = rewards[:group_rewards_len]
+
+        use_rerange = bool(bgpo_cfg.get("use_rerange", False))
+        rerange_method = bgpo_cfg.get("rerange_method", "binary")
+        rerange_a = float(bgpo_cfg.get("rerange_a", 50.0))
+        rerange_temperature = float(bgpo_cfg.get("rerange_temperature", 5.0))
+        exp_clamp = float(bgpo_cfg.get("exp_clamp", 30.0))
+        reranged_rewards = rewards_for_groups.clone()
+
+        if use_rerange:
+            for i in range(num_groups):
+                start = i * rollout_n
+                end = start + rollout_n
+                reranged_rewards[start:end] = self._rerange_group_rewards(
+                    rewards_for_groups[start:end],
+                    prior=float(prior_arr[i]),
+                    method=rerange_method,
+                    a=rerange_a,
+                    temperature=rerange_temperature,
+                    exp_clamp=exp_clamp,
+                )
+        else:
+            return gen_batch_output
+
+        append_rerange = bool(bgpo_cfg.get("append_rerange_samples", False))
+        if append_rerange:
+            try:
+                reranged_proto = gen_batch_output.select(
+                    batch_keys=["rewards"],
+                    non_tensor_batch_keys=[],
+                    deepcopy=True,
+                )
+                reranged_proto.batch["rewards"][:group_rewards_len] = reranged_rewards
+                gen_batch_output = DataProto.concat([gen_batch_output, reranged_proto])
+                metrics["train/bgpo_samples"] = float(gen_batch_output.batch.batch_size[0])
+            except Exception as exc:
+                logger.warning("BGPO append_rerange_samples failed (%s); falling back to in-place rerange", exc)
+                gen_batch_output.batch["rewards"][:group_rewards_len] = reranged_rewards
+        else:
+            gen_batch_output.batch["rewards"][:group_rewards_len] = reranged_rewards
+
+        metrics["train/rewards_reranged"] = reranged_rewards.mean().item()
+        return gen_batch_output
+
+    def _apply_bgpo_on_advantages(
+        self,
+        gen_batch_output: DataProto,
+        source_batch: DataProto,
+        metrics: dict,
+    ) -> DataProto:
+        """Scale scalar advantages with the RAS adaptive weight (combine-style)."""
+        if "advantages" not in gen_batch_output.batch or "rewards" not in gen_batch_output.batch:
+            return gen_batch_output
+
+        prior_arr = self._get_prior_array(source_batch)
+        if prior_arr is None:
+            return gen_batch_output
+
+        bgpo_cfg = self._get_bgpo_config()
+        alpha = float(bgpo_cfg.get("regularization_term_alpha", 1.0))
+        max_scale = float(bgpo_cfg.get("max_adv_scale", 10.0))
+        min_scale = float(bgpo_cfg.get("min_adv_scale", 0.01))
+
+        rewards = gen_batch_output.batch["rewards"]
+        rollout_n = max(int(self.config.actor_rollout_ref.rollout.n), 1)
+
+        num_groups = min(int(prior_arr.shape[0]), int(rewards.shape[0] // rollout_n))
+        if num_groups <= 0:
+            return gen_batch_output
+
+        group_rewards_len = num_groups * rollout_n
+        per_sample_weight = torch.zeros_like(rewards, dtype=torch.float32)
+
+        for i in range(num_groups):
+            start = i * rollout_n
+            end = start + rollout_n
+            weight = self._calculate_adaptive_weight(
+                rewards[start:end].float(),
+                float(prior_arr[i]),
+                self.global_steps,
+            )
+            per_sample_weight[start:end] = weight
+
+        # Mirror group weights into an appended rerange block (if any).
+        append_rerange = bool(bgpo_cfg.get("append_rerange_samples", False))
+        use_rerange = bool(bgpo_cfg.get("use_rerange", False))
+        if use_rerange and append_rerange and rewards.shape[0] >= 2 * group_rewards_len:
+            per_sample_weight[group_rewards_len : 2 * group_rewards_len] = per_sample_weight[:group_rewards_len]
+
+        gen_batch_output.batch["bgpo_weight"] = per_sample_weight
+
+        scale = torch.clamp(1.0 + alpha * per_sample_weight, min=min_scale, max=max_scale)
+        advantages = gen_batch_output.batch["advantages"]
+        # When advantages are already multi-dim (e.g. VIPO pre-broadcast was
+        # done earlier or upstream produced token-level advantages) we must
+        # reshape ``scale`` to broadcast along the batch axis only.
+        if advantages.ndim > 1:
+            scale_view = scale.view(scale.shape[0], *([1] * (advantages.ndim - 1)))
+        else:
+            scale_view = scale
+        gen_batch_output.batch["advantages"] = advantages * scale_view
+
+        metrics["train/bgpo_weight"] = per_sample_weight[:group_rewards_len].mean().item()
+        metrics["train/bgpo_adv_scale"] = scale.mean().item()
+        return gen_batch_output
+
+    # ================================================================
+    # VIPO: pixel-weighted dense advantage broadcast
+    # ================================================================
+
+    def _is_pixel_weight_enabled(self) -> bool:
+        pw_cfg = self.config.actor_rollout_ref.get("pixel_weight", {}) or {}
+        return bool(pw_cfg.get("enable", False))
+
+    def _apply_vipo_broadcast(self, gen_batch_output: DataProto, metrics: dict) -> DataProto:
+        """Broadcast the scalar advantage against a ``(B, T, H, W)`` pixel
+        weight map produced by the rollout stage.
+
+        Contract: the rollout worker stores ``pixel_weight_maps`` with shape
+        ``(B, T_lat, H_lat, W_lat)`` in ``gen_batch_output.batch``.  When
+        this is missing (e.g. during smoke tests on non-VIPO rollouts) we
+        silently leave the scalar advantage untouched.
+        """
+        if "pixel_weight_maps" not in gen_batch_output.batch:
+            logger.warning(
+                "pixel_weight.enable=true but 'pixel_weight_maps' is missing in batch; "
+                "falling back to scalar advantage."
+            )
+            return gen_batch_output
+
+        advantages = gen_batch_output.batch["advantages"]
+        pixel_maps = gen_batch_output.batch["pixel_weight_maps"].to(dtype=advantages.dtype, device=advantages.device)
+
+        if pixel_maps.ndim != 4:
+            raise ValueError(
+                f"pixel_weight_maps must be 4-D (B, T, H, W); got shape {tuple(pixel_maps.shape)}"
+            )
+        if advantages.ndim != 1:
+            # Already dense; re-broadcasting would double-apply the weights.
+            logger.warning(
+                "VIPO broadcast skipped: advantages already have ndim=%d.", advantages.ndim
+            )
+            return gen_batch_output
+        if advantages.shape[0] != pixel_maps.shape[0]:
+            raise ValueError(
+                f"Batch-size mismatch: advantages[{advantages.shape[0]}] vs "
+                f"pixel_weight_maps[{pixel_maps.shape[0]}]"
+            )
+
+        # (B,) -> (B, 1, 1, 1) * (B, T, H, W) -> (B, T, H, W)
+        dense = advantages.view(-1, 1, 1, 1) * pixel_maps
+        gen_batch_output.batch["advantages"] = dense
+        metrics["train/pixel_weight_mean"] = float(pixel_maps.mean().item())
+        metrics["train/pixel_weight_std"] = float(pixel_maps.std().item())
+        metrics["train/dense_advantage_mean"] = float(dense.mean().item())
+        return gen_batch_output

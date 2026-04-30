@@ -43,6 +43,20 @@ def _select_wan22_guide_scale(guide_scale, t, sigma, boundary):
 
 
 class DiffusionDataParallelPPOActor(DataParallelPPOActor):
+    # ------------------------------------------------------------------
+    # VIPO (pixel-weighted advantage) helpers
+    # ------------------------------------------------------------------
+    # These small helpers avoid repeating the ``config.get("pixel_weight")``
+    # boilerplate in every method and keep the flag name in one place.
+    # When the flag is off the actor runs the original scalar GRPO path
+    # bit-for-bit identical to the pre-merge baseline.
+
+    def _pixel_cfg(self):
+        return self.config.get("pixel_weight", {}) or {}
+
+    def _pixel_enabled(self) -> bool:
+        return bool(self._pixel_cfg().get("enable", False))
+
     @staticmethod
     def _build_perms(timesteps: torch.Tensor, shuffle: bool = True) -> torch.Tensor:
         seq_len = len(timesteps[0])
@@ -88,11 +102,25 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         # make sure we are in training mode
         self.actor_module.train()
 
+        # ----- VIPO: runtime guards & feature detection -------------------
+        pixel_enable = self._pixel_enabled()
+        pixel_cfg = self._pixel_cfg()
+
         # GRPO-Guard options (Flow-GRPO RatioNorm)
         guard_cfg = self.config.get("grpo_guard", {})
         guard_enable = guard_cfg.get("enable", False)
         ratio_norm = guard_cfg.get("ratio_norm", guard_enable)
         ratio_norm_eps = guard_cfg.get("ratio_norm_eps", 1e-6)
+
+        # Dense pixel-weighted advantages require a matching dense KL path.
+        use_kl_loss = bool(self.config.get("use_kl_loss", False))
+        if pixel_enable and use_kl_loss and not bool(pixel_cfg.get("kl_loss_compatible", False)):
+            raise NotImplementedError(
+                "VIPO pixel-weighted advantages are incompatible with the KL loss path. "
+                "Set `actor_rollout_ref.actor.use_kl_loss=false` or flip "
+                "`actor_rollout_ref.pixel_weight.kl_loss_compatible=true` once the "
+                "dense-KL path has been implemented and tested."
+            )
 
         flow_cfg = self.config.get("flow_grpo", {})
         shuffle_timesteps = flow_cfg.get("shuffle_timesteps", True)
@@ -207,39 +235,75 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     adv_clip_max,
                 )
 
-                # 1. old_log_prob for this denoising step (shape: Batch).
-                old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx].flatten()
+                # ----- log-prob / advantage shape reconciliation ---------
+                # Baseline (pixel_enable=False): both log_probs are scalar
+                # per sample -> flatten to (B,).  The matching advantages
+                # tensor is also (B,).
+                #
+                # VIPO (pixel_enable=True): log_probs have dense spatial
+                # shape (B, T_lat, H_lat, W_lat).  We keep those dims and
+                # broadcast a matching dense advantages tensor - which the
+                # trainer already expanded via `_apply_vipo_broadcast` -
+                # so the policy loss is computed per spatial location.
+                if pixel_enable:
+                    old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx]
+                    new_log_probs_step = new_log_probs
+                    # Normalise rank so both tensors are (B, T, H, W).
+                    # ``wan_step`` returns (T, H, W) for a single-sample
+                    # mini-batch; add a leading batch dim so broadcasting
+                    # against old_log_probs works.
+                    if new_log_probs_step.dim() + 1 == old_log_probs_step.dim():
+                        new_log_probs_step = new_log_probs_step.unsqueeze(0)
+                    if new_log_probs_step.dim() == old_log_probs_step.dim() + 1 and new_log_probs_step.shape[0] == 1:
+                        new_log_probs_step = new_log_probs_step.squeeze(0)
+                    if new_log_probs_step.shape != old_log_probs_step.shape:
+                        raise RuntimeError(
+                            f"VIPO log-prob shape mismatch: new={tuple(new_log_probs_step.shape)} "
+                            f"vs old={tuple(old_log_probs_step.shape)}.  Both should be (B, T, H, W)."
+                        )
+                else:
+                    # 1. old_log_prob for this denoising step (shape: Batch)
+                    old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx].flatten()
 
-                # 2. new_log_probs is already the current step's log_prob (shape: Batch).
-                new_log_probs_step = new_log_probs.flatten()
+                    # 2. new_log_probs is already the current step's log_prob (shape: Batch)
+                    new_log_probs_step = new_log_probs.flatten()
 
                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
 
                 if ratio_norm:
                     prev_sample_mean_step = prev_sample_mean
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
-                    
-                    # ratio_mean_bias: reduce over spatial dims first to get [batch_size] or scalar.
+
+                    # ratio_mean_bias: reduce over spatial dims first -> [batch_size] or scalar
                     diff_squared = (prev_sample_mean_step - prev_sample_mean_old).pow(2)
-                    # Reduce over every non-batch dim.
+                    # Reduce over every non-batch dim
                     ratio_mean_bias = diff_squared.flatten(start_dim=1).mean(dim=1) if diff_squared.ndim > 1 else diff_squared.mean()
-                    # Ensure 1-D shape.
+                    # Ensure 1-D
                     ratio_mean_bias = ratio_mean_bias.flatten()
 
-                    # sqrt_dt and std_dev_t are scalars, no indexing needed.
+                    # sqrt_dt and std_dev_t are scalars; no indexing needed
                     sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
                     std_dev_t_scalar = std_dev_t.mean() if std_dev_t.ndim > 0 else std_dev_t
 
                     sigma_t = std_dev_t_scalar / (sqrt_dt_scalar + ratio_norm_eps)
                     scale = sqrt_dt_scalar * sigma_t
 
-                    # ratio_mean_bias / scale^2; result stays [batch_size].
+                    # ratio_mean_bias / scale^2; shape stays [batch_size]
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
 
                     print(f"Step {step_idx}: ratio_mean_bias {ratio_mean_bias.shape}, scale {scale}")
 
-                    # Importance-sampling ratio with RatioNorm adjustment (GRPO_Guard).
-                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale)
+                    # VIPO: broadcast the per-sample bias scalar over the
+                    # dense spatial dims when the actor is running in
+                    # pixel mode.  In scalar mode this is a no-op (shapes
+                    # already match).
+                    if pixel_enable:
+                        ratio_mean_bias_bcast = ratio_mean_bias.view(-1, 1, 1, 1)
+                    else:
+                        ratio_mean_bias_bcast = ratio_mean_bias
+
+                    # Importance-sampling ratio with RatioNorm adjustment (GRPO_Guard)
+                    ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias_bcast) * scale)
                 else:
                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
 
@@ -335,7 +399,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     seq_len=seq_len,
                 )
 
-            # Handle the unconditional prediction output
+            # Handle unconditional prediction output
             if isinstance(pred_uncond, dict) and "rgb" in pred_uncond:
                 model_output_uncond = pred_uncond["rgb"][0].detach()
             elif isinstance(pred_uncond, list):
@@ -350,7 +414,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 seq_len=seq_len,
             )
 
-            # Handle the conditional prediction output
+            # Handle conditional prediction output
             if isinstance(pred_cond, dict) and "rgb" in pred_cond:
                 model_output_cond = pred_cond["rgb"][0]
             elif isinstance(pred_cond, list):
@@ -423,7 +487,23 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 / (2 * (std_dev_t**2))
             ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
-            log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+            # Align the reduction with the rollout path.
+            # Both this actor's ``wan_step`` and the rollout's ``wan_step``
+            # must sum the **channel** axis in pixel mode, so the shapes
+            # match at loss time.  In baseline mode we mean-reduce over all
+            # non-batch dims to a scalar, identical to pre-merge behaviour.
+            if self._pixel_enabled():
+                if log_prob.dim() == 4:
+                    # (C, T, H, W) -> (T, H, W): channel is dim 0 when
+                    # there is no explicit batch dim.
+                    log_prob = log_prob.sum(dim=0)
+                elif log_prob.dim() == 5:
+                    # (B, C, T, H, W) -> (B, T, H, W): channel is dim 1.
+                    log_prob = log_prob.sum(dim=1)
+                else:
+                    log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+            else:
+                log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             if return_stats:
                 sqrt_dt = torch.sqrt(delta_t)
                 return prev_sample, pred_original_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt

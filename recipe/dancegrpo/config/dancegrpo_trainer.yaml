@@ -1,6 +1,6 @@
 hydra:
   searchpath:
-    - pkg://verl.trainer.config
+    - file://verl/trainer/config
 
 defaults:
   - ppo_trainer
@@ -59,6 +59,14 @@ actor_rollout_ref:
   vae_stride: [4, 8, 8]
   # latent_channels: Number of channels in VAE latent space
   latent_channels: 16
+
+  pixel_weight:
+    enable: false
+    model_path: "facebook/dinov2-large"
+    pca_method: weighted
+    sigma: 1.0
+    assert_latent_5d: true
+    kl_loss_compatible: false
 
   # if fast flow-grpo
   flow_grpo:
@@ -304,3 +312,57 @@ reward_model:
     n: 1
 
 use_rm: True # use_reward_model
+
+# ============================================================================
+# BGPO: Bayesian-Prior Group Optimization
+# ----------------------------------------------------------------------------
+# Two branches:
+#   CRT (use_rerange)        : rearranges per-sample rewards before advantage
+#                              computation, using a prior-based sign + sigmoid.
+#   RAS (adaptive_weight_*)  : scales the scalar advantage with a per-group
+#                              weight computed from posterior statistics.
+# Both branches share the `enable` flag.  When `enable: false`, BGPO is a
+# no-op and the trainer runs the original baseline path.
+# ============================================================================
+algorithm:
+  bgpo:
+    enable: false
+
+    # --- CRT: reward rearrangement --------------------------------------
+    use_rerange: false
+    rerange_method: binary         # currently only "binary"
+    rerange_a: 50.0                # slope term in the rerange formula
+    rerange_temperature: 5.0       # temperature in sigmoid; must be > 0
+    # When true, reward-only copies of the batch are appended with reranged
+    # rewards. Keep this disabled unless the extra memory cost is intended.
+    append_rerange_samples: false
+
+    # --- RAS: adaptive advantage scaling --------------------------------
+    adaptive_weight_method: bayes              # no | bayes | random | cvpr
+    adaptive_weight_discriminate_method: normal  # normal | reverse
+    adaptive_weight_weight_method: std_pos       # fix | std_pos | std_neg | random
+    adaptive_weight_fix_weight: 0.0
+
+    # bayes mode
+    prior_var: 1.0
+    bayes_weight_range: [0.5, 1.5]
+
+    # cvpr std mode
+    use_std_runningmean: false
+    neg_base: 1.005
+    scale_neg: 0.01
+
+    # Loss coupling with adaptive weight:
+    # `advantage *= clamp(1 + alpha * w, min_adv_scale, max_adv_scale)`.
+    regularization_term_alpha: 1.0
+    min_adv_scale: 0.01
+    max_adv_scale: 10.0
+
+    # --- Joint-reward interaction ---------------------------------------
+    joint:
+      # When true, the joint-advantage pre-computation respects the user's
+      # `reward_model.weights` instead of overwriting them.
+      reuse_user_task_weights: true
+
+    # Numerical-stability clamp for `exp(-r/T)` in CRT.
+    exp_clamp: 30.0
