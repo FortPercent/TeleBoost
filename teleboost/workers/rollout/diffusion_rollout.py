@@ -35,7 +35,7 @@ from verl.utils.device import get_device_id, get_device_name, get_nccl_backend
 from verl.utils.torch_functional import get_response_mask
 from wan.modules.vae import WanVAE
 
-from verl.workers.rollout.base import BaseRollout
+from verl.workers.rollout.base import BaseRollout  # import-verl: verl is pip-installed
 import logging
 
 __all__ = ['DiffusionRollout']
@@ -85,12 +85,30 @@ class DiffusionRollout(BaseRollout):
         super().__init__()
         self.config = config
         self.module = module
-        vae_dtype=torch.float16
-        vae=WanVAE(
+        # bfloat16 (not float16): the Wan VAE's intermediate activations
+        # routinely exceed fp16's ~65504 max under autocast, producing NaN
+        # decoded videos that silently propagate through the
+        # ``(video_frames * 255).astype(uint8)`` cast (warns "invalid value
+        # encountered in cast" but yields zeros), then NaN HPS scores ->
+        # NaN advantages -> NaN grads.  bfloat16 has the same memory cost
+        # as fp16 but the dynamic range of fp32, so VAE decode stays
+        # finite.  Verified empirically on Wan2.2-T2V-A14B at sampling
+        # steps in {4, 10}.
+        vae_dtype = torch.bfloat16
+        vae = WanVAE(
             vae_pth=os.path.join(self.config.model.vae_model_path),
-            dtype=vae_dtype
+            dtype=vae_dtype,
         )
-        self.vae_module=vae
+        self.vae_module = vae
+
+        # ----- VIPO: pixel-weight feature flag ---------------------------
+        # Enabled via ``actor_rollout_ref.pixel_weight.enable`` in Hydra.
+        # When False (the default) the rollout keeps the original scalar
+        # log-probability behaviour.  When True it preserves spatial dims
+        # so dense (T,H,W) log-probs can flow into a pixel-weighted loss.
+        pixel_cfg = self.config.get("pixel_weight", {}) or {}
+        self._pixel_enable = bool(pixel_cfg.get("enable", False))
+        self._pixel_cfg = pixel_cfg
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
         torch.cuda.memory._set_allocator_settings(f"expandable_segments:{False}")
@@ -126,7 +144,7 @@ class DiffusionRollout(BaseRollout):
         
         grpo_sample = True
         # self.module.eval()
-        self.vae_module.model.to(get_device_id(),dtype=torch.float16)
+        self.vae_module.model.to(get_device_id(), dtype=torch.bfloat16)
         for index, batch_idx in enumerate(batch_indices):
             progress_bar = tqdm(range(0, self.config.sampling_steps), desc="WAN Sampling Progress")
             # batch_captions = [caption[i] for i in batch_idx]
@@ -140,6 +158,7 @@ class DiffusionRollout(BaseRollout):
             
             # ---- log info ----
 
+            # with torch.no_grad(): 
             wan_outputs = self.run_wan_sample_step(
                 batch_input_latents,
                 progress_bar,
@@ -168,30 +187,36 @@ class DiffusionRollout(BaseRollout):
             
             # autocast_dtype = torch.float32 #TODO
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                # Cast final_latents to fp32 for the VAE decoder.
+                # Cast final_latents to fp32 for the VAE decoder
                 final_latents_vae = final_latents.to(dtype=torch.float32)
 
                 decoded_videos = self.vae_module.decode([final_latents_vae])
 
                 video_frames = decoded_videos[0]
+                
 
-                # Post-process: normalize from [-1, 1] to [0, 1].
+                
+                # Post-process: normalize from [-1, 1] to [0, 1]
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
-
-                # Ensure video_frames is (C, T, H, W).
+                
+                
+                # Ensure video_frames is (C, T, H, W)
                 if video_frames.dim() == 4:
-                    # Subsample frames at 15 FPS for the preview.
-                    fps = 15
+                    # Subsample frames at 15 FPS for the preview
+                    fps=15
                     video_id = video_frames[:, ::fps, :, :]
                     C, T, H, W = video_frames.shape
-
-                    # Convert to numpy (T, H, W, C).
-                    video_id = video_id.permute(1, 2, 3, 0).cpu().numpy()
+                    # print(video_frames.shape)
+                        
+                    # Convert to numpy (T, H, W, C)
+                    video_id = video_id.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+                    # video_id = video_frames.cpu().numpy()
+                    
                     import numpy as np
                     video_id = (video_id * 255).astype(np.uint8)
-
-                    # If single-channel, expand to 3 channels.
+                        
+                        # If single-channel, expand to 3 channels
                     if C == 1:
                         video_id = id.repeat(video_id, 3, axis=-1)
                         
@@ -204,7 +229,7 @@ class DiffusionRollout(BaseRollout):
         self.vae_module.model.to("cpu", dtype=torch.float32)
         torch.cuda.empty_cache()
         
-        # Everything except all_video_paths is returned as a single tensor.
+        # Everything except all_video_paths is a single tensor
         if len(all_latents) > 1:
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
@@ -255,13 +280,55 @@ class DiffusionRollout(BaseRollout):
 
         non_tensor_batch = prompts.non_tensor_batch
         non_tensor_batch['video_ids'] = np.array(all_video_ids)
+
+        # ----- VIPO: attach per-sample pixel-weight maps -----------------
+        # Only executed when the feature flag is on.  We derive the
+        # spatial/temporal target sizes from the produced latents so the
+        # map aligns with whatever the actor will receive.  Failures in
+        # DINOv2 fall back to an all-ones map inside the util (graceful
+        # degradation to baseline GRPO for that sample).
+        if self._pixel_enable:
+            try:
+                videos = all_video_frames
+                if videos.ndim != 5:
+                    raise ValueError(
+                        f"Expected video_frames of shape (B, C, T, H, W); got {tuple(videos.shape)}"
+                    )
+                # latents here has shape (B, num_steps, C, T_lat, H_lat, W_lat);
+                # we want T_lat, H_lat, W_lat from dims 3/4/5.
+                target_time = int(latents.shape[3])
+                target_size = (int(latents.shape[4]), int(latents.shape[5]))
+
+                # Local import to keep the pixel-weight code path lazy -
+                # we don't want to force DINOv2/transformers imports on
+                # users who never enable VIPO.
+                from recipe.dancegrpo.pixel_weight_utils import (
+                    compute_batch_pixel_weight_maps,
+                )
+
+                pixel_weight_maps = compute_batch_pixel_weight_maps(
+                    videos=videos,
+                    target_size=target_size,
+                    target_time=target_time,
+                    device=videos.device,
+                    model_path=self._pixel_cfg.get("model_path", "facebook/dinov2-large"),
+                    pca_method=self._pixel_cfg.get("pca_method", "weighted"),
+                    sigma=float(self._pixel_cfg.get("sigma", 1.0)),
+                )
+                batch["pixel_weight_maps"] = pixel_weight_maps
+            except Exception as err:
+                logger.warning(
+                    "VIPO pixel_weight_maps computation failed: %s."
+                    "  Falling back to baseline scalar GRPO for this batch.",
+                    err,
+                )
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     def run_wan_sample_step(
         self,
         latents,  # [(16, 7, 64, 64)]
         progress_bar, 
-        sigma_schedule,  # sigma_schedule
+        sigma_schedule,
         transformer,
         context,
         neg_context,
@@ -302,16 +369,44 @@ class DiffusionRollout(BaseRollout):
                 # timestep_uncond = timestep
 
                 with torch.autocast("cuda", torch.bfloat16):
-                    # Wan model input: x is a list of (C, T, H, W) tensors.
+                    # Wan model input: x is a list of (C, T, H, W) tensors
+                    
+                    
+                    # import hashlib
+                    # md5 = hashlib.md5(arr.tobytes()).hexdigest()
+                    # print(
+                    #     f"[Rollout] rank {torch.distributed.get_rank()} "
+                    #     f"step {i}/{self.config.sampling_steps} "
+                    #     f"shape={tuple(latents[0].shape)} "
+                    #     f"norm={latents[0].norm().item():.4f} "
+                    #     f"latents[0] md5={md5}"
+                    #     f"timestep_cond norm={timestep_cond} "
+                    #     f"context norm={context[0].norm().item():.4f} "
+                    #     f"seq_len={seq_len} "
+                    # )
+                    # with torch.no_grad():
+                    #     pred_cond = transformer(
+                    #         x=latents,  # [(16, 7, 64, 64)]
+                    #         t=timestep,
+                    #         context=context,
+                    #         seq_len=seq_len
+                    #     )
                     with torch.no_grad():
                         pred_cond = transformer(
-                            x=latents,
+                            x=latents,  # [(16, 7, 64, 64)]
                             t=timestep,
                             context=context,
                             seq_len=seq_len
                         )
-
-                    # Unwrap conditional prediction.
+                    # with torch.no_grad():
+                    #     pred_cond = transformer(
+                    #         x=latents,  # [(16, 7, 64, 64)]
+                    #         t=timestep,
+                    #         context=context,
+                    #         seq_len=seq_len
+                    #     )
+                        
+                    # Unwrap conditional prediction
                     if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
                         model_output_cond = pred_cond['rgb'][0]
                     elif isinstance(pred_cond, list):
@@ -319,10 +414,11 @@ class DiffusionRollout(BaseRollout):
                     else:
                         model_output_cond = pred_cond
 
-                    # Unconditional prediction.
+                    # Unconditional prediction
+                    
                     with torch.no_grad():
                         pred_uncond = transformer(
-                            x=latents,
+                            x=latents,  # [(16, 7, 64, 64)]
                             t=timestep,
                             context=neg_context,
                             seq_len=seq_len
@@ -334,15 +430,15 @@ class DiffusionRollout(BaseRollout):
                         model_output_uncond = pred_uncond[0]
                     else:
                         model_output_uncond = pred_uncond
-
+                        
                     del pred_cond, pred_uncond
 
-                    # CFG combine.
+                    # CFG combine
                     model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
                     del model_output_cond, model_output_uncond
                     torch.cuda.empty_cache()
 
-                # Wan SDE sampling step.
+                # Wan SDE sampling step
                 in_window = window_start <= i < window_end
                 if i == window_start:
                     all_latents.append(latents[0])
@@ -350,26 +446,26 @@ class DiffusionRollout(BaseRollout):
                 if in_window:
                     if return_prev_sample_mean:
                         next_latents, pred_original, log_prob, prev_sample_mean = self.wan_step(
-                            model_output,
-                            latents[0].to(torch.float32),
-                            self.config.actor.eta,
+                            model_output, 
+                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
+                            self.config.actor.eta, 
                             sigma_schedule,
-                            i,
-                            prev_sample=None,
-                            grpo=True,
+                            i, 
+                            prev_sample=None, 
+                            grpo=True, 
                             sde_solver=True,
                             return_prev_sample_mean=True,
                         )
                         all_prev_sample_mean.append(prev_sample_mean)
                     else:
                         next_latents, pred_original, log_prob = self.wan_step(
-                            model_output,
-                            latents[0].to(torch.float32),
-                            self.config.actor.eta,
+                            model_output, 
+                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
+                            self.config.actor.eta, 
                             sigma_schedule,
-                            i,
-                            prev_sample=None,
-                            grpo=True,
+                            i, 
+                            prev_sample=None, 
+                            grpo=True, 
                             sde_solver=True,
                         )
                     all_log_probs.append(log_prob)
@@ -389,7 +485,7 @@ class DiffusionRollout(BaseRollout):
                 latents=[next_latents.to(torch.float32)]
             final_latents = pred_original
 
-            # all_latents shape is (num_steps+1, 16, 7, 64, 64).
+            # all_latents shape is (num_steps+1, 16, 7, 64, 64)
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
             if return_prev_sample_mean:
@@ -405,30 +501,30 @@ class DiffusionRollout(BaseRollout):
         eta: float,                  # randomness strength
         sigmas: torch.Tensor,        # sigma schedule (FLUX-style)
         index: int,                  # current timestep index
-        prev_sample: torch.Tensor,   # previous-step sample (used for GRPO re-computation)
+        prev_sample: torch.Tensor,   # previous-step sample (for GRPO re-computation)
         grpo: bool,                  # True -> also return logprob
         sde_solver: bool,            # use SDE solver
         return_prev_sample_mean: bool = False,
     ):
         """One Wan Flow-Matching sampling step, recast as an SDE solver for GRPO."""
-
+        
         sigma = sigmas[index]
         dsigma = sigmas[index + 1] - sigma  # sigma delta
-
-        # Deterministic update.
+        
+        # Deterministic update
         prev_sample_mean = latents + dsigma * model_output
-
-        # Predicted original sample.
+        
+        # Predicted original sample
         pred_original_sample = latents - sigma * model_output
-
+        
         delta_t = sigma - sigmas[index + 1]  # time delta
-        std_dev_t = eta * torch.sqrt(delta_t)  # std of the SDE noise term
-
+        std_dev_t = eta * torch.sqrt(delta_t)  # SDE noise std
+        
         if sde_solver:  # SDE solver (matches FLUX)
             score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # score estimate
             log_term = -0.5 * eta**2 * score_estimate  # log-term correction
             prev_sample_mean = prev_sample_mean + log_term * dsigma  # corrected mean
-
+        
         if grpo and prev_sample is None:
             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
@@ -439,8 +535,26 @@ class DiffusionRollout(BaseRollout):
                 / (2 * (std_dev_t**2))
             ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
-            # Average over every non-batch dim.
-            log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+            # When pixel-weighting is enabled, preserve the spatial dims so
+            # the actor can form a dense advantage against the per-pixel map.
+            # Here ``log_prob`` has
+            # shape (C, T, H, W) for a single rollout sample, so summing
+            # the channel axis leaves (T, H, W).  The original baseline
+            # behaviour (mean over all non-batch dims -> scalar) is kept
+            # when pixel-weighting is off.
+            if self._pixel_enable:
+                if log_prob.dim() == 4:
+                    # (C, T, H, W) -> (T, H, W)
+                    log_prob = log_prob.sum(dim=0)
+                elif log_prob.dim() == 5:
+                    # (B, C, T, H, W) -> (B, T, H, W)
+                    log_prob = log_prob.sum(dim=1)
+                else:
+                    # Fallback: reduce everything except the leading dim.
+                    log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+            else:
+                # Average over every non-batch dim
+                log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             if return_prev_sample_mean:
                 return prev_sample, pred_original_sample, log_prob, prev_sample_mean
             return prev_sample, pred_original_sample, log_prob

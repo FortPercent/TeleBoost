@@ -617,6 +617,29 @@ class DiffusionActorRolloutRefWorker(ActorRolloutRefWorker):
             with open_dict(self.config.actor):
                 self.config.actor.use_remove_padding = use_remove_padding
                 self.config.actor.use_fused_kernels = use_fused_kernels
+
+            # The diffusion actor reads ``pixel_weight`` (VIPO) and
+            # ``flow_grpo`` from ``self.config`` inside dp_actor, but
+            # those Hydra blocks live at ``actor_rollout_ref.<flag>``,
+            # not ``actor_rollout_ref.actor.<flag>``.  Without this
+            # merge, VIPO mode produces dense ``(T,H,W)`` log-probs in
+            # the rollout but scalar log-probs in the actor (the
+            # actor's ``_pixel_enabled()`` returns False), which fails
+            # at ``ratio = exp(new - old)`` with a shape mismatch like
+            # ``(16) vs (3072)``.  Same path for flow-grpo's
+            # ``shuffle_timesteps`` and ``timestep_indices``.
+            #
+            # ``self.config.actor`` is a struct-typed OmegaConf node;
+            # opening struct mode briefly is required to add a new key.
+            _was_struct = OmegaConf.is_struct(self.config.actor)
+            OmegaConf.set_struct(self.config.actor, False)
+            try:
+                for _propagate_key in ("pixel_weight", "flow_grpo"):
+                    if _propagate_key in self.config and _propagate_key not in self.config.actor:
+                        self.config.actor[_propagate_key] = self.config[_propagate_key]
+            finally:
+                OmegaConf.set_struct(self.config.actor, _was_struct)
+
             self.actor = DataParallelPPOActor(config=self.config.actor, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer)
 
         if self._is_rollout:

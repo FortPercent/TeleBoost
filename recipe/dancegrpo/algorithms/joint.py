@@ -233,14 +233,40 @@ class JointRewardMixin:
         gen_batch_output: DataProto,
         metrics: dict,
     ) -> DataProto:
-        """Joint rewards via parallel worker groups (one thread per model).
+        """Joint rewards via the unified ``JointRewardModelWorker`` worker group.
 
-        Each entry in ``self.reward_model_wgs`` is fanned out concurrently;
-        results are weighted-summed using ``reward_model.joint.models[name].weight``.
+        The worker (registered as ``Role.RewardModel`` in ``main_dancegrpo.py``)
+        owns all per-task models and emits ``<name>_rewards`` keys plus a
+        weighted-aggregate ``rewards`` key in a single ``compute_rm_score``
+        call.  Earlier revisions exposed one worker group per task on
+        ``self.reward_model_wgs``, but that attribute is no longer
+        populated; that code path is deleted to avoid silent
+        AttributeError at runtime.
         """
-        from tensordict import TensorDict  # local: avoid module-level dep
-
         start_time = time.time()
+
+        reward_input = gen_batch_output.select(
+            batch_keys=["video_frames"],
+            non_tensor_batch_keys=["caption"],
+        )
+
+        # ``JointRewardModelWorker.compute_rm_score`` is registered with
+        # ``Dispatch.ALL_TO_ALL``: every worker receives the full batch
+        # and returns its own DataProto.  The worker performs an
+        # AllGather internally so each rank's returned proto is already
+        # the merged view, and the dispatcher hands us a list with one
+        # equivalent entry per rank.  Concat-merging would inflate the
+        # batch dim, so we just take the first.
+        raw = self.rm_wg.compute_rm_score(reward_input)
+        if isinstance(raw, list):
+            if not raw:
+                raise RuntimeError("rm_wg.compute_rm_score returned an empty list")
+            result = raw[0]
+        else:
+            result = raw
+
+        batch_with_rewards = gen_batch_output
+        combined_reward = None
 
         joint_cfg = self.config.reward_model.get("joint", {})
         models_cfg = joint_cfg.get("models", {})
@@ -249,71 +275,19 @@ class JointRewardMixin:
         else:
             weights = {k: v.get("weight", 1.0) for k, v in models_cfg.items()}
 
-        reward_results = {}
-        thread_inputs = {}
-        ready_events = {}
-        done_events = {}
-
-        def thread_loop(name, worker_group):
-            while True:
-                ready_events[name].wait()
-                ready_events[name].clear()
-                try:
-                    reward_results[name] = worker_group.compute_rm_score(thread_inputs[name])
-                except Exception as e:
-                    logger.error(f"Error computing {name} reward: {e}")
-                    reward_results[name] = None
-                done_events[name].set()
-
-        threads = []
-        for name, wg in self.reward_model_wgs.items():
-            reward_results[name] = None
-            thread_inputs[name] = None
-            ready_events[name] = threading.Event()
-            done_events[name] = threading.Event()
-            t = threading.Thread(target=thread_loop, args=(name, wg), daemon=True)
-            t.start()
-            threads.append(t)
-
-        reward_input = gen_batch_output.select(
-            batch_keys=["video_frames"],
-            non_tensor_batch_keys=["caption"],
-        )
-
-        for name in self.reward_model_wgs:
-            thread_inputs[name] = reward_input
-            done_events[name].clear()
-            ready_events[name].set()
-
-        for name in self.reward_model_wgs:
-            done_events[name].wait()
-
-        batch_with_rewards = gen_batch_output
-        combined_reward = None
-
-        for name, result in reward_results.items():
-            if result is None:
-                logger.warning(f"No result from {name} reward model")
+        # Pull per-task ``<name>_rewards`` keys back into the batch and
+        # build the weighted sum from them.  If the worker already
+        # supplied an aggregated ``rewards`` key we still recompute here
+        # so the metrics' weighted view matches the BGPO precompute path.
+        for key in result.batch.keys():
+            if not key.endswith("_rewards"):
+                continue
+            name = key[:-len("_rewards")]
+            if name == "":  # the bare aggregated ``rewards`` key
                 continue
 
-            reward_key = f"{name}_rewards"
-            rewards = None
-
-            if reward_key in result.batch.keys():
-                rewards = result.batch[reward_key]
-            else:
-                for key in result.batch.keys():
-                    if "reward" in key.lower():
-                        rewards = result.batch[key]
-                        break
-
-            if rewards is None:
-                logger.warning(
-                    f"No reward key found in {name} result, keys: {list(result.batch.keys())}"
-                )
-                continue
-
-            batch_with_rewards.batch[reward_key] = rewards
+            rewards = result.batch[key]
+            batch_with_rewards.batch[key] = rewards
 
             weight = weights.get(name, 1.0)
             weighted_reward = rewards * weight
@@ -323,6 +297,12 @@ class JointRewardMixin:
                 combined_reward = combined_reward + weighted_reward
 
             metrics[f"train/rewards_{name}"] = rewards.mean().item()
+
+        # Fall back to whatever aggregate the worker already produced if
+        # no per-task keys came through (e.g. single-model joint config).
+        if combined_reward is None and "rewards" in result.batch:
+            combined_reward = result.batch["rewards"]
+            batch_with_rewards.batch["rewards"] = combined_reward
 
         if combined_reward is None:
             raise RuntimeError("No valid rewards computed from any model")
