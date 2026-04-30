@@ -1,16 +1,15 @@
 # ============================================================
-# Dance-GRPO / TeleBoost 1.3B smoke - pinned requirements
-# Python 3.10 + CUDA 12.4 wheels + torch 2.6.0 + vllm 0.8.4
-# Frozen from /user/.venvs/dancegrpo-vllm084-py310 (2026-04-23)
+# TeleBoost / DanceGRPO smoke — pinned requirements
+# Python 3.10 + CUDA 12.4 + torch 2.6.0 + vllm 0.8.4
 # ============================================================
 # INSTALL ORDER MATTERS:
 #   1. pip install torch==2.6.0
 #   2. pip install <local flash_attn wheel> --no-deps
 #   3. pip install vllm==0.8.4
-#   4. pip install -r requirements-dancegrpo-py310.txt
-#   5. pip install -e .        # for verl editable
-#   6. pip install opencv-python easydict diffusers hpsv2 tensorboard
-#   7. Patch hpsv2 (see README)
+#   4. pip install -r requirements-pinned.txt
+#   5. pip install --no-deps -e .                 # TeleBoost editable
+#   6. pip install opencv-python easydict diffusers hpsv2 tensorboard decord
+#   7. Apply hpsv2 packaging fixes (see docs/install_from_scratch.md §3.1)
 # ============================================================
 
 absl-py==2.4.0
