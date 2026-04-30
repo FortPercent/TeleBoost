@@ -48,6 +48,8 @@ def apply() -> None:
 
     # verl.workers.reward_manager
     import verl.workers.reward_manager as _vrm
-    from teleboost.workers.reward_manager.registry import register
+    from teleboost.workers.reward_manager.registry import register, get_reward_manager_cls
     if not hasattr(_vrm, "register"):
         _vrm.register = register
+    if not hasattr(_vrm, "get_reward_manager_cls"):
+        _vrm.get_reward_manager_cls = get_reward_manager_cls
