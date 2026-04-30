@@ -11,13 +11,18 @@ _APPLIED = False
 
 
 def apply() -> None:
-    """Apply every TeleBoost patch over upstream verl. Idempotent."""
+    """Apply every TeleBoost patch over upstream verl. Idempotent.
+
+    Order matters: cp_fix injects gate_with_cp_grad_reduce et al into
+    verl.utils.ulysses; module_overrides triggers importing teleboost
+    modules (e.g. teleboost.models.transformers.wan) whose top-level
+    `from verl.utils.ulysses import gate_with_cp_grad_reduce` requires
+    the cp_fix injections to have happened first.
+    """
     global _APPLIED
     if _APPLIED:
         return
-    # Module-level overrides MUST come before symbol injections so that
-    # any upstream import inside our patches sees the overridden modules.
-    _apply_module_overrides()
     _apply_debug_extras()
     _apply_cp_fix()
+    _apply_module_overrides()
     _APPLIED = True

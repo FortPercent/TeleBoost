@@ -17,6 +17,12 @@ import sys
 # verl module path -> teleboost override module path
 OVERRIDES = {
     "verl.utils.dataset.rl_dataset": "teleboost._overrides.verl.utils.dataset.rl_dataset",
+    "verl.models.transformers.monkey_patch": "teleboost._overrides.verl.models.transformers.monkey_patch",
+    # The wan22 / wan modules already live in teleboost.models.transformers
+    # (stage 1 mv); alias them under verl namespace so monkey_patch.py's
+    # `from .wan import ulysses_self_flash_attn_forward` resolves.
+    "verl.models.transformers.wan": "teleboost.models.transformers.wan",
+    "verl.models.transformers.wan22": "teleboost.models.transformers.wan22",
 }
 
 
