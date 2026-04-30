@@ -142,6 +142,7 @@ teleboost/                            TeleBoost-only extensions
 
 wan/                                  Wan2.1 / Wan2.2 backbone (vendored, lightly patched)
 data_preprocess/prepare_wan_data.py   umT5 prompt-embedding prep (idempotent)
+models/videoalign/                    Qwen2VL-based video-alignment reward model trainer (standalone)
 prompts/                              prompt lists for preprocess
 docs/                                 docs (see §4)
 tests/special_distributed/            distributed regression tests (CP grad reduce)
