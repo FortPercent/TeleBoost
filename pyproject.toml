@@ -17,9 +17,40 @@ version = "0.1.0"
 description = "TeleBoost: video-generation RL training stack on top of verl + Wan2.1/2.2"
 license = {file = "LICENSE"}
 readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [{name = "TeleBoost contributors"}]
 urls = {Homepage = "https://github.com/FortPercent/TeleBoost"}
+
+# Runtime deps. `verl` itself is intentionally NOT listed: it must be
+# installed with `--no-deps` to avoid pip upgrading torch / cuda / ray.
+# See requirements-verl.txt and docs/install_from_scratch.md for details.
+dependencies = [
+    "accelerate",
+    "codetiming",
+    "datasets",
+    "dill",
+    "hydra-core",
+    "numpy",
+    "pandas",
+    "peft",
+    "pyarrow>=19.0.0",
+    "pybind11",
+    "pylatexenc",
+    "ray[default]",
+    "tensordict<=0.6.2",
+    "torchdata",
+    "transformers",
+    "wandb",
+    "packaging>=20.0",
+    "uvicorn",
+    "fastapi",
+]
+
+[project.optional-dependencies]
+gpu = ["liger-kernel", "flash-attn"]
+test = ["pytest", "pre-commit", "py-spy"]
+vllm = ["tensordict<=0.6.2", "vllm<=0.8.5"]
+sglang = ["tensordict<=0.6.2", "sglang[srt,openai]==0.4.6.post5", "torch-memory-saver>=0.0.5", "torch==2.6.0"]
 
 # -------------------------------
 # tool.ruff - Linting configuration
