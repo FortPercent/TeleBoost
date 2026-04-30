@@ -54,8 +54,12 @@ def apply() -> None:
     if not hasattr(_vrm, "get_reward_manager_cls"):
         _vrm.get_reward_manager_cls = get_reward_manager_cls
 
-    # verl.utils.dataset.rl_dataset (wan-specific extras)
+    # verl.utils.dataset.rl_dataset (wan-specific extras + RLHFDataset replacement)
+    # Project-modified RLHFDataset adds _read_latent() (JSON loader) + diffusion
+    # branch in __getitem__ that reads .npy context embeddings. Upstream v0.4.0
+    # only supports parquet input.
     import verl.utils.dataset.rl_dataset as _vrl_ds
     from teleboost.utils.dataset._wan_collate import wan_preprocessed_collate_function
-    if not hasattr(_vrl_ds, "wan_preprocessed_collate_function"):
-        _vrl_ds.wan_preprocessed_collate_function = wan_preprocessed_collate_function
+    from teleboost.utils.dataset._dancegrpo_rl_dataset import RLHFDataset as _DanceGRPORLHFDataset
+    _vrl_ds.wan_preprocessed_collate_function = wan_preprocessed_collate_function
+    _vrl_ds.RLHFDataset = _DanceGRPORLHFDataset
