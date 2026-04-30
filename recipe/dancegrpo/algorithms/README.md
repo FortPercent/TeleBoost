@@ -5,9 +5,9 @@
 | baseline    | (no module — vanilla GRPO loop)       | `algorithm.adv_estimator=grpo`                    | reference policy-gradient baseline                                  |
 | BGPO        | [`bgpo.py`](bgpo.py)                  | `algorithm.bgpo.enable=true`                      | Bayesian-prior group optimization (CRT reward rerange + RAS adv scale) |
 | VIPO        | [`vipo.py`](vipo.py)                  | `actor_rollout_ref.pixel_weight.enable=true`      | DINOv2 per-pixel advantage broadcast                                |
+| joint reward| [`joint.py`](joint.py)                | `reward_model.type=joint`                         | multi-head joint reward (worker-parallel / driver-side dynamic / legacy fixed-4) |
 | GRPO-Guard  | (in `dp_actor.py`)                    | `actor_rollout_ref.actor.grpo_guard.enable=true`  | flow-matching ratio-norm + grad-reweight                            |
 | flow-grpo   | (in `dp_actor.py` / rollout)          | `actor_rollout_ref.flow_grpo.enable=true`         | SDE-window subsampling for fast flow-grpo                           |
-| joint reward| `unified_reward_worker.py` + `reward_models/dynamic_joint.py` | `reward_model.type=joint` | weighted-sum / mean / max / min over multiple reward heads          |
 
 ## Layout convention
 

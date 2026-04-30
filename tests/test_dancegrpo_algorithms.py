@@ -159,16 +159,37 @@ class TestRerangeGroupRewards:
 
 def test_algorithms_namespace_exports_mixins():
     """The trainer relies on these names from algorithms.__init__."""
-    from recipe.dancegrpo.algorithms import BGPOMixin, VIPOMixin
+    from recipe.dancegrpo.algorithms import BGPOMixin, JointRewardMixin, VIPOMixin
 
-    # Both should be plain mixin classes (no abstract methods, no required init).
     bgpo_methods = {m for m in dir(BGPOMixin) if not m.startswith("__")}
     vipo_methods = {m for m in dir(VIPOMixin) if not m.startswith("__")}
+    joint_methods = {m for m in dir(JointRewardMixin) if not m.startswith("__")}
 
     assert {"_get_bgpo_config", "_is_bgpo_enabled", "_apply_bgpo_on_rewards",
             "_apply_bgpo_on_advantages", "_calculate_adaptive_weight",
             "_get_prior_array"} <= bgpo_methods
     assert {"_is_pixel_weight_enabled", "_apply_vipo_broadcast"} <= vipo_methods
+    assert {"_maybe_create_joint_reward_runner", "_compute_joint_reward",
+            "_compute_joint_parallel_reward", "_precompute_joint_advantages"} <= joint_methods
+
+
+def test_trainer_inherits_all_three_mixins():
+    """The driver trainer must mix in BGPO, VIPO, and JointReward."""
+    from recipe.dancegrpo.algorithms import BGPOMixin, JointRewardMixin, VIPOMixin
+    from recipe.dancegrpo.dancegrpo_ray_trainer import RayDanceGRPOTrainer
+
+    mro = RayDanceGRPOTrainer.__mro__
+    assert BGPOMixin in mro
+    assert VIPOMixin in mro
+    assert JointRewardMixin in mro
+
+
+def test_joint_runner_helpers_callable():
+    """Module-level helpers exposed for unit tests / external use."""
+    from recipe.dancegrpo.algorithms import _JointRewardRunner, merge_worker_results
+
+    assert callable(merge_worker_results)
+    assert hasattr(_JointRewardRunner, "compute")
 
 
 def test_pixel_weight_utils_shim_reexports():

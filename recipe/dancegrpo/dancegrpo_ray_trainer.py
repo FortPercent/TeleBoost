@@ -8,11 +8,10 @@ multiple GPU workers.
 """
 
 import logging
-import time
 import uuid
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 import numpy as np
 import torch
@@ -25,8 +24,8 @@ from verl.utils.debug import marked_timer
 
 from recipe.dancegrpo.algorithms import (
     BGPOMixin,
+    JointRewardMixin,
     VIPOMixin,
-    compute_joint_task_weights,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,152 +105,18 @@ def compute_advantage(
     return data
 
 
-def merge_worker_results(
-    data_list: List[DataProto],
-    skip_all_zero: bool = True,
-    use_validity_flag: bool = True
-) -> DataProto:
-    """
-    Merge results from multiple DataProto instances.
 
-    This function handles the merging of results from different data-parallel
-    workers. It provides two strategies for identifying valid data:
-
-    1. Validity flag (preferred): Check for '_valid' meta info
-    2. Non-zero check (fallback): Skip tensors that are all zeros
-
-    IMPORTANT: The non-zero check can incorrectly skip valid data where
-    all values happen to be zero. Prefer using validity flags when possible.
-
-    Args:
-        data_list: List of DataProto from different workers
-        skip_all_zero: If True, skip tensors/arrays that are all zeros
-        use_validity_flag: If True, prefer validity flags over zero-checking
-
-    Returns:
-        Merged DataProto combining valid data from all workers
-    """
-    if data_list is None:
-        return DataProto()
-    if isinstance(data_list, DataProto):
-        return data_list
-    if not data_list:
-        return DataProto()
-    if len(data_list) == 1:
-        return data_list[0]
-
-    # Collect all unique keys
-    all_batch_keys = set()
-    all_non_tensor_keys = set()
-
-    for dp in data_list:
-        if dp.batch is not None:
-            all_batch_keys.update(dp.batch.keys())
-        if dp.non_tensor_batch is not None:
-            all_non_tensor_keys.update(dp.non_tensor_batch.keys())
-
-    def _is_valid_tensor(dp: DataProto, key: str, tensor: torch.Tensor) -> bool:
-        """Check if a tensor is valid using multiple strategies."""
-        # Strategy 1: Check validity flag in meta_info
-        if use_validity_flag and hasattr(dp, 'meta_info') and dp.meta_info:
-            validity_key = f'{key}_valid'
-            if validity_key in dp.meta_info:
-                return dp.meta_info[validity_key]
-
-        # Strategy 2: Check for non-zero values (fallback)
-        if skip_all_zero:
-            return torch.any(tensor != 0).item()
-
-        return True
-
-    def _is_valid_array(dp: DataProto, key: str, arr: np.ndarray) -> bool:
-        """Check if a numpy array is valid using multiple strategies."""
-        # Strategy 1: Check validity flag in meta_info
-        if use_validity_flag and hasattr(dp, 'meta_info') and dp.meta_info:
-            validity_key = f'{key}_valid'
-            if validity_key in dp.meta_info:
-                return dp.meta_info[validity_key]
-
-        # Strategy 2: Check for non-zero values (fallback)
-        # Note: Only apply to numeric arrays
-        if skip_all_zero:
-            if np.issubdtype(arr.dtype, np.number):
-                return np.any(arr != 0)
-
-        return True
-
-    # Process batch tensors
-    batch_dict = {}
-    for key in all_batch_keys:
-        tensors_to_concat = []
-        for dp in data_list:
-            if dp.batch is not None and key in dp.batch:
-                tensor = dp.batch[key]
-                if _is_valid_tensor(dp, key, tensor):
-                    tensors_to_concat.append(tensor)
-
-        if tensors_to_concat:
-            batch_dict[key] = torch.cat(tensors_to_concat, dim=0)
-
-    # Process non_tensor_batch arrays
-    non_tensor_dict = {}
-    for key in all_non_tensor_keys:
-        arrays_to_concat = []
-        for dp in data_list:
-            if dp.non_tensor_batch is not None and key in dp.non_tensor_batch:
-                arr = dp.non_tensor_batch[key]
-                if _is_valid_array(dp, key, arr):
-                    arrays_to_concat.append(arr)
-
-        if arrays_to_concat:
-            non_tensor_dict[key] = np.concatenate(arrays_to_concat, axis=0)
-
-    return DataProto.from_dict(tensors=batch_dict, non_tensors=non_tensor_dict)
-
-
-class _JointRewardRunner:
-    def __init__(self, workers: Dict[str, object]):
-        import threading
-
-        self._workers = workers
-        self._reward_results = {name: None for name in workers}
-        self._thread_inputs = {name: None for name in workers}
-        self._ready_events = {name: threading.Event() for name in workers}
-        self._done_events = {name: threading.Event() for name in workers}
-
-        for name, worker in workers.items():
-            t = threading.Thread(target=self._thread_loop, args=(name, worker), daemon=True)
-            t.start()
-
-    def _thread_loop(self, name, worker):
-        while True:
-            self._ready_events[name].wait()  # wait for main thread to push data
-            self._ready_events[name].clear()
-            # call worker.compute_rm_score
-            self._reward_results[name] = worker.compute_rm_score(self._thread_inputs[name])
-            self._done_events[name].set()  # notify main thread of completion
-
-    def compute(self, batch: DataProto) -> Dict[str, DataProto]:
-        for name in self._workers:
-            self._thread_inputs[name] = batch
-            self._done_events[name].clear()
-            self._ready_events[name].set()
-
-        for name in self._workers:
-            self._done_events[name].wait()
-
-        return {name: merge_worker_results(self._reward_results[name]) for name in self._workers}
-
-
-class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, RayPPOTrainer):
+class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer):
     """Driver-side Dance-GRPO trainer.
 
     Algorithm hooks come from mixins in :mod:`recipe.dancegrpo.algorithms`:
 
     * :class:`BGPOMixin` — reward rerange (CRT) + adaptive advantage scaling (RAS)
     * :class:`VIPOMixin` — pixel-weighted dense advantage broadcast
+    * :class:`JointRewardMixin` — multi-head joint reward (worker-parallel,
+      driver-side dynamic, legacy fixed-4 runners)
 
-    Both mixins are no-ops unless their enable flags are set in the Hydra
+    Mixins are no-ops unless their enable flags are set in the Hydra
     config.  See ``recipe/dancegrpo/algorithms/README.md`` for the
     feature-flag matrix.
     """
@@ -413,57 +278,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, RayPPOTrainer):
                 progress_bar.update(1)
                 self.global_steps += 1
 
-    def _maybe_create_joint_reward_runner(self):
-        """
-        Create a joint reward runner if configured.
-        
-        Note: In the new unified architecture, JointRewardModelWorker handles
-        all the reward model management internally. This method returns None
-        because the trainer should just call self.rm_wg.compute_rm_score()
-        which will handle everything (including aggregation).
-        
-        For DynamicJointRewardRunner (driver-side computation), we still support
-        it but it's deprecated in favor of letting workers handle it.
-        
-        Returns:
-            None - joint mode is now handled by JointRewardModelWorker via rm_wg
-        """
-        if not self.use_rm or self.config.reward_model.type != "joint":
-            return None
-        
-        # Check if using dynamic joint configuration with driver-side runner
-        joint_config = self.config.reward_model.get("joint", None)
-        use_driver_side_runner = joint_config.get("driver_side_runner", False) if joint_config else False
-        
-        if use_driver_side_runner and joint_config and joint_config.get("models"):
-            # Use new dynamic joint reward runner (driver-side computation)
-            from .reward_models.dynamic_joint import (
-                DynamicJointRewardRunner,
-                JointRewardConfig
-            )
-            import torch.distributed as dist
-            
-            rank = dist.get_rank() if dist.is_initialized() else 0
-            world_size = dist.get_world_size() if dist.is_initialized() else 1
-            
-            config = JointRewardConfig.from_dict(joint_config)
-            runner = DynamicJointRewardRunner(config, rank, world_size)
-            runner.init_all_models()
-            
-            logger.info(
-                f"Created DynamicJointRewardRunner with {len(runner)} models: "
-                f"{runner.list_models()}"
-            )
-            return runner
-        
-        # Default: Return None - joint mode is handled by JointRewardModelWorker
-        # which is accessed via self.rm_wg.compute_rm_score()
-        logger.info(
-            "Joint reward mode: using JointRewardModelWorker via rm_wg "
-            "(worker-side aggregation)"
-        )
-        return None
-
     def _build_gen_batch(self, new_batch: DataProto) -> DataProto:
         # trainer.type == 'diffusion'
         if self.config.trainer.type == "diffusion":
@@ -589,245 +403,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, RayPPOTrainer):
             return self._apply_bgpo_on_rewards(gen_batch_output, source_batch, metrics)
         return gen_batch_output
     
-    def _compute_joint_parallel_reward(self, gen_batch_output: DataProto, metrics: dict) -> DataProto:
-        """
-        Compute joint rewards using multiple worker groups in parallel.
-        
-        Each reward model has its own worker group. We use Python threading
-        to call them in parallel and aggregate the results.
-        """
-        import threading
-        import time
-        from tensordict import TensorDict
-        
-        start_time = time.time()
-        
-        # Get model weights from config
-        joint_cfg = self.config.reward_model.get("joint", {})
-        models_cfg = joint_cfg.get("models", {})
-        if isinstance(models_cfg, (list, tuple)):
-            weights = {m.get("name"): m.get("weight", 1.0) for m in models_cfg if m.get("name")}
-        else:
-            weights = {k: v.get("weight", 1.0) for k, v in models_cfg.items()}
-        
-        # Threading infrastructure
-        reward_results = {}
-        thread_inputs = {}
-        ready_events = {}
-        done_events = {}
-        
-        def thread_loop(name, worker_group):
-            while True:
-                ready_events[name].wait()
-                ready_events[name].clear()
-                try:
-                    reward_results[name] = worker_group.compute_rm_score(thread_inputs[name])
-                except Exception as e:
-                    logger.error(f"Error computing {name} reward: {e}")
-                    reward_results[name] = None
-                done_events[name].set()
-        
-        # Start threads for each reward model worker group
-        threads = []
-        for name, wg in self.reward_model_wgs.items():
-            reward_results[name] = None
-            thread_inputs[name] = None
-            ready_events[name] = threading.Event()
-            done_events[name] = threading.Event()
-            t = threading.Thread(target=thread_loop, args=(name, wg), daemon=True)
-            t.start()
-            threads.append(t)
-        
-        # Prepare input for all workers
-        reward_input = gen_batch_output.select(
-            batch_keys=['video_frames'],
-            non_tensor_batch_keys=['caption'],
-        )
-        
-        # Dispatch to all workers
-        for name in self.reward_model_wgs:
-            thread_inputs[name] = reward_input
-            done_events[name].clear()
-            ready_events[name].set()
-        
-        # Wait for all to complete
-        for name in self.reward_model_wgs:
-            done_events[name].wait()
-        
-        # Collect and merge results
-        batch_with_rewards = gen_batch_output
-        combined_reward = None
-        
-        for name, result in reward_results.items():
-            if result is None:
-                logger.warning(f"No result from {name} reward model")
-                continue
-            
-            # Find the reward tensor using model-specific key
-            reward_key = f"{name}_rewards"
-            rewards = None
-            
-            if reward_key in result.batch.keys():
-                rewards = result.batch[reward_key]
-            else:
-                # Try to find any key containing 'reward'
-                for key in result.batch.keys():
-                    if 'reward' in key.lower():
-                        rewards = result.batch[key]
-                        break
-            
-            if rewards is None:
-                logger.warning(f"No reward key found in {name} result, keys: {list(result.batch.keys())}")
-                continue
-            
-            # Add to batch with model-specific name
-            batch_with_rewards.batch[reward_key] = rewards
-            
-            # Add to combined reward
-            weight = weights.get(name, 1.0)
-            weighted_reward = rewards * weight
-            if combined_reward is None:
-                combined_reward = weighted_reward
-            else:
-                combined_reward = combined_reward + weighted_reward
-            
-            # Log individual metrics
-            metrics[f"train/rewards_{name}"] = rewards.mean().item()
-        
-        if combined_reward is None:
-            raise RuntimeError("No valid rewards computed from any model")
-        
-        # Add aggregated reward directly to batch
-        batch_with_rewards.batch["rewards"] = combined_reward
-        
-        # Log overall metrics
-        metrics["train/rewards"] = combined_reward.mean().item()
-        if "log_probs" in batch_with_rewards.batch.keys():
-            metrics["train/log_probs"] = batch_with_rewards.batch["log_probs"].mean().item()
-        
-        elapsed = time.time() - start_time
-        logger.info(f"Joint parallel reward computation took {elapsed:.2f}s")
-        
-        return batch_with_rewards
-
-    def _compute_joint_reward(
-        self, 
-        gen_batch_output: DataProto, 
-        metrics: dict, 
-        joint_reward_runner
-    ) -> DataProto:
-        """
-        Compute weighted combination of multiple reward signals.
-        
-        Supports two runner types:
-        1. DynamicJointRewardRunner: Uses compute_and_aggregate() for full processing
-        2. Legacy _JointRewardRunner: Uses manual aggregation with fixed 4 models
-        
-        Args:
-            gen_batch_output: Generated video batch
-            metrics: Dict to store metrics
-            joint_reward_runner: Runner managing parallel reward computation
-            
-        Returns:
-            DataProto with combined rewards
-        """
-        from tensordict import TensorDict
-        from .reward_models.dynamic_joint import DynamicJointRewardRunner
-        
-        start_time = time.time()
-        
-        # Check if using dynamic runner (has compute_and_aggregate method)
-        if isinstance(joint_reward_runner, DynamicJointRewardRunner):
-            # Use the new dynamic runner which handles everything internally
-            final_batch = joint_reward_runner.compute_and_aggregate(gen_batch_output)
-            
-            # Add metrics from the dynamic runner
-            rewards_dict = joint_reward_runner.compute(gen_batch_output)
-            metrics.update(joint_reward_runner.get_metrics(rewards_dict))
-            metrics["train/rewards"] = final_batch.batch["rewards"].mean().item()
-            
-            if "log_probs" in gen_batch_output.batch.keys():
-                final_batch = gen_batch_output.union(final_batch)
-                metrics["train/log_probs"] = final_batch.batch["log_probs"].mean().item()
-            
-            elapsed = time.time() - start_time
-            logger.info(f"Dynamic joint reward computation took {elapsed:.2f}s")
-            return final_batch
-        
-        # Legacy mode: manual aggregation with fixed 4 models
-        rewards = joint_reward_runner.compute(gen_batch_output)
-        aes_tensor = rewards.get("aes")
-        raft_tensor = rewards.get("raft")
-        videoclip_tensor = rewards.get("videoclip")
-        videophy_tensor = rewards.get("videophy")
-
-        batch_with_rewards = gen_batch_output
-        if aes_tensor is not None:
-            batch_with_rewards = batch_with_rewards.union(aes_tensor)
-        if raft_tensor is not None:
-            batch_with_rewards = batch_with_rewards.union(raft_tensor)
-        if videoclip_tensor is not None:
-            batch_with_rewards = batch_with_rewards.union(videoclip_tensor)
-        if videophy_tensor is not None:
-            batch_with_rewards = batch_with_rewards.union(videophy_tensor)
-
-        # Get configurable weights (with sensible defaults)
-        weights_config = self.config.reward_model.get("weights", {})
-        w_aes = weights_config.get("aes", 1.0)
-        w_raft = weights_config.get("raft", 1.0)
-        w_videoclip = weights_config.get("videoclip", 1.0)
-        w_videophy = weights_config.get("videophy", 1.0)
-        
-        logger.debug(
-            f"Reward weights: aes={w_aes}, raft={w_raft}, "
-            f"videoclip={w_videoclip}, videophy={w_videophy}"
-        )
-
-        # Compute weighted sum of rewards (handle missing rewards gracefully)
-        combined_reward = torch.zeros_like(batch_with_rewards.batch.get(
-            "aes_rewards", 
-            batch_with_rewards.batch.get("raft_rewards")
-        ))
-        
-        if "aes_rewards" in batch_with_rewards.batch.keys():
-            combined_reward = combined_reward + w_aes * batch_with_rewards.batch["aes_rewards"]
-            metrics["train/rewards_aes"] = batch_with_rewards.batch["aes_rewards"].mean().item()
-        if "raft_rewards" in batch_with_rewards.batch.keys():
-            combined_reward = combined_reward + w_raft * batch_with_rewards.batch["raft_rewards"]
-            metrics["train/rewards_raft"] = batch_with_rewards.batch["raft_rewards"].mean().item()
-        if "videoclip_rewards" in batch_with_rewards.batch.keys():
-            combined_reward = combined_reward + w_videoclip * batch_with_rewards.batch["videoclip_rewards"]
-            metrics["train/rewards_videoclip"] = batch_with_rewards.batch["videoclip_rewards"].mean().item()
-        if "videophy_rewards" in batch_with_rewards.batch.keys():
-            combined_reward = combined_reward + w_videophy * batch_with_rewards.batch["videophy_rewards"]
-            metrics["train/rewards_videophy"] = batch_with_rewards.batch["videophy_rewards"].mean().item()
-
-        # Build final result with combined reward
-        reward_td = TensorDict(
-            {"rewards": combined_reward}, 
-            batch_size=combined_reward.shape[0]
-        )
-        
-        # Get non_tensor_batch from first available tensor
-        non_tensor = {}
-        for tensor in [aes_tensor, raft_tensor, videoclip_tensor, videophy_tensor]:
-            if tensor is not None and tensor.non_tensor_batch:
-                non_tensor = tensor.non_tensor_batch
-                break
-        
-        reward_proto = DataProto(batch=reward_td, non_tensor_batch=non_tensor)
-        final_batch = batch_with_rewards.union(reward_proto)
-
-        # Log metrics
-        metrics["train/rewards"] = combined_reward.mean().item()
-        if "log_probs" in final_batch.batch.keys():
-            metrics["train/log_probs"] = final_batch.batch["log_probs"].mean().item()
-
-        elapsed = time.time() - start_time
-        logger.info(f"Legacy joint reward computation took {elapsed:.2f}s")
-        
-        return final_batch
-
     def _compute_single_rm_reward(self, gen_batch_output: DataProto, metrics: dict):
         if self.config.reward_model.type == "qwen":
             reward_input = gen_batch_output.select(
@@ -873,74 +448,4 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, RayPPOTrainer):
             logger.debug("%s.batch is None; non_tensor_keys=%s", name, list(non_tensor.keys()))
             return
         logger.debug("%s.batch_size=%s", name, batch.batch_size)
-
-    # ================================================================
-    # Joint-reward + algorithm glue
-    # ----------------------------------------------------------------
-    # Algorithm hooks (BGPO, VIPO) come from mixins in
-    # ``recipe.dancegrpo.algorithms``.  The methods below stitch them
-    # into the joint-reward path that lives only in the trainer.
-    # ================================================================
-
-    def _precompute_joint_advantages(
-        self,
-        gen_batch_output: DataProto,
-        source_batch: DataProto,
-        metrics: dict,
-        joint_reward_runner,
-    ) -> Tuple[DataProto, bool]:
-        """Pre-compute joint-mode advantages before the reward timer block.
-
-        Reward extraction follows the existing joint paths:
-        - driver-side runner: ``_compute_joint_reward``
-        - worker-group parallel: ``_compute_joint_parallel_reward``
-
-        Returns
-        -------
-        (DataProto, bool)
-            Tuple of updated batch and a flag indicating whether a
-            multi-head precompute actually happened.  When the flag is
-            False the caller must run the standard reward+advantage path.
-        """
-        if joint_reward_runner is not None:
-            reward_output = self._compute_joint_reward(gen_batch_output, metrics, joint_reward_runner)
-        else:
-            reward_output = self._compute_joint_parallel_reward(gen_batch_output, metrics)
-
-        reward_keys = [k for k in reward_output.batch.keys() if k.endswith("_rewards")]
-        if not reward_keys:
-            return reward_output, False
-
-        per_task_rewards = [reward_output.batch[k].float() for k in reward_keys]
-        per_task_advantages = []
-
-        for reward_key in reward_keys:
-            reward_tensor = reward_output.batch[reward_key].float()
-            mean = reward_tensor.mean()
-            std = reward_tensor.std() + 1e-8
-            adv = (reward_tensor - mean) / std
-            task_name = reward_key[:-8]
-            reward_output.batch[f"{task_name}_advantages"] = adv
-            metrics[f"train/{task_name}_advantages"] = adv.mean().item()
-            per_task_advantages.append(adv)
-
-        adv_matrix = torch.stack(per_task_advantages, dim=-1)
-        weight_matrix = compute_joint_task_weights(adv_matrix)
-
-        reward_output.batch["task_weights"] = weight_matrix
-        reward_output.batch["rewards"] = (weight_matrix * torch.stack(per_task_rewards, dim=-1)).sum(dim=-1)
-        reward_output.batch["advantages"] = (weight_matrix * adv_matrix).sum(dim=-1)
-
-        if self._is_bgpo_enabled():
-            reward_output = self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
-            if self._get_bgpo_config().get("use_rerange", False):
-                rewards = reward_output.batch["rewards"].float()
-                reward_output.batch["advantages"] = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
-
-        for idx, reward_key in enumerate(reward_keys):
-            task_name = reward_key[:-8]
-            metrics[f"train/task_weight_{task_name}"] = weight_matrix[:, idx].mean().item()
-
-        metrics["train/rewards"] = reward_output.batch["rewards"].mean().item()
-        return reward_output, True
 

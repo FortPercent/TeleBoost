@@ -6,6 +6,8 @@ directory listing.
 * :mod:`bgpo`  — Bayesian-Prior Group Optimization. CRT (reward
   rearrangement) and RAS (adaptive advantage scaling) branches.
 * :mod:`vipo`  — Pixel-weighted dense advantage broadcast via DINOv2.
+* :mod:`joint` — Multi-head joint reward (worker-side parallel groups,
+  legacy fixed 4-model runner, dynamic driver-side runner).
 
 Each module exposes:
 
@@ -22,6 +24,11 @@ from recipe.dancegrpo.algorithms.bgpo import (
     compute_joint_task_weights,
     rerange_group_rewards,
 )
+from recipe.dancegrpo.algorithms.joint import (
+    JointRewardMixin,
+    _JointRewardRunner,
+    merge_worker_results,
+)
 from recipe.dancegrpo.algorithms.vipo import (
     VIPOMixin,
     compute_batch_pixel_weight_maps,
@@ -33,6 +40,10 @@ __all__ = [
     "BGPOMixin",
     "compute_joint_task_weights",
     "rerange_group_rewards",
+    # Joint reward
+    "JointRewardMixin",
+    "_JointRewardRunner",
+    "merge_worker_results",
     # VIPO
     "VIPOMixin",
     "compute_batch_pixel_weight_maps",
