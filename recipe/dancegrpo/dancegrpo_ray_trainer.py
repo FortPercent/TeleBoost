@@ -220,11 +220,11 @@ class _JointRewardRunner:
 
     def _thread_loop(self, name, worker):
         while True:
-            self._ready_events[name].wait()  # 等待主线程喂数据
+            self._ready_events[name].wait()  # wait for main thread to push data
             self._ready_events[name].clear()
-            # 调用现有 worker 的 compute_rm_score
+            # call the worker's compute_rm_score
             self._reward_results[name] = worker.compute_rm_score(self._thread_inputs[name])
-            self._done_events[name].set()  # 通知主线程完成
+            self._done_events[name].set()  # notify main thread of completion
 
     def compute(self, batch: DataProto) -> Dict[str, DataProto]:
         for name in self._workers:
@@ -277,8 +277,8 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         joint_reward_runner = self._maybe_create_joint_reward_runner()
 
         for epoch in range(self.config.trainer.total_epochs):
-            # ======== 1. 数据 ========
-            for batch_dict in self.train_dataloader:  # self.train_dataloader处理数据
+            # ======== 1. Data ========
+            for batch_dict in self.train_dataloader:
                 metrics = {}
 
                 new_batch: DataProto = DataProto.from_single_dict(batch_dict)
@@ -291,12 +291,11 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw):
-                        # gen_batch_output的数据类型是DataProto
-                        # 具体见DiffusionActorRolloutWorker.generate_sequences方法
-                        # 得到的gen_batch_output是聚合所有gpu的结果
+                        # gen_batch_output is a DataProto aggregated across all GPUs.
+                        # See DiffusionActorRolloutRefWorker.generate_sequences.
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
-                    # 目前用的是 GAE(组间相对优势)，TODO:修改reward计算方法
+                    # Default GRPO uses group-relative advantages.
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
@@ -424,7 +423,7 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         return None
 
     def _build_gen_batch(self, new_batch: DataProto) -> DataProto:
-        # trainer的类型是diffusion
+        # trainer.type == "diffusion"
         if self.config.trainer.type == "diffusion":
             gen_batch = new_batch.pop(
                 batch_keys=["context", "context_orig_lengths", "null_context"],
@@ -789,16 +788,17 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         _keys_to_pop = [k for k in ("caption", "video_ids", "video_frames")
                         if k in gen_batch_output.non_tensor_batch]
         if _keys_to_pop:
-            gen_batch_output.pop(non_tensor_batch_keys=_keys_to_pop)  # reward计算完就可以丢掉大tensor了
-        # 清理原 batch（移除大 tensor）
+            gen_batch_output.pop(non_tensor_batch_keys=_keys_to_pop)  # reward done — drop the large tensors
+        # Clean the original batch (drop large tensors)
 
         self._debug_proto_batch("gen_batch_output", gen_batch_output)
         self._debug_proto_batch("reward_tensor", reward_tensor)
         gen_batch_output = gen_batch_output.union(reward_tensor)
 
-        # [smoke-patch] reward key 在 single 模式下是 "{model_name}_rewards" (e.g. hps_rewards),
-        # 而下游 (compute_advantage / metrics) 硬编码读 "rewards".
-        # 把 *_rewards 复制为 "rewards" 别名, 不删除源 key 以兼容 joint 等其他引用.
+        # [smoke-patch] In single-reward mode, the reward key is "{model_name}_rewards"
+        # (e.g. hps_rewards), but downstream code (compute_advantage / metrics) hardcodes
+        # "rewards". Alias *_rewards into "rewards" without removing the source key so
+        # joint / other consumers still work.
         if "rewards" not in gen_batch_output.batch:
             _src_key = next((k for k in gen_batch_output.batch.keys() if k.endswith("_rewards")), None)
             if _src_key is None:

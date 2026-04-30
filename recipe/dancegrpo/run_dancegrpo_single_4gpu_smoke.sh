@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 4×H800 80GB smoke test —— 派生自 run_dancegrpo_single.sh
+# 4×H800 80GB smoke test — derived from run_dancegrpo_single.sh.
 #
-# 目标: 在 4 卡 H800 上, 把 14B Wan2.2 + HPSv2 reward 跑 1-2 步, 验证
-#       1) ray init / hydra resolve config 通过
-#       2) vllm 引擎能起来
-#       3) actor + ref + rollout + reward 一轮 forward+backward 不 OOM
-# 不是用来训出有效模型, 不要看 reward 曲线.
+# Goal: on 4 H800 GPUs, run 14B Wan2.2 + HPSv2 reward for 1-2 steps to verify
+#       1) Ray init + Hydra config resolve succeed
+#       2) the vLLM engine starts (used by the Qwen reward path; unused here)
+#       3) actor + ref + rollout + reward complete one forward+backward without OOM
+# Not for training quality — do not interpret the reward curve.
 #
-# 与原版 single.sh 的关键差异:
-#   - n_gpus_per_node=4              (原 8)
-#   - sampling_steps=1                (原 10) → rollout 只跑 1 步去噪
-#   - h=256, w=256                   (原 480x832) → 视频分辨率最小
-#   - num_frames=9                   (原 49) → 视频帧数最小
-#   - train_prompt_bsz=2              (原 8)
-#   - n_resp_per_prompt=2             (原 3)
-#   - ppo_mini_batch_size=2           (原 8)
-#   - total_training_steps=2          (原 1000)
-#   - val_before_train=False          (原 True) → 跳过 val 直接进训练
-#   - test_freq=999, save_freq=999   → smoke 期间不保存
+# Key differences vs the production single.sh:
+#   - n_gpus_per_node=4              (was 8)
+#   - sampling_steps=1                (was 10)  -> single denoise step in rollout
+#   - h=256, w=256                   (was 480x832)
+#   - num_frames=9                   (was 49)
+#   - train_prompt_bsz=2              (was 8)
+#   - n_resp_per_prompt=2             (was 3)
+#   - ppo_mini_batch_size=2           (was 8)
+#   - total_training_steps=2          (was 1000)
+#   - val_before_train=False          (was True)
+#   - test_freq=999, save_freq=999   -> nothing saved during smoke
 # =============================================================================
 set -xeuo pipefail
 
@@ -46,7 +46,7 @@ enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
 
-# === SMOKE: 缩小 batch ===
+# === SMOKE: shrink batch ===
 train_prompt_bsz=2
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=2
@@ -56,7 +56,7 @@ WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 
-# Paths (沿用 wxe 部署的 GFS 路径)
+# Paths (override via env vars TRAIN_FILE / TEST_FILE / CKPTS_DIR)
 RAY_DATA_HOME="/gfs/platform/public/infra/wxe"
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/dancegrpo_smoke_ckpt"}
 TRAIN_FILE=${TRAIN_FILE:-"/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json"}

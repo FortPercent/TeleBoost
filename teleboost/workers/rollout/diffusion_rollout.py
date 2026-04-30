@@ -138,9 +138,8 @@ class DiffusionRollout(BaseRollout):
             for i in range(len(batch_contexts)):
                 batch_contexts[i] = batch_contexts[i][:batch_context_orig_lengths[i]]
             
-            # ---- 打印信息 ----
+            # ---- log info ----
 
-            # with torch.no_grad(): 
             wan_outputs = self.run_wan_sample_step(
                 batch_input_latents,
                 progress_bar,
@@ -169,38 +168,30 @@ class DiffusionRollout(BaseRollout):
             
             # autocast_dtype = torch.float32 #TODO
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                # 确保final_latents的数据类型正确
+                # Cast final_latents to fp32 for the VAE decoder.
                 final_latents_vae = final_latents.to(dtype=torch.float32)
 
-                # 记录开始时间
                 decoded_videos = self.vae_module.decode([final_latents_vae])
 
-                # 计算耗时
                 video_frames = decoded_videos[0]
-                # print(f"video_frames的形状是{video_frames.shape}")
 
-                
-                # 后处理
+                # Post-process: normalize from [-1, 1] to [0, 1].
                 video_frames = (video_frames + 1.0) / 2.0
                 video_frames = torch.clamp(video_frames, 0, 1)
-                
-                
-                # 确保video_frames是正确的格式 (C, T, H, W)
+
+                # Ensure video_frames is (C, T, H, W).
                 if video_frames.dim() == 4:
-                    # 调整帧率
-                    fps=15
+                    # Subsample frames at 15 FPS for the preview.
+                    fps = 15
                     video_id = video_frames[:, ::fps, :, :]
                     C, T, H, W = video_frames.shape
-                    # print(video_frames.shape)
-                        
-                    # 转换为numpy格式 (T, H, W, C)
-                    video_id = video_id.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
-                    # video_id = video_frames.cpu().numpy()
-                    # print(f"video_id形状为{video_id.shape}")
+
+                    # Convert to numpy (T, H, W, C).
+                    video_id = video_id.permute(1, 2, 3, 0).cpu().numpy()
                     import numpy as np
                     video_id = (video_id * 255).astype(np.uint8)
-                        
-                        # 如果是单通道，扩展为3通道
+
+                    # If single-channel, expand to 3 channels.
                     if C == 1:
                         video_id = id.repeat(video_id, 3, axis=-1)
                         
@@ -213,7 +204,7 @@ class DiffusionRollout(BaseRollout):
         self.vae_module.model.to("cpu", dtype=torch.float32)
         torch.cuda.empty_cache()
         
-        # 除了all_video_paths返回的都是一个张量
+        # Everything except all_video_paths is returned as a single tensor.
         if len(all_latents) > 1:
             all_latents = torch.cat(all_latents, dim=0)
             all_log_probs = torch.cat(all_log_probs, dim=0)
@@ -270,7 +261,7 @@ class DiffusionRollout(BaseRollout):
         self,
         latents,  # [(16, 7, 64, 64)]
         progress_bar, 
-        sigma_schedule,  # 添加sigma_schedule
+        sigma_schedule,  # sigma_schedule
         transformer,
         context,
         neg_context,
@@ -278,7 +269,7 @@ class DiffusionRollout(BaseRollout):
         grpo_sample,
         flow_window=None,
     ):
-        """WAN采样步骤，支持(C,T,H,W)格式输入"""
+        """One Wan sampling step. Latent input layout is (C, T, H, W)."""
         if grpo_sample:
             all_latents = []
             
@@ -288,7 +279,7 @@ class DiffusionRollout(BaseRollout):
             )
             all_prev_sample_mean = [] if return_prev_sample_mean else None
             B = len(context) if isinstance(context, list) else context.shape[0]
-            # 确保设备一致
+            # ensure all tensors are on the same device
             device = latents[0].device
             boundary = getattr(self.config, "wan22_boundary", 0.9)
             base_guide_scale = getattr(self.config, "guide_scale", 5.0)
@@ -300,7 +291,7 @@ class DiffusionRollout(BaseRollout):
                 window_start, window_end = flow_window
             
             for i in progress_bar:
-                # 使用sigma值计算timestep
+                # Compute timestep from sigma value
                 sigma = sigma_schedule[i]
                 
                 timestep_value = int(sigma * 1000)
@@ -311,44 +302,16 @@ class DiffusionRollout(BaseRollout):
                 # timestep_uncond = timestep
 
                 with torch.autocast("cuda", torch.bfloat16):
-                    # WAN模型输入：x是(C,T,H,W)格式的列表
-                    # transformer.to(device)
-                    # arr = latents[0].detach().cpu().numpy()  # 取第 0 个样本，转 numpy
-                    # import hashlib
-                    # md5 = hashlib.md5(arr.tobytes()).hexdigest()
-                    # print(
-                    #     f"[Rollout] rank {torch.distributed.get_rank()} "
-                    #     f"step {i}/{self.config.sampling_steps} "
-                    #     f"shape={tuple(latents[0].shape)} "
-                    #     f"norm={latents[0].norm().item():.4f} "
-                    #     f"latents[0] md5={md5}"
-                    #     f"timestep_cond norm={timestep_cond} "
-                    #     f"context norm={context[0].norm().item():.4f} "
-                    #     f"seq_len={seq_len} "
-                    # )
-                    # with torch.no_grad():
-                    #     pred_cond = transformer(
-                    #         x=latents,  # [(16, 7, 64, 64)]
-                    #         t=timestep,
-                    #         context=context,
-                    #         seq_len=seq_len
-                    #     )
+                    # Wan model input: x is a list of (C, T, H, W) tensors.
                     with torch.no_grad():
                         pred_cond = transformer(
-                            x=latents,  # [(16, 7, 64, 64)]
+                            x=latents,
                             t=timestep,
                             context=context,
                             seq_len=seq_len
                         )
-                    # with torch.no_grad():
-                    #     pred_cond = transformer(
-                    #         x=latents,  # [(16, 7, 64, 64)]
-                    #         t=timestep,
-                    #         context=context,
-                    #         seq_len=seq_len
-                    #     )
-                        
-                    # 处理模型输出
+
+                    # Unwrap conditional prediction.
                     if isinstance(pred_cond, dict) and 'rgb' in pred_cond:
                         model_output_cond = pred_cond['rgb'][0]
                     elif isinstance(pred_cond, list):
@@ -356,11 +319,10 @@ class DiffusionRollout(BaseRollout):
                     else:
                         model_output_cond = pred_cond
 
-                    # 为无条件预测准备输入
-                    # transformer.to(device)
+                    # Unconditional prediction.
                     with torch.no_grad():
                         pred_uncond = transformer(
-                            x=latents,  # [(16, 7, 64, 64)]
+                            x=latents,
                             t=timestep,
                             context=neg_context,
                             seq_len=seq_len
@@ -372,15 +334,15 @@ class DiffusionRollout(BaseRollout):
                         model_output_uncond = pred_uncond[0]
                     else:
                         model_output_uncond = pred_uncond
-                        
+
                     del pred_cond, pred_uncond
 
-                    # CFG组合
+                    # CFG combine.
                     model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
                     del model_output_cond, model_output_uncond
                     torch.cuda.empty_cache()
 
-                # WAN的SDE采样步骤
+                # Wan SDE sampling step.
                 in_window = window_start <= i < window_end
                 if i == window_start:
                     all_latents.append(latents[0])
@@ -388,27 +350,27 @@ class DiffusionRollout(BaseRollout):
                 if in_window:
                     if return_prev_sample_mean:
                         next_latents, pred_original, log_prob, prev_sample_mean = self.wan_step(
-                            model_output, 
-                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
-                            sigma_schedule,  # 传入sigma_schedule
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True,  # 启用SDE求解器
+                            model_output,
+                            latents[0].to(torch.float32),
+                            self.config.actor.eta,
+                            sigma_schedule,
+                            i,
+                            prev_sample=None,
+                            grpo=True,
+                            sde_solver=True,
                             return_prev_sample_mean=True,
                         )
                         all_prev_sample_mean.append(prev_sample_mean)
                     else:
                         next_latents, pred_original, log_prob = self.wan_step(
-                            model_output, 
-                            latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
-                            sigma_schedule,  # 传入sigma_schedule
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True  # 启用SDE求解器
+                            model_output,
+                            latents[0].to(torch.float32),
+                            self.config.actor.eta,
+                            sigma_schedule,
+                            i,
+                            prev_sample=None,
+                            grpo=True,
+                            sde_solver=True,
                         )
                     all_log_probs.append(log_prob)
                     all_latents.append(next_latents.to(torch.float32))
@@ -427,7 +389,7 @@ class DiffusionRollout(BaseRollout):
                 latents=[next_latents.to(torch.float32)]
             final_latents = pred_original
 
-            # 修正：WAN的all_latents维度是 (num_steps+1, 16, 7, 64, 64)
+            # all_latents shape is (num_steps+1, 16, 7, 64, 64).
             all_latents = torch.stack(all_latents, dim=0)  # (9, 16, 7, 64, 64)
             all_log_probs = torch.stack(all_log_probs, dim=0)  # (8, B) -> (8,)
             if return_prev_sample_mean:
@@ -438,46 +400,46 @@ class DiffusionRollout(BaseRollout):
 
     def wan_step(
         self,
-        model_output: torch.Tensor,  # 模型预测的flow
-        latents: torch.Tensor,       # 当前时间步的潜在表示 (16, 7, 64, 64)
-        eta: float,                  # 控制随机性强度
-        sigmas: torch.Tensor,        # sigma调度序列 (类似FLUX)
-        index: int,                  # 当前时间步索引  
-        prev_sample: torch.Tensor,   # 前一步的样本（用于GRPO重计算）
-        grpo: bool,                  # True时会得到logprob
-        sde_solver: bool,            # 使用SDE求解器
+        model_output: torch.Tensor,  # model-predicted flow
+        latents: torch.Tensor,       # current-timestep latents (16, 7, 64, 64)
+        eta: float,                  # randomness strength
+        sigmas: torch.Tensor,        # sigma schedule (FLUX-style)
+        index: int,                  # current timestep index
+        prev_sample: torch.Tensor,   # previous-step sample (used for GRPO re-computation)
+        grpo: bool,                  # True -> also return logprob
+        sde_solver: bool,            # use SDE solver
         return_prev_sample_mean: bool = False,
     ):
-        """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
-        
+        """One Wan Flow-Matching sampling step, recast as an SDE solver for GRPO."""
+
         sigma = sigmas[index]
-        dsigma = sigmas[index + 1] - sigma  # sigma差分
-        
-        # 确定性更新部分
+        dsigma = sigmas[index + 1] - sigma  # sigma delta
+
+        # Deterministic update.
         prev_sample_mean = latents + dsigma * model_output
-        
-        # 预测的原始样本
+
+        # Predicted original sample.
         pred_original_sample = latents - sigma * model_output
-        
-        delta_t = sigma - sigmas[index + 1]  # 时间差分
-        std_dev_t = eta * torch.sqrt(delta_t)  # 随机噪声的std
-        
-        if sde_solver:  # 使用SDE求解器（和FLUX相同）
-            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # 估计的得分
-            log_term = -0.5 * eta**2 * score_estimate  # 对数项修正
-            prev_sample_mean = prev_sample_mean + log_term * dsigma  # 修正的均值
-        
+
+        delta_t = sigma - sigmas[index + 1]  # time delta
+        std_dev_t = eta * torch.sqrt(delta_t)  # std of the SDE noise term
+
+        if sde_solver:  # SDE solver (matches FLUX)
+            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # score estimate
+            log_term = -0.5 * eta**2 * score_estimate  # log-term correction
+            prev_sample_mean = prev_sample_mean + log_term * dsigma  # corrected mean
+
         if grpo and prev_sample is None:
             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
         if grpo:
-            # 计算log概率
+            # log probability
             log_prob = (
                 -((prev_sample.detach().to(torch.float32) - prev_sample_mean.to(torch.float32)) ** 2)
                 / (2 * (std_dev_t**2))
             ) - torch.log(std_dev_t + 1e-8) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
 
-            # 在除batch维度外的所有维度上求平均
+            # Average over every non-batch dim.
             log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             if return_prev_sample_mean:
                 return prev_sample, pred_original_sample, log_prob, prev_sample_mean

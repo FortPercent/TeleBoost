@@ -2,13 +2,13 @@
 # =============================================================================
 # 4×H800 80GB smoke test (1.3B variant)
 #
-# 基于 run_dancegrpo_single_4gpu_smoke.sh, 换成 Wan2.1-T2V-**1.3B**:
+# Derived from run_dancegrpo_single_4gpu_smoke.sh, swapping the actor for Wan2.1-T2V-1.3B:
 #   - actor_rollout_ref.model.path = /tmp/Wan2.1-T2V-1.3B (HF snapshot_download)
-#   - wan_version = 'wan21' (14B 是 wan22)
-#   - VAE: 同目录下 Wan2.1_VAE.pth
-#   - 其余 smoke 参数与 14B 版一致 (n_gpus=4, steps=2, bsz=2, h=w=256, frames=9)
+#   - wan_version = 'wan21' (14B variant uses wan22)
+#   - VAE: Wan2.1_VAE.pth in the same directory
+#   - other smoke params identical to the 14B variant (n_gpus=4, steps=2, bsz=2, h=w=256, frames=9)
 #
-# 1.3B 显存占用远小于 14B, 4×80G 即便不 offload 也够.
+# 1.3B uses far less VRAM than 14B, fits on 4x80G even without offload.
 # =============================================================================
 set -xeuo pipefail
 
@@ -36,7 +36,7 @@ enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
 
-# === SMOKE: 缩小 batch ===
+# === SMOKE: shrink batch ===
 train_prompt_bsz=2
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=2
@@ -46,7 +46,7 @@ WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 
-# Paths (沿用 wxe 部署的 GFS 路径)
+# Paths (override via env vars TRAIN_FILE / TEST_FILE / CKPTS_DIR)
 RAY_DATA_HOME="/gfs/platform/public/infra/wxe"
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/dancegrpo_smoke_ckpt"}
 TRAIN_FILE=${TRAIN_FILE:-"/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json"}

@@ -780,15 +780,15 @@ class QwenRewardModelWorker(RewardModelWorker):
 
         # TODO(sgm): support FSDP hybrid shard for larger model
         infer_tp = self.config.rollout.tensor_model_parallel_size
-        dp = self.world_size // infer_tp # world_size 是总的环境卡数
+        dp = self.world_size // infer_tp  # world_size is the total number of GPUs in the cluster
         assert self.world_size % infer_tp == 0, f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         rollout_device_mesh = init_device_mesh(device_name, mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
-        rollout_name = self.config.rollout.name # rollout使用的架构 vllm
+        rollout_name = self.config.rollout.name  # rollout backend (e.g. vllm)
         
         from verl.workers.rollout.vllm_rollout import vllm_mode, vLLMRollout
         from teleboost.workers.sharding_manager.reward_qwen import RewardVLLMManager
         log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
-        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False)) # use_shm 是否使用shared_memory
+        local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False))  # use_shm: whether to use shared memory
        
         # lora_kwargs = {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}} if self._is_lora else {}
         lora_kwargs = {}
@@ -827,7 +827,11 @@ class QwenRewardModelWorker(RewardModelWorker):
         
     
     def _create_simple_prompt(self) -> str:
-        """创建结构化视频质量评估提示词（界面风格）"""
+        """Build the structured video-quality evaluation prompt for Qwen-VL.
+
+        Note: prompt content is intentionally Chinese — Qwen-VL is best
+        prompted in Chinese for the structured-scoring template below.
+        """
         return """请你作为一个专业视频质量评估助手，参考以下评分标准和格式，对给定的视频进行多维度质量评估。请严格按照输出格式，以客观、公正、结构化的方式打分。
 
                 评估维度（每项满分100分）：
@@ -955,42 +959,42 @@ class QwenRewardModelWorker(RewardModelWorker):
                 - summery: output_text[:500], str
                 - raw_output: output_text, str
         """
-        # 针对新格式的分数提取模式
+        # Score-extraction patterns. Patterns contain Chinese on purpose — they
+        # match the Qwen-VL output format used in `_create_simple_prompt`.
         score_patterns = [
-                r'合计[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 合计：80分
-                r'综合得分[：:]\s*(\d+(?:\.\d+)?)\s*分',      # 综合得分：80分
-                r'总分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 总分：80分
-                r'dim5[：:]\s*(\d+(?:\.\d+)?)\s*分.*?合计[：:]\s*(\d+(?:\.\d+)?)\s*分',  # 提取合计分数
-                r'最终[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 最终：80分
-                r'评分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # 评分：80分
-                r'质量评分[：:]\s*(\d+(?:\.\d+)?)',          # 质量评分：80
-                r'分数[：:]\s*(\d+(?:\.\d+)?)',              # 分数：80
-                r'(\d+(?:\.\d+)?)\s*分',                     # 80分
-                r'(\d+(?:\.\d+)?)/100',                      # 80/100
-                r'(\d+(?:\.\d+)?)%',                         # 80%
+                r'合计[：:]\s*(\d+(?:\.\d+)?)\s*分',          # overall total
+                r'综合得分[：:]\s*(\d+(?:\.\d+)?)\s*分',      # composite score
+                r'总分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # total score
+                r'dim5[：:]\s*(\d+(?:\.\d+)?)\s*分.*?合计[：:]\s*(\d+(?:\.\d+)?)\s*分',  # extract overall after dim5
+                r'最终[：:]\s*(\d+(?:\.\d+)?)\s*分',          # final score
+                r'评分[：:]\s*(\d+(?:\.\d+)?)\s*分',          # rating
+                r'质量评分[：:]\s*(\d+(?:\.\d+)?)',          # quality rating
+                r'分数[：:]\s*(\d+(?:\.\d+)?)',              # score
+                r'(\d+(?:\.\d+)?)\s*分',                     # bare "N points"
+                r'(\d+(?:\.\d+)?)/100',                      # N/100
+                r'(\d+(?:\.\d+)?)%',                         # N%
             ]
-            
-        score = 50.0  # 默认分数
+
+        score = 50.0  # default score when nothing matches
         for pattern in score_patterns:
             match = re.search(pattern, output_text)
             if match:
-                # 对于有多个捕获组的模式，取最后一个（合计分数）
+                # For multi-group patterns take the last group (the overall total).
                 if len(match.groups()) > 1:
-                    found_score = float(match.group(2))  # 取合计分数
+                    found_score = float(match.group(2))
                 else:
                     found_score = float(match.group(1))
-                    
+
                 if found_score > 100:
                     found_score = min(found_score, 100)
                 score = found_score
                 logger.info(f"Found score: {score} using pattern: {pattern}")
                 break
-            
-        # 如果没找到分数，记录日志
+
         if score == 50.0:
             logger.warning(f"No score found in output, using default 50.0. Output: {output_text[:200]}...")
-            
-        # 尝试提取各个维度的分数
+
+        # Try to extract per-dimension scores.
         dimension_scores = {}
         dim_patterns = [
                 (r'dim1[：:]\s*(\d+(?:\.\d+)?)\s*分', 'visual_artifacts'),
@@ -1011,7 +1015,7 @@ class QwenRewardModelWorker(RewardModelWorker):
                 "raw_output": output_text
             }
             
-        # 如果提取到了维度分数，也加入结果
+        # If per-dimension scores were extracted, include them in the result.
         if dimension_scores:
             result["dimension_scores"] = dimension_scores
             logger.info(f"Extracted dimension scores: {dimension_scores}")
@@ -1180,7 +1184,7 @@ class DiffusionRewardModelWorker(RewardModelWorker):
         for index, batch_idx in enumerate(batch_indices):
             with torch.no_grad():
                 frame = decoded_images[index][:, 0, :, :]  # (C, H, W)
-                # 转换为PIL图像
+                # Convert to PIL image
                 frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
                 frame_np = (frame_np * 255).astype(np.uint8)
                 frame_pil = Image.fromarray(frame_np)
@@ -1335,7 +1339,7 @@ class AestheticRewardModelWorker(RewardModelWorker):
     @register(dispatch_mode=Dispatch.ALL_TO_ALL)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
-        print(f"  -> Actor 'aes' 的 CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
+        print(f"  -> Actor 'aes' CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
 
         start_time = time.time()
         datas=data.pop(
@@ -1439,7 +1443,7 @@ class RAFTRewardModelWorker(RewardModelWorker):
         model = RAFT(args)
         
         from collections import OrderedDict
-        # 去除 "module." 前缀
+        # Strip "module." prefix
         state_dict = torch.load(self.raft_model_path, map_location="cpu")
         new_state_dict = OrderedDict()
 
@@ -1482,10 +1486,10 @@ class RAFTRewardModelWorker(RewardModelWorker):
     @register(dispatch_mode=Dispatch.ALL_TO_ALL)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
-        print(f"  -> Actor 'raft' 的 CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
+        print(f"  -> Actor 'raft' CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
 
         start_time = time.time()
-        # 读取数据，但是不删除
+        # Read data without popping it
         datas=data.pop(
             batch_keys=['video_frames'],
             non_tensor_batch_keys=["caption"],
@@ -1551,7 +1555,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         if self.rank < self.videoclip_dp:
             self.is_active = True
             videoclip_cfg = self.config.get("videoclip", {}) or {}
-            # get() 方法用于从字典中获取指定键的值，如果键不存在则返回默认值
+            # .get() returns the value if present else the default
             # .get(key, default_value)
             self.videoclip_model_path = videoclip_cfg.get(
                 "model_path",
@@ -1565,7 +1569,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
         
     def _build_model(self):
         from teleboost.models.VideoCLIP_XL.modeling import VideoCLIP_XL
-        # 需要适配videoCLIP_XL中vision_model frame 配置
+        # Match VideoCLIP_XL vision_model frame configuration
         self.videoclip_model = VideoCLIP_XL()
         state_dict = torch.load(self.videoclip_model_path, map_location="cpu")
         self.videoclip_model.load_state_dict(state_dict)
@@ -1577,7 +1581,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
     def _video_preprocessing(self, frames: torch.Tensor, fnum=8):
         """
         frames: torch.Tensor, shape [C, T, H, W], e.g. [3, 13, 720, 720]
-        输出: torch.Tensor, shape [1, T, C, 224, 224]
+        Output: torch.Tensor, shape [1, T, C, 224, 224]
         """
         frames = frames.permute(1, 2, 3, 0).cpu().numpy()  # [C, T, H, W] -> [T, H, W, C]
 
@@ -1607,9 +1611,9 @@ class VideoclipRewardModelWorker(RewardModelWorker):
     @register(dispatch_mode=Dispatch.ALL_TO_ALL)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
-        print(f"  -> Actor 'videoclip' 的 CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
+        print(f"  -> Actor 'videoclip' CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
         start_time = time.time()
-        # 读取数据，但是不删除
+        # Read data without popping it
         datas=data.pop(
             batch_keys=['video_frames'],
             non_tensor_batch_keys=["caption"],
@@ -1649,7 +1653,7 @@ class VideoclipRewardModelWorker(RewardModelWorker):
                 text_features = F.normalize(text_features, dim=-1)
 
                 similarity = (video_features @ text_features.T) * 100
-                similarity = similarity.view(-1)  # 得到 torch.Size([1])
+                similarity = similarity.view(-1)  # yields torch.Size([1])
                 print(f"similarity_score value: {similarity}")
             all_rewards.append(similarity)
         
@@ -1997,12 +2001,12 @@ class VideophyRewardModelWorker(RewardModelWorker):
         """
         B, C, T, H, W = video_tensor.shape
         target_H, target_W = target_size
-        # 把时间帧展平成 batch 维度
+        # Flatten the time dim into the batch dim
         video_tensor = video_tensor.permute(0, 2, 1, 3, 4)  # [B, T, C, H, W]
         video_tensor = video_tensor.reshape(B * T, C, H, W)  # [B*T, C, H, W]
         
-        # -------------------- Step 1: Resize (保持比例，最短边对齐) --------------------
-        # 计算缩放因子（保持原始比例）
+        # -------------------- Step 1: Resize (preserve aspect, align shortest side) --------------------
+        # Compute scale factor (preserves the original ratio)
         scale = max(target_H / H, target_W / W)
         new_H = int(round(H * scale))
         new_W = int(round(W * scale))
@@ -2014,7 +2018,7 @@ class VideophyRewardModelWorker(RewardModelWorker):
         left = (new_W - target_W) // 2
         cropped = resized[:, :, top:top+target_H, left:left+target_W]  # [B*T, C, target_H, target_W]
 
-        # -------------------- Step 3: 还原回视频格式 --------------------
+        # -------------------- Step 3: Restore video shape --------------------
         cropped = cropped.view(B, T, C, target_H, target_W).permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
 
         return cropped    
@@ -2022,9 +2026,9 @@ class VideophyRewardModelWorker(RewardModelWorker):
     @register(dispatch_mode=Dispatch.ALL_TO_ALL)
     @WorkerProfiler.annotate(color="brown")
     def compute_rm_score(self, data: DataProto):
-        print(f"  -> Actor 'videophy' 的 CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
+        print(f"  -> Actor 'videophy' CUDA_MPS_ACTIVE_THREAD_PERCENTAGE = {self.get_mps_percentage()}")
         start_time = time.time()
-        # 读取数据，但是不删除
+        # Read data without popping it
         datas=data.pop(
             batch_keys=['video_frames'],
             non_tensor_batch_keys=["caption"],
@@ -2094,10 +2098,10 @@ class VideophyRewardModelWorker(RewardModelWorker):
         
         all_rewards = torch.cat(all_rewards, dim=0)
         
-        # Z-score标准化
+        # Z-score normalization
         mean = all_rewards.mean()
-        std = all_rewards.std(unbiased=False)  # unbiased=False 表示按总体方差计算
-        all_rewards = (all_rewards - mean) / (std + 1e-8)  # 防止除0   
+        std = all_rewards.std(unbiased=False)  # unbiased=False -> population variance
+        all_rewards = (all_rewards - mean) / (std + 1e-8)  # epsilon avoids div-by-zero
                 
         all_rewards = all_rewards.to(torch.device('cpu'))
         self.videophy_model.to("cpu")
@@ -2118,11 +2122,11 @@ class VideophyRewardModelWorker(RewardModelWorker):
  
 class MultiRewardModelWorker(RewardModelWorker):
     """
-    聚合 Aesthetic, RAFT, Videoclip, Videophy 四种 RewardModelWorker
+    Aggregates the four RewardModelWorkers: Aesthetic, RAFT, Videoclip, Videophy.
     """
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
-        # 初始化各个 reward worker
+        # Init each reward worker
         self.aesthetic_worker = AestheticRewardModelWorker()
         self.raft_worker = RAFTRewardModelWorker()
         self.videoclip_worker = VideoclipRewardModelWorker()
@@ -2143,7 +2147,7 @@ class MultiRewardModelWorker(RewardModelWorker):
         print(f"datas.batch['video_frames'].shape: {datas.batch['video_frames'].shape}")
         streams = [torch.cuda.Stream() for _ in range(4)]
         
-        # 分别调用各个 reward worker 的 compute_rm_score
+        # Call compute_rm_score on each reward worker
         with torch.cuda.stream(streams[0]):
             aes_result = self.aesthetic_worker.compute_rm_score(datas)
         with torch.cuda.stream(streams[1]):
@@ -2161,7 +2165,7 @@ class MultiRewardModelWorker(RewardModelWorker):
         torch.cuda.synchronize()
         
 
-        # 合并结果
+        # Merge results
         batch = TensorDict(
             {
                 "aes_rewards": aes_result.batch["aes_rewards"],

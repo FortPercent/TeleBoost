@@ -2,10 +2,10 @@
 # =============================================================================
 # 4×H800 80GB smoke test (1.3B + Joint 4-reward variant)
 #
-# 基于 run_dancegrpo_1p3B_4gpu_smoke.sh, 把 reward_model 切到 joint 模式
-# 同时跑 4 个 reward (aesthetic + raft + videoclip + videophy):
+# Derived from run_dancegrpo_1p3B_4gpu_smoke.sh, swapping reward_model into joint mode
+# runs 4 rewards in parallel (aesthetic + raft + videoclip + videophy):
 #   - reward_model.type = "joint"
-#   - 4 个 reward 权重均在 /gfs/platform/public/infra/models/
+#   - all 4 reward weights live under the configured reward_models dir
 # =============================================================================
 set -xeuo pipefail
 
@@ -33,7 +33,7 @@ enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
 
-# === SMOKE: 缩小 batch ===
+# === SMOKE: shrink batch ===
 train_prompt_bsz=2
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 n_resp_per_prompt=2
@@ -43,7 +43,7 @@ WORKING_DIR=${WORKING_DIR:-"${PWD}"}
 RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 
-# Paths (沿用 wxe 部署的 GFS 路径)
+# Paths (override via env vars TRAIN_FILE / TEST_FILE / CKPTS_DIR)
 RAY_DATA_HOME="/gfs/platform/public/infra/wxe"
 CKPTS_DIR=${CKPTS_DIR:-"/tmp/dancegrpo_smoke_ckpt"}
 TRAIN_FILE=${TRAIN_FILE:-"/gfs/space/chatrl/users/wxe/fastvideo/data/processed_wan_prompt.json"}

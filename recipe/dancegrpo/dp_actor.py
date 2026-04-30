@@ -207,10 +207,10 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     adv_clip_max,
                 )
 
-                # 1. 拿到当前这一步的 old_log_prob (形状: Batch)
+                # 1. old_log_prob for this denoising step (shape: Batch).
                 old_log_probs_step = batch_on_device.batch["log_probs"][:, step_idx].flatten()
 
-                # 2. new_log_probs 本身就是当前时间步的 log_prob (形状: Batch)
+                # 2. new_log_probs is already the current step's log_prob (shape: Batch).
                 new_log_probs_step = new_log_probs.flatten()
 
                 print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
@@ -219,26 +219,26 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     prev_sample_mean_step = prev_sample_mean
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
                     
-                    # 计算 ratio_mean_bias，先对空间维度规约，得到 [batch_size] 或标量
+                    # ratio_mean_bias: reduce over spatial dims first to get [batch_size] or scalar.
                     diff_squared = (prev_sample_mean_step - prev_sample_mean_old).pow(2)
-                    # 对所有非batch维度规约
+                    # Reduce over every non-batch dim.
                     ratio_mean_bias = diff_squared.flatten(start_dim=1).mean(dim=1) if diff_squared.ndim > 1 else diff_squared.mean()
-                    # 确保 flatten 到一维
+                    # Ensure 1-D shape.
                     ratio_mean_bias = ratio_mean_bias.flatten()
-                    
-                    # sqrt_dt 和 std_dev_t 都是标量，不需要索引
+
+                    # sqrt_dt and std_dev_t are scalars, no indexing needed.
                     sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
                     std_dev_t_scalar = std_dev_t.mean() if std_dev_t.ndim > 0 else std_dev_t
-                    
+
                     sigma_t = std_dev_t_scalar / (sqrt_dt_scalar + ratio_norm_eps)
                     scale = sqrt_dt_scalar * sigma_t
-                    
-                    # ratio_mean_bias 除以 scale^2，结果仍是 [batch_size]
+
+                    # ratio_mean_bias / scale^2; result stays [batch_size].
                     ratio_mean_bias = ratio_mean_bias / (2 * (scale**2 + ratio_norm_eps))
-                    
+
                     print(f"Step {step_idx}: ratio_mean_bias {ratio_mean_bias.shape}, scale {scale}")
-                    
-                    # 计算重要性采样权重，并进行RatioNorm调整(GRPO_Guard)
+
+                    # Importance-sampling ratio with RatioNorm adjustment (GRPO_Guard).
                     ratio = torch.exp((new_log_probs_step - old_log_probs_step + ratio_mean_bias) * scale)
                 else:
                     ratio = torch.exp(new_log_probs_step - old_log_probs_step)
@@ -308,10 +308,10 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         guide_scale=5.0,
         return_stats: bool = False,
     ):
-        """GRPO的单步训练，支持FP16优化"""
+        """One GRPO training step (with FP16 support)."""
         transformer.train()
 
-        # 确保latents维度正确：(16, 7, 64, 64)
+        # Ensure latents shape (16, 7, 64, 64)
         if latents.dim() == 5:
             latents = latents.squeeze(0)
 
@@ -335,7 +335,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     seq_len=seq_len,
                 )
 
-            # 处理无条件预测输出
+            # Handle the unconditional prediction output
             if isinstance(pred_uncond, dict) and "rgb" in pred_uncond:
                 model_output_uncond = pred_uncond["rgb"][0].detach()
             elif isinstance(pred_uncond, list):
@@ -350,7 +350,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 seq_len=seq_len,
             )
 
-            # 处理条件预测输出
+            # Handle the conditional prediction output
             if isinstance(pred_cond, dict) and "rgb" in pred_cond:
                 model_output_cond = pred_cond["rgb"][0]
             elif isinstance(pred_cond, list):
@@ -358,7 +358,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             else:
                 model_output_cond = pred_cond
 
-            # CFG组合
+            # CFG combine
             model_output = model_output_uncond + sample_guide_scale * (model_output_cond - model_output_uncond)
 
         if return_stats:
@@ -400,7 +400,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         sde_solver: bool,
         return_stats: bool = False,
     ):
-        """WAN的Flow Matching采样步骤，转换为SDE求解器支持GRPO"""
+        """One Wan Flow-Matching sampling step, recast as an SDE solver for GRPO."""
         sigma = sigmas[index]
         dsigma = sigmas[index + 1] - sigma
         prev_sample_mean = latents + dsigma * model_output

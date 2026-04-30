@@ -42,10 +42,10 @@ def wan_preprocessed_collate_function(data_list: list[dict]) -> dict:
         for key, val in data.items():
             if isinstance(val, torch.Tensor):
                 tensors[key].append(val)
-                orig_lengths[key].append(val.shape[0])  # 记录原始长度
+                orig_lengths[key].append(val.shape[0])  # remember the unpadded length
             else:
                 non_tensors[key].append(val)
-    # 第二步：对 Tensor pad 成相同长度
+    # Step 2: pad each Tensor to the max length
     for key, val_list in tensors.items():
         max_len = max(v.shape[0] for v in val_list)
         padded_list = []
@@ -54,12 +54,12 @@ def wan_preprocessed_collate_function(data_list: list[dict]) -> dict:
             v_padded = F.pad(v, (0, 0, 0, pad_len), value=0.0)  # pad: [left, right, top, bottom]
             padded_list.append(v_padded)
         tensors[key] = torch.stack(padded_list, dim=0)  # [B, max_len, D]
-    # 把原始长度也作为 tensor 存进去，key 加个前缀或后缀避免冲突
+    # Store unpadded lengths as tensors under a suffixed key so they don't collide
 
     for key, val_list in orig_lengths.items():
         tensors[f"{key}_orig_lengths"] = torch.tensor(val_list, dtype=torch.int)
 
-        # 可选：non_tensors 可以变成 numpy array（不影响主逻辑）
+        # Optional: convert non_tensors to numpy arrays (doesn't affect main logic)
     for key, val in non_tensors.items():
         non_tensors[key] = np.array(val, dtype=object)
 
@@ -164,15 +164,15 @@ class RLHFDataset(Dataset):
             self.data_files[i] = copy_to_local(src=parquet_file, cache_dir=self.cache_dir, use_shm=self.use_shm)
 
     def _read_latent(self):
-        # 加载处理后的数据
+        # Load the preprocessed data
         import json
         from datasets import Dataset
         print("begin to prepare new dataset")
         
         with open(self.json_path, 'r', encoding='utf-8') as f:
-            self.data = json.load(f)  # 通常是 List[Dict]
+            self.data = json.load(f)  # typically a List[Dict]
 
-        # 正确传入 Dataset.from_list
+        # Pass into Dataset.from_list
         self.dataframe = Dataset.from_list(self.data)
 
         print(f"dataset len: {len(self.dataframe)}")
@@ -265,8 +265,8 @@ class RLHFDataset(Dataset):
             row_dict['context']=context
             # `context_null_path` is optional. When the preprocess pipeline
             # didn't emit it (smoke datasets, older JSONs), fall back to a
-            # zero-tensor of the same shape — matches the README's documented
-            # "smoke 用 zeros 占位" behavior. Real training should regenerate
+            # zero-tensor of the same shape — matches the documented
+            # "smoke uses zero placeholder" behavior. Real training should regenerate
             # the JSON via `data_preprocess/preprocess_wan_data.py`.
             null_path = row_dict.get('context_null_path')
             if null_path:
