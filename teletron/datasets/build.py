@@ -1,29 +1,56 @@
 # Copyright (c) 2025 TeleAI-infra Team. All rights reserved.
 
 from .registry import Registry, build_module
-from .clip_dataset import ClipDataset
-from .fake_dataset import FakeDataset
-from .variable_dataset import VariableClipDataset
-from .dpo_dataset import WanDPODataset
 import torch
 import random
+import logging
 from teletron.datasets.collators import DefaultCollator
 from teletron.utils import (
     print_rank_0,
     get_args,
     set_config,
 )
-import logging
-from teletron.train.utils import (
-    get_train_valid_test_num_samples,
-)
-from teletron.core.parallel_state import get_transformer_model_group
+# NOTE: `from teletron.train.utils import get_train_valid_test_num_samples` and
+# `from teletron.core.parallel_state import get_transformer_model_group` are
+# done lazily inside build_train_valid_test_datasets() to break a circular
+# import. teletron/train/__init__.py → trainer.py → dataloader.py → us, so
+# importing them at module level here makes `import teletron.datasets` fail
+# with "partially initialized module" when `teletron.datasets` is loaded
+# before `teletron.train` is fully resolved.
+
+# FakeDataset / FakeDPODataset have no external dep — always available for
+# smoke tests / OSS users without an internal data infra checkout.
+from .fake_dataset import FakeDataset, FakeDPODataset
+
+# Production datasets depend on `teleai_data_tool` (TeleAI internal data infra:
+# lmdb_client, file_client, schema.Clip, etc.). OSS users without that package
+# can still `import teletron`, register their own DPODatasetBase subclass, and
+# train via the FakeDataset path or a custom dataset. Production users that
+# have teleai_data_tool on PYTHONPATH get the full set automatically.
+_OPTIONAL_DATASET_MODULES = {
+    "ClipDataset":         (".clip_dataset",     "ClipDataset"),
+    "VariableClipDataset": (".variable_dataset", "VariableClipDataset"),
+    "WanDPODataset":       (".dpo_dataset",      "WanDPODataset"),
+}
 
 DATASETS = Registry()
-DATASETS.register_module(ClipDataset)
 DATASETS.register_module(FakeDataset)
-DATASETS.register_module(VariableClipDataset)
-DATASETS.register_module(WanDPODataset)
+DATASETS.register_module(FakeDPODataset)
+
+import importlib
+_log = logging.getLogger(__name__)
+for _name, (_modpath, _attr) in _OPTIONAL_DATASET_MODULES.items():
+    try:
+        _mod = importlib.import_module(_modpath, package=__package__)
+        _cls = getattr(_mod, _attr)
+        DATASETS.register_module(_cls)
+        # Re-export at package level so existing `from teletron.datasets.build
+        # import WanDPODataset` callers keep working.
+        globals()[_name] = _cls
+    except ImportError as _e:
+        _log.info(f"teletron.datasets: {_name} unavailable ({_e}); "
+                  f"this is expected on OSS installs without teleai_data_tool. "
+                  f"FakeDataset and any user-registered datasets remain functional.")
 
 
 
@@ -32,6 +59,10 @@ def build_dataset(params_or_type, *args, **kwargs):
 
 def build_train_valid_test_datasets(dp_rank=None, dp_size=None, shuffle=False):
     """Build pretraining datasets."""
+    # Lazy imports — see top-of-file note re: circular import.
+    from teletron.train.utils import get_train_valid_test_num_samples  # noqa: F401
+    from teletron.core.parallel_state import get_transformer_model_group
+
     args = get_args()
 
     print_rank_0("> building train, validation, and test datasets for multimodal ...")

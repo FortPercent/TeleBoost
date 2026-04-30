@@ -398,10 +398,30 @@ class SchedulerMixin:
             raise Exception('{} optimizer is not supported.'.format(config.optimizer))
         param_names = {param:name for name, param in model[0].named_parameters()}
         timers = NoopTimer()
+        # optimizer_params dict (required by DeepSpeedZeroOptimizer.__init__).
+        optimizer_params = {
+            "lr": config.lr,
+            "weight_decay": config.weight_decay,
+            "betas": [config.adam_beta1, config.adam_beta2],
+            "eps": config.adam_eps,
+        }
+        # communication_data_type must match model param dtype, otherwise the
+        # ipg_buckets dict (built at __init__ from {communication_data_type})
+        # has the wrong key and the first autograd hook fires KeyError.
+        # DeepSpeed only auto-discovers per-param dtypes when wrapped in
+        # DeepSpeedEngine + autocast; teletron uses the optimizer alone, so
+        # we set it explicitly.
+        if args.bf16:
+            comm_dtype = torch.bfloat16
+        elif args.fp16:
+            comm_dtype = torch.float16
+        else:
+            comm_dtype = torch.float32
         optimizer = DeepSpeedZeroOptimizer(
                 base_optimizer,
                 param_names,
                 timers=timers,
+                optimizer_params=optimizer_params,
                 static_loss_scale=1.0,
                 dynamic_loss_scale=False,
                 dynamic_loss_args=None,
@@ -413,6 +433,7 @@ class SchedulerMixin:
                 dp_process_group=mpu.get_data_parallel_group(with_context_parallel=True),
                 expert_parallel_group=None,
                 expert_data_parallel_group=None,
+                communication_data_type=comm_dtype,
                 reduce_scatter=True,
                 overlap_comm=False,
                 offload_optimizer_config=None,

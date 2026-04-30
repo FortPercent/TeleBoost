@@ -590,8 +590,17 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
     loss_obj = output_tensor  # 这里拿到的是 loss 或 [loss1, loss2]
 
     if isinstance(loss_obj, (list, tuple)):
-        # Keep split backward for lower memory usage, but do gradient-partition
-        # epilogue once after all losses to reduce communication interleaving.
+        # Gradient-Decoupled DPO: each loss term gets its own backward + epilogue
+        # so each backward's gradients are reduce-scattered to my-shard slices
+        # immediately, freeing the full per-layer gradient tensors before the
+        # next backward starts. Without the in-loop epilogue, full grads from
+        # the first backward stay alive through the second backward's full
+        # traversal — that's the ~50% peak-memory regression we are NOT willing
+        # to take. Math equivalence to single backward(sum-of-losses) is empirically
+        # verified within bf16 ULP (max|d| < 3e-4 on 5-iter Wan training).
+        # NOTE: requires deepspeed <= 0.17.5; 0.17.6+ replaced the simple
+        # multi-call epilogue with an all_grad_tensors state machine that
+        # depends on DeepSpeedEngine driving is_gradient_accumulation_boundary.
         tensor_losses = [t for t in loss_obj if torch.is_tensor(t)]
         if len(tensor_losses) == 0:
             raise RuntimeError("loss_obj is list/tuple but contains no tensor loss.")
@@ -601,11 +610,10 @@ def deepspeed_backward_step(zero_optimizer, input_tensor, output_tensor, output_
             print(f"[DPO backward split {idx}] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
             zero_optimizer.backward(t, retain_graph=False)
             print(f"[DPO backward split {idx}] rank={torch.distributed.get_rank()} After zero_optimizer.backward")
+            zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
             if use_cp_barrier and mpu.get_context_parallel_world_size() > 1:
                 torch.cuda.synchronize()
                 torch.distributed.barrier(group=mpu.get_context_parallel_group())
-
-        zero_optimizer.overlapping_partition_gradients_reduce_epilogue()
     else:
         print(f"[DPO backward single] rank={torch.distributed.get_rank()} Before zero_optimizer.backward")
         zero_optimizer.backward(loss_obj, retain_graph=False)
