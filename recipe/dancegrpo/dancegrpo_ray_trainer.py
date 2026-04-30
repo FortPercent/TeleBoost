@@ -8,6 +8,7 @@ multiple GPU workers.
 """
 
 import logging
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -19,7 +20,55 @@ import torch
 from tqdm import tqdm
 
 from verl import DataProto
-from verl.trainer.ppo.metric_utils import compute_timing_metrics, reduce_metrics
+from verl.trainer.ppo.metric_utils import reduce_metrics
+
+
+def _save_video_and_prompt(video_frames: torch.Tensor, rank: int, index: int) -> None:
+    """Write a (C, T, H, W) tensor to ./videos/output/wan_video_batch_<ts>_<index>.mp4.
+
+    Pre-X3 lived as `verl.utils.checkpoint.checkpoint_manager.save_video_and_prompt` in the
+    in-tree fork; moved here since it's purely a recipe-level validation preview helper and
+    has no place in upstream verl.
+    """
+    from datetime import datetime
+    import cv2
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    assert video_frames.dim() == 4
+    C, T, H, W = video_frames.shape
+    video_np = video_frames.permute(1, 2, 3, 0).cpu().numpy()
+    video_np = (video_np * 255).astype(np.uint8)
+    video_filename = f"wan_video_batch_{timestamp}_{index}.mp4"
+    video_path = os.path.join("./videos/output", video_filename)
+    os.makedirs("videos/output", exist_ok=True)
+    out = cv2.VideoWriter(
+        video_path,
+        fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
+        fps=video_np.shape[0],
+        frameSize=(W, H),
+    )
+    for t in range(T):
+        frame = video_np[t]
+        if C == 3:
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        else:
+            frame_bgr = frame
+        out.write(frame_bgr)
+    out.release()
+
+
+def _compute_timing_metrics_diffusion(batch: DataProto, timing_raw: Dict[str, float]) -> Dict[str, Any]:
+    """Diffusion-friendly timing metrics.
+
+    Upstream verl 0.4.0 `compute_timing_metrics` requires `batch["responses"]` (LM token shape)
+    to derive per-token throughput. Diffusion batches don't carry that — they have latents.
+    Pre-X3's in-tree fork of metric_utils.py commented out the per-token block and emitted only
+    raw `timing_s/{name}` entries; mirror that here.
+    """
+    return {f"timing_s/{name}": value for name, value in timing_raw.items()}
+
+
+compute_timing_metrics = _compute_timing_metrics_diffusion
 from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
 from verl.utils.debug import marked_timer
 
@@ -451,11 +500,9 @@ class RayDanceGRPOTrainer(RayPPOTrainer):
         return (shift * x) / (1 + (shift - 1) * x)
 
     def _save_validation_videos(self, gen_batch_output: DataProto) -> None:
-        from verl.utils.checkpoint.checkpoint_manager import save_video_and_prompt
-
         video_frames = gen_batch_output.batch["video_frames"]
         for i in range(video_frames.shape[0]):
-            save_video_and_prompt(video_frames[i], 0, i)
+            _save_video_and_prompt(video_frames[i], 0, i)
 
     def _compute_rewards(self, gen_batch_output: DataProto, metrics: dict, joint_reward_runner):
         # compute scores. Support both model and function-based.
