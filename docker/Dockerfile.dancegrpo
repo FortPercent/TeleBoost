@@ -1,28 +1,33 @@
 # ============================================================
-# Dance-GRPO / TeleBoost — single-file Dockerfile
+# TeleBoost / DanceGRPO — single-file Dockerfile
 # ============================================================
-# 直接 FROM NGC 24.08, 一条 `docker build` 出最终镜像.
-#
-# 前半内容源自 verl 官方 docker/Dockerfile.ngc.vllm0.8 (装 torch 2.6 + vllm 0.8.x + flashinfer),
-# 版本对齐 TeleBoost 内部 dancegrpo:1228 镜像 (vllm 0.8.3 → 0.8.4).
-# 后半是 Dance-GRPO 特有 overlay (reward/wan 链的 deps + hpsv2 补丁 + 本地源码).
+# Builds a self-contained image: NGC PyTorch 24.08 base, then layered
+# torch 2.6 + vllm 0.8.4 + flash-attn 2.7.4.post1 + flashinfer 0.2.2.post1,
+# upstream verl v0.4.0 (no-deps), Wan + reward dependencies, hpsv2 packaging
+# fixes, and the TeleBoost source as an editable install.
 #
 # Build:
-#   cd /path/to/TeleBoost-gh
+#   cd /path/to/TeleBoost
 #   docker build -f docker/Dockerfile.dancegrpo -t teleboost/dancegrpo:latest .
 #
-# Run (4×H100):
+# China-mirror build (Tsinghua):
+#   docker build -f docker/Dockerfile.dancegrpo \
+#     --build-arg APT_SOURCE=https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ \
+#     --build-arg PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+#     -t teleboost/dancegrpo:latest .
+#
+# Run (4×H100, replace the smoke script and mount your own data):
 #   docker run --rm --gpus all --ipc=host --shm-size=32g \
 #     -v $PWD:/workspace/TeleBoost \
 #     teleboost/dancegrpo:latest \
-#     bash recipe/dancegrpo/run_dancegrpo_1p3B_valfirst_4gpu_smoke_wxe.sh
+#     bash recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke.sh
 # ============================================================
 
 # NGC PyTorch 24.08: Ubuntu 22.04 + CUDA 12.6 + Python 3.10 + torch 2.5 + TE 1.9
 # https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-24-08.html
 FROM nvcr.io/nvidia/pytorch:24.08-py3
 
-# ---------- 基础 Env ----------
+# ---------- base env ----------
 ENV MAX_JOBS=32 \
     VLLM_WORKER_MULTIPROC_METHOD=spawn \
     DEBIAN_FRONTEND=noninteractive \
@@ -30,19 +35,24 @@ ENV MAX_JOBS=32 \
     PIP_ROOT_USER_ACTION=ignore \
     HF_HUB_ENABLE_HF_TRANSFER="1"
 
-ARG APT_SOURCE=https://mirrors.tuna.tsinghua.edu.cn/ubuntu/
-ARG PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+# Default to the standard upstream apt + pip endpoints. Override with
+# `--build-arg APT_SOURCE=...  --build-arg PIP_INDEX=...` for region mirrors.
+ARG APT_SOURCE=
+ARG PIP_INDEX=
 
-# ---------- apt 清华源 + 常用工具 (含 python3-tk 防 hpsv2 turtle 坑) ----------
-RUN cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
-    { \
-    echo "deb ${APT_SOURCE} jammy main restricted universe multiverse"; \
-    echo "deb ${APT_SOURCE} jammy-updates main restricted universe multiverse"; \
-    echo "deb ${APT_SOURCE} jammy-backports main restricted universe multiverse"; \
-    echo "deb ${APT_SOURCE} jammy-security main restricted universe multiverse"; \
-    } > /etc/apt/sources.list
-
-RUN apt-get update && \
+# ---------- apt: optional mirror + system tools ----------
+# python3-tk works around hpsv2 importing tkinter via dead `from turtle import forward`
+# ffmpeg: video I/O for the videophy reward
+RUN if [ -n "${APT_SOURCE}" ]; then \
+        cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
+        { \
+        echo "deb ${APT_SOURCE} jammy main restricted universe multiverse"; \
+        echo "deb ${APT_SOURCE} jammy-updates main restricted universe multiverse"; \
+        echo "deb ${APT_SOURCE} jammy-backports main restricted universe multiverse"; \
+        echo "deb ${APT_SOURCE} jammy-security main restricted universe multiverse"; \
+        } > /etc/apt/sources.list ; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confdef" \
         systemd tini \
         python3-tk \
@@ -50,37 +60,39 @@ RUN apt-get update && \
         git curl wget && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ---------- pip 清华源 + 升级 pip ----------
-RUN pip config set global.index-url "${PIP_INDEX}" && \
-    pip config set global.extra-index-url "${PIP_INDEX}" && \
+# ---------- pip: optional mirror + upgrade ----------
+RUN if [ -n "${PIP_INDEX}" ]; then \
+        pip config set global.index-url "${PIP_INDEX}" && \
+        pip config set global.extra-index-url "${PIP_INDEX}" ; \
+    fi && \
     python -m pip install --upgrade pip
 
-# ---------- 卸掉 NGC 自带 torch 2.5 fork (要换 pypi torch 2.6 匹配 vllm 0.8.4) ----------
+# ---------- drop NGC's bundled torch 2.5 fork; we need torch 2.6 for vllm 0.8.4 ----------
 RUN pip uninstall -y torch torchvision torchaudio \
     pytorch-quantization pytorch-triton torch-tensorrt \
     xgboost transformer_engine flash_attn apex megatron-core grpcio || true && \
     rm -rf /usr/local/lib/python3.10/dist-packages/cv2
 
-# ---------- Core: vllm 0.8.4 + torch 2.6 + RL 基础栈 ----------
+# ---------- core: vllm 0.8.4 + torch 2.6 + RL stack ----------
 RUN pip install --no-cache-dir \
     "vllm==0.8.4" "torch==2.6.0" "torchvision==0.21.0" "torchaudio==2.6.0" "tensordict==0.6.2" torchdata \
     "transformers[hf_xet]==4.57.1" accelerate datasets peft hf-transfer \
     "numpy<2.0.0" "pyarrow>=15.0.0" pandas \
     ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb dill pybind11 liger-kernel mathruler \
     pytest py-spy pyext pre-commit ruff \
-    tensorboard
+    tensorboard fastapi uvicorn
 
 # ---------- flash-attn 2.7.4.post1 ----------
 RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
     pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
     rm -f flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# ---------- flashinfer 0.2.2.post1 (vllm 0.8.x 不支持 >=0.2.3) ----------
+# ---------- flashinfer 0.2.2.post1 (vllm 0.8.x doesn't support >=0.2.3) ----------
 RUN wget -nv https://github.com/flashinfer-ai/flashinfer/releases/download/v0.2.2.post1/flashinfer_python-0.2.2.post1+cu124torch2.6-cp38-abi3-linux_x86_64.whl && \
     pip install --no-cache-dir flashinfer_python-0.2.2.post1+cu124torch2.6-cp38-abi3-linux_x86_64.whl && \
     rm -f flashinfer_python-0.2.2.post1+cu124torch2.6-cp38-abi3-linux_x86_64.whl
 
-# ---------- 修包 ----------
+# ---------- pinned NV/FastAPI/etc fixups ----------
 RUN pip uninstall -y pynvml nvidia-ml-py && \
     pip install --no-cache-dir --upgrade \
         "nvidia-ml-py>=12.560.30" \
@@ -89,16 +101,20 @@ RUN pip uninstall -y pynvml nvidia-ml-py && \
         "pydantic>=2.9" \
         "grpcio>=1.62.1"
 
+# ---------- upstream verl v0.4.0 (no-deps to keep our torch/vllm/ray pins) ----------
+RUN pip install --no-cache-dir --no-deps \
+    "verl @ git+https://github.com/volcengine/verl.git@v0.4.0"
+
 # ==========================================================
-# Dance-GRPO overlay (上游 Dockerfile.ngc.vllm0.8 没有的部分)
+# DanceGRPO overlay (Wan + reward stack on top of the verl-compatible base)
 # ==========================================================
 
-# ---------- Dance-GRPO 特有依赖 ----------
+# ---------- DanceGRPO-specific deps ----------
 # wan.modules.*  : easydict + diffusers
 # videoclip      : opencv-python
 # videophy       : decord
 # hps            : hpsv2 + ftfy
-# 共用           : timm + einops
+# shared         : timm + einops
 RUN pip install --no-cache-dir \
         diffusers==0.37.1 \
         easydict==1.13 \
@@ -109,38 +125,38 @@ RUN pip install --no-cache-dir \
         timm==1.0.26 \
         hpsv2==1.2.0
 
-# ---------- hpsv2 wheel 两个 bug 打补丁 ----------
-# 1. 没打包 BPE vocab
+# ---------- hpsv2 packaging fixes (see docs/install_from_scratch.md §3.1) ----------
+# 1. The published wheel ships without the BPE vocab.
 RUN VOCAB_DIR=$(python -c "import hpsv2.src.open_clip as m, os; print(os.path.dirname(m.__file__))") && \
     curl -fsSL -o "$VOCAB_DIR/bpe_simple_vocab_16e6.txt.gz" \
         https://raw.githubusercontent.com/tgxs002/HPSv2/master/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz
-# 2. factory.py 里有条废代码 `from turtle import forward`
+# 2. factory.py has a stray `from turtle import forward` line — strip it.
 RUN FACTORY=$(python -c "import hpsv2.src.open_clip.factory as m; print(m.__file__)") && \
     sed -i '/from turtle import forward/d' "$FACTORY"
 
-# ---------- 本地源码 editable install ----------
+# ---------- copy the TeleBoost source and install in editable mode ----------
 WORKDIR /workspace/TeleBoost
 COPY . /workspace/TeleBoost
-RUN pip install --no-cache-dir -e . --no-deps
+RUN pip install --no-cache-dir --no-deps -e .
 
-# ---------- 重置 pip 索引 ----------
+# ---------- reset pip mirror config so users picking up this image don't inherit it ----------
 RUN pip config unset global.index-url || true && \
     pip config unset global.extra-index-url || true
 
-# ---------- 构建期自检 ----------
+# ---------- build-time self-check ----------
 RUN python - <<'PY'
-import torch, vllm, flash_attn, transformers, cv2
-from wan.modules.t5 import T5EncoderModel
+import torch, vllm, flash_attn, transformers, cv2, verl
+from wan.modules.t5 import T5EncoderModel  # noqa: F401
 from recipe.dancegrpo.reward_models import RewardRegistry
-from hpsv2.src.open_clip import create_model_and_transforms
-from decord import VideoReader
+from hpsv2.src.open_clip import create_model_and_transforms  # noqa: F401
+from decord import VideoReader  # noqa: F401
 print(f"torch={torch.__version__}  vllm={vllm.__version__}  flash_attn={flash_attn.__version__}")
-print(f"transformers={transformers.__version__}  cv2={cv2.__version__}")
+print(f"transformers={transformers.__version__}  cv2={cv2.__version__}  verl={verl.__version__}")
 print(f"reward models: {RewardRegistry.list_available()}")
 print("OK")
 PY
 
-# ---------- 运行时 Env ----------
+# ---------- runtime env ----------
 ENV PYTHONPATH=/workspace/TeleBoost:${PYTHONPATH:-} \
     HYDRA_FULL_ERROR=1 \
     TOKENIZERS_PARALLELISM=false \
