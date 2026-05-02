@@ -8,11 +8,10 @@ Supports dynamic loading of reward models from configuration.
 
 from .registry import RewardRegistry
 from .base import BaseRewardModel, RewardConfig, MPSConfig
-from .composite import CompositeRewardManager, CompositeRewardConfig
 from .dynamic_joint import (
-    DynamicJointRewardRunner, 
+    DynamicJointRewardRunner,
     JointRewardConfig,
-    create_joint_runner_from_config
+    create_joint_runner_from_config,
 )
 
 # Import all reward models to trigger registration
@@ -24,11 +23,9 @@ from . import hps
 
 __all__ = [
     "RewardRegistry",
-    "BaseRewardModel", 
+    "BaseRewardModel",
     "RewardConfig",
     "MPSConfig",
-    "CompositeRewardManager",
-    "CompositeRewardConfig",
     "DynamicJointRewardRunner",
     "JointRewardConfig",
     "create_joint_runner_from_config",

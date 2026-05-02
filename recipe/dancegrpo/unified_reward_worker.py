@@ -513,15 +513,12 @@ class JointRewardModelWorker(Worker, WorkerProfilerExtension):
                 reward_key = model.REWARD_KEY
                 local_rewards = result.batch[reward_key]
                 
-                # AllGather to collect rewards from all workers for this model
-                if dist.is_initialized() and model.dp_size > 1:
-                    # Gather from all active workers in this model's DP group
-                    gathered_rewards = self._allgather_rewards(
-                        local_rewards, 
-                        model.dp_size,
-                        model.config.rank_offset,
-                        model.is_active
-                    )
+                # AllGather to collect rewards from all workers for this model.
+                # `base.py` fail-loud guards force dp_size == world_size (the
+                # only dispatch the codebase supports), so the default world
+                # group is exactly the right collective.
+                if dist.is_initialized() and dist.get_world_size() > 1:
+                    gathered_rewards = self._allgather_rewards(local_rewards)
                 else:
                     gathered_rewards = local_rewards
                 
@@ -567,46 +564,25 @@ class JointRewardModelWorker(Worker, WorkerProfilerExtension):
         
         return DataProto(batch=batch, non_tensor_batch=data.non_tensor_batch)
     
-    def _allgather_rewards(
-        self, 
-        local_rewards: torch.Tensor,
-        dp_size: int,
-        rank_offset: int,
-        is_active: bool
-    ) -> torch.Tensor:
-        """
-        AllGather rewards from all active workers for a model.
-        
-        Args:
-            local_rewards: This worker's portion of rewards
-            dp_size: Number of workers in this model's DP group
-            rank_offset: Starting rank for active workers
-            is_active: Whether this worker is active for this model
-            
-        Returns:
-            Full batch rewards (concatenated from all active workers)
+    def _allgather_rewards(self, local_rewards: torch.Tensor) -> torch.Tensor:
+        """AllGather a model's local rewards across the world process group.
+
+        Returns the concatenated full-batch tensor.  Caller is responsible for
+        verifying ``dist.is_initialized()`` and ``world_size > 1``.
+
+        The previous version of this helper carried ``dp_size`` /
+        ``rank_offset`` / ``is_active`` parameters intended for disjoint
+        per-reward DP groups, but ``dist.all_gather`` here always runs on the
+        default world group — so ``dp_size != world_size`` would silently
+        mismatch the gathered list length.  The yaml default + ``base.py``
+        fail-loud guards now keep ``dp_size == world_size`` invariant; the
+        helper reflects that.
         """
         import torch.distributed as dist
-        
-        local_size = local_rewards.shape[0]
-        device = local_rewards.device
-        
-        # Create list to gather into
-        gathered_list = [torch.zeros_like(local_rewards) for _ in range(dp_size)]
-        
-        # Only active workers in the DP group participate
-        if is_active:
-            # AllGather within the DP group
-            # Note: We use all workers but only active ones have real data
-            dist.all_gather(gathered_list, local_rewards)
-        else:
-            # Inactive workers also need to participate in collective
-            dist.all_gather(gathered_list, local_rewards)
-        
-        # Concatenate gathered results
-        full_rewards = torch.cat(gathered_list, dim=0)
-        
-        return full_rewards
+        world_size = dist.get_world_size()
+        gathered = [torch.zeros_like(local_rewards) for _ in range(world_size)]
+        dist.all_gather(gathered, local_rewards)
+        return torch.cat(gathered, dim=0)
     
     def _aggregate_rewards(
         self, 
