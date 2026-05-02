@@ -102,7 +102,7 @@ class MPSConfig:
             logger.info(f"Set MPS percentage for {model_name}: {percentage}%")
 
 
-def zscore_normalize(values: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def zscore_normalize(values: torch.Tensor) -> torch.Tensor:
     """
     Apply z-score normalization to a tensor.
 
@@ -117,13 +117,12 @@ def zscore_normalize(values: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
       full gathered batch, so a per-rank passthrough is semantically
       correct and avoids the silent ``std()`` NaN that Bessel's
       correction emits when ``n <= 1``.
-    * std == 0: returns ``values - mean`` so equal-valued inputs collapse
-      to all zeros instead of dividing by ``eps`` and producing huge
-      values that look like outliers.
+    * std == 0 (or non-finite): returns ``values - mean`` so equal-valued
+      inputs collapse to all zeros instead of being divided by an
+      epsilon and producing huge values that look like outliers.
 
     Args:
         values: Input tensor
-        eps: Small value to prevent division by zero
 
     Returns:
         Normalized tensor (or original when n <= 1).
@@ -134,7 +133,7 @@ def zscore_normalize(values: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     std = values.std()
     if not torch.isfinite(std) or float(std.item()) == 0.0:
         return values - mean
-    return (values - mean) / (std + eps)
+    return (values - mean) / std
 
 
 def split_batch_for_dp(
