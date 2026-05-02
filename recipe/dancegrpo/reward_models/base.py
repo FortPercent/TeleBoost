@@ -271,8 +271,43 @@ class BaseRewardModel(ABC):
         
         # Calculate DP info
         self.dp_size = max(1, int(world_size * config.dp_fraction))
+
+        # Fail-loud guards: catch dispatch misconfigurations before they degrade
+        # to silent reward=0 (rank_offset out of range) or NCCL/Gloo allgather
+        # mismatches downstream.  These fire only on explicit yaml/Hydra overrides
+        # — the yaml default is dp_fraction=1.0 + rank_offset=0 (all-active), which
+        # is always valid and the only dispatch the codebase actually supports
+        # (see `unified_reward_worker._allgather_rewards`, which calls
+        # `dist.all_gather` on the default world group).
+        if config.rank_offset >= world_size:
+            raise ValueError(
+                f"Reward model '{config.name}' configured with "
+                f"rank_offset={config.rank_offset} but world_size={world_size}; "
+                f"this model can never be active. Set dp_fraction=1.0 + "
+                f"rank_offset=0 (the only dispatch this codebase currently "
+                f"supports) or pick rank_offset < {world_size}."
+            )
+        if config.rank_offset + self.dp_size > world_size:
+            raise ValueError(
+                f"Reward model '{config.name}': rank_offset({config.rank_offset}) + "
+                f"dp_size({self.dp_size}) = {config.rank_offset + self.dp_size} "
+                f"> world_size({world_size}); the assigned rank slice overshoots "
+                f"the last GPU."
+            )
+        if self.dp_size != world_size and config.dp_fraction != 1.0:
+            # Disjoint dispatch is expressed but `_allgather_rewards` will
+            # mismatch on default-group all_gather.  Fail rather than crash
+            # mid-step with an opaque ProcessGroupGloo error.
+            raise ValueError(
+                f"Reward model '{config.name}' has dp_fraction={config.dp_fraction} "
+                f"(dp_size={self.dp_size}) != world_size={world_size}; the codebase "
+                f"only supports all-active dispatch (dp_fraction=1.0). Disjoint "
+                f"per-model GPU assignment would require sub-group setup that "
+                f"`_allgather_rewards` does not implement."
+            )
+
         self.is_active = self._check_active()
-        
+
         if self.is_active:
             self.local_dp_rank = (global_rank - config.rank_offset) % self.dp_size
             # Apply MPS settings if configured

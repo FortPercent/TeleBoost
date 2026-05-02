@@ -143,86 +143,73 @@ reward_model:
     #   reward_model.joint.models.aesthetic.extra_config.clip_model_path=/new/path
     # Each model MUST have a registered name in the reward_models/ registry
     # You can add/remove models freely - just ensure they are registered
+    #
+    # Dispatch design: every reward model runs on every GPU (dp_fraction=1.0,
+    # rank_offset=0).  Reward workers co-locate with the actor on each GPU and
+    # share thread budget via CUDA MPS (see `mps.model_percentages` above).
+    # The earlier disjoint scheme (dp_fraction=0.25 + rank_offset=0/2/4/6) was
+    # never wired up correctly: `_allgather_rewards` calls `dist.all_gather`
+    # on the default world process group, so any dp_size != world_size triggers
+    # `expected length=world_size, got=dp_size`.  Until the codebase grows real
+    # sub-group support, all-active is the only correct dispatch.
     models:
       aesthetic:
         enabled: true
         weight: 1.0
-        dp_fraction: 0.25      # Use 1/4 of GPUs (e.g., 2 out of 8)
-        rank_offset: 0         # Start from rank 0
+        dp_fraction: 1.0       # all-active: every reward on every GPU
+        rank_offset: 0
         mps_percentage: 20     # 20% of GPU threads (overrides mps.model_percentages)
         normalize: true
         model_path: ""
         extra_config:
           clip_model_path: /root/models/aesthetic/ViT-L-14.pt
           aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
-      
+
       raft:
         enabled: true
         weight: 1.0
-        dp_fraction: 0.25
-        rank_offset: 2         # Start from rank 2
+        dp_fraction: 1.0
+        rank_offset: 0
         mps_percentage: 30
         normalize: true
         model_path: /root/models/raft/raft-things.pth
         extra_config:
           stride: 1
           iters: 20
-      
+
       videoclip:
         enabled: true
         weight: 1.5            # Higher weight = more influence
-        dp_fraction: 0.25
-        rank_offset: 4
+        dp_fraction: 1.0
+        rank_offset: 0
         mps_percentage: 25
         normalize: true
         model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
         extra_config:
           num_frames: 8
           target_size: 224
-      
+
       videophy:
         enabled: true
         weight: 0.8            # Lower weight
-        dp_fraction: 0.25
-        rank_offset: 6
+        dp_fraction: 1.0
+        rank_offset: 0
         mps_percentage: 25
         normalize: true
         model_path: /root/models/videocon_physics
         extra_config:
           max_length: 256
-      
+
       # Example: Adding HPS model (disabled by default)
       # hps:
       #   enabled: false
       #   weight: 1.0
-      #   dp_fraction: 0.125
+      #   dp_fraction: 1.0
       #   rank_offset: 0
       #   mps_percentage: 15
       #   model_path: /root/models/hps/hpsv2.pt
       #   extra_config:
       #     model_type: ViT-H-14
-
-  # ============================================================
-  # LEGACY CONFIGURATION (for backward compatibility)
-  # ============================================================
-  # These are used when type is NOT 'joint'
-  weights:
-    aes: 1.0
-    raft: 1.0
-    videoclip: 1.0
-    videophy: 1.0
-
-  aesthetic:
-    clip_model_path: /root/models/aesthetic/ViT-L-14.pt
-    aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
-  raft:
-    model_path: /root/models/raft/raft-things.pth
-    stride: 1
-  videoclip:
-    model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
-    num_frames: 8
-  videophy:
-    model_path: /root/models/videocon_physics
 
   reward_manager: dancegrpo
   
