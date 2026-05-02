@@ -1,6 +1,8 @@
 hydra:
   searchpath:
-    - file://verl/trainer/config
+    # import-verl mode: verl is installed via pip; resolve `ppo_trainer` defaults
+    # through the package's `verl.trainer.config` package, not a vendored verl/ dir.
+    - pkg://verl.trainer.config
 
 defaults:
   - ppo_trainer
