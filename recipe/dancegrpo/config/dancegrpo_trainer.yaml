@@ -37,7 +37,7 @@ actor_rollout_ref:
       enable: false
       ratio_norm: false           # Eq. 8: rewrite policy ratio with Δμ-bias term
       grad_reweight: false        # Eq. 12: rescale policy loss by δ = β/dt
-      grad_reweight_form: flow_grpo   # 'flow_grpo' (δ=1/dt) or 'dancegrpo' (δ=(1+η²(1-t)/(2t))/dt)
+      grad_reweight_form: dancegrpo   # 'flow_grpo' (δ=1/dt) or 'dancegrpo' (δ=(1+η²(1-t)/(2t))/dt)
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6     # also doubles as the t-floor for the dancegrpo form
       grad_reweight_alpha: 1.0    # currently unused; reserved for future weighting experiments
@@ -351,12 +351,6 @@ algorithm:
     regularization_term_alpha: 1.0
     min_adv_scale: 0.01
     max_adv_scale: 10.0
-
-    # --- Joint-reward interaction ---------------------------------------
-    joint:
-      # When true, the joint-advantage pre-computation respects the user's
-      # `reward_model.weights` instead of overwriting them.
-      reuse_user_task_weights: true
 
     # Numerical-stability clamp for `exp(-r/T)` in CRT.
     exp_clamp: 30.0

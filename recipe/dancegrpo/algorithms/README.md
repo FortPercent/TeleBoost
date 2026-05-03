@@ -3,11 +3,12 @@
 | name        | file                                  | enable flag                                       | role                                                                |
 |-------------|---------------------------------------|---------------------------------------------------|---------------------------------------------------------------------|
 | baseline    | (no module — vanilla GRPO loop)       | `algorithm.adv_estimator=grpo`                    | reference policy-gradient baseline                                  |
-| BGPO        | [`bgpo.py`](bgpo.py)                  | `algorithm.bgpo.enable=true`                      | Bayesian-prior group optimization (CRT reward rerange + RAS adv scale) |
-| VIPO        | [`vipo.py`](vipo.py)                  | `actor_rollout_ref.pixel_weight.enable=true`      | DINOv2 per-pixel advantage broadcast                                |
-| joint reward| [`joint.py`](joint.py)                | `reward_model.type=joint`                         | multi-head joint reward (worker-parallel / driver-side dynamic / legacy fixed-4) |
-| GRPO-Guard  | (in `dp_actor.py`)                    | `actor_rollout_ref.actor.grpo_guard.enable=true`  | flow-matching ratio-norm + grad-reweight                            |
-| flow-grpo   | (in `dp_actor.py` / rollout)          | `actor_rollout_ref.flow_grpo.enable=true`         | SDE-window subsampling for fast flow-grpo                           |
+| BGPO        | [`bgpo.py`](bgpo.py)                  | `algorithm.bgpo.enable=true`                      | Bayesian-prior group optimization (CRT reward rerange + RAS adv scale) — paper arxiv 2511.18919 |
+| VIPO        | [`vipo.py`](vipo.py)                  | `actor_rollout_ref.pixel_weight.enable=true`      | DINOv2 per-pixel advantage broadcast — paper arxiv 2511.18719       |
+| joint reward| [`joint.py`](joint.py)                | `reward_model.type=joint`                         | multi-head joint reward orchestration                               |
+| multi-reward agg | [`multi_reward_aggregation.py`](multi_reward_aggregation.py) | (always on under `joint`)        | in-house convex zero-bracket weights (NOT from BGPO paper)         |
+| GRPO-Guard  | [`grpo_guard.py`](grpo_guard.py)      | `actor_rollout_ref.actor.grpo_guard.enable=true` (+ `ratio_norm` / `grad_reweight` separable per paper §4.3) | flow-matching ratio-norm (Eq. 8) + grad-reweight δ (Eq. 12, ``flow_grpo`` / ``dancegrpo`` forms) — paper arxiv 2510.22319 |
+| flow-grpo   | (in `dp_actor.py` / `teleboost/workers/rollout/diffusion_rollout.py`) | `actor_rollout_ref.flow_grpo.enable=true`         | SDE-window subsampling for fast flow-grpo — paper arxiv 2505.05470  |
 
 ## Layout convention
 
