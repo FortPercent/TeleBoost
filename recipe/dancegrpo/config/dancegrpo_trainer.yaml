@@ -29,13 +29,18 @@ actor_rollout_ref:
     eta: 0.3
     max_grad_norm: 1.0
     
+    # GRPO-Guard (paper arxiv 2510.22319).  RatioNorm and grad-reweight are
+    # exposed as separable levers per the paper's §4.3 ablation
+    # (Mean-revised / RatioNorm / GRPO-Guard combined).  See
+    # ``algorithms/grpo_guard.py`` for the formulas.
     grpo_guard:
       enable: false
-      ratio_norm: false
-      grad_reweight: false
+      ratio_norm: false           # Eq. 8: rewrite policy ratio with Δμ-bias term
+      grad_reweight: false        # Eq. 12: rescale policy loss by δ = β/dt
+      grad_reweight_form: flow_grpo   # 'flow_grpo' (δ=1/dt) or 'dancegrpo' (δ=(1+η²(1-t)/(2t))/dt)
       ratio_norm_eps: 1e-6
-      grad_reweight_eps: 1e-6
-      grad_reweight_alpha: 1.0
+      grad_reweight_eps: 1e-6     # also doubles as the t-floor for the dancegrpo form
+      grad_reweight_alpha: 1.0    # currently unused; reserved for future weighting experiments
   
   rollout:
     ulysses_sequence_parallel_size: 1.0

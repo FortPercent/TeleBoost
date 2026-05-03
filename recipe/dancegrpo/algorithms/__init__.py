@@ -23,6 +23,11 @@ from recipe.dancegrpo.algorithms.bgpo import (
     BGPOMixin,
     rerange_group_rewards,
 )
+from recipe.dancegrpo.algorithms.grpo_guard import (
+    GRAD_REWEIGHT_FORMS,
+    compute_grad_reweight_delta,
+    compute_ratio_norm_bias,
+)
 from recipe.dancegrpo.algorithms.joint import (
     JointRewardMixin,
     _JointRewardRunner,
@@ -41,6 +46,10 @@ __all__ = [
     # BGPO (paper arxiv 2511.18919)
     "BGPOMixin",
     "rerange_group_rewards",
+    # GRPO-Guard (paper arxiv 2510.22319)
+    "compute_ratio_norm_bias",
+    "compute_grad_reweight_delta",
+    "GRAD_REWEIGHT_FORMS",
     # Joint reward
     "JointRewardMixin",
     "_JointRewardRunner",
