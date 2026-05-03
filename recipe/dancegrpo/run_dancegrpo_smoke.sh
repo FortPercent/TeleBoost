@@ -19,7 +19,7 @@ set -euo pipefail
 #   INIT_SAME_NOISE=True|False               (False = real reward variance for grad checks)
 #   ENABLE_GRPOGUARD=True|False              (turns on GRPO-Guard ratio_norm + grad_reweight)
 #   ENABLE_FLOWGRPO=True|False               (turns on flow-grpo SDE; also bumps SAMPLING_STEPS to >=4)
-#   ADV_ESTIMATOR=grpo|remax                 (algorithm.adv_estimator override)
+#   ADV_ESTIMATOR=grpo                       (algorithm.adv_estimator; only "grpo" is wired up)
 #   SAMPLING_STEPS=N                         (rollout denoise steps; HPS needs >=4 to avoid nan)
 #   TOTAL_TRAINING_STEPS=N
 #   N_GPUS_PER_NODE=N

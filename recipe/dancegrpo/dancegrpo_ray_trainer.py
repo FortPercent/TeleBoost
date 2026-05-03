@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from verl import DataProto
 from verl.trainer.ppo.metric_utils import reduce_metrics
-from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer
+from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 from verl.utils.debug import marked_timer
 
 from recipe.dancegrpo.algorithms import (
@@ -87,7 +87,6 @@ DEFAULT_LATENT_CHANNELS = 16
 
 def compute_advantage(
     data: DataProto,
-    adv_estimator,
     gamma=1.0,
     lam=1.0,
     num_repeat=1,
@@ -95,6 +94,13 @@ def compute_advantage(
     norm_adv_by_std_in_grpo=True,
     config=None,
 ):
+    """Group-relative GRPO advantage = (rewards - group_mean) / group_std.
+
+    The verl-side multi-estimator switch (GRPO / GAE / REMAX / etc.) was
+    replaced by this GRPO-only inline body in commit 33f9b00c (wxe X3
+    series).  ReMax / GAE are not supported here — adding either back
+    needs the verl-side switch reinstated, not just an `if` branch.
+    """
     rewards = data.batch["rewards"]
     advantages = torch.zeros_like(rewards)
     # TODO: when batchsize not equal to 1
@@ -178,23 +184,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
                         # See DiffusionActorRolloutRefWorker.generate_sequences.
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
-                    # Default GRPO uses group-relative advantages.
-                    if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                        with marked_timer("gen_max", timing_raw):
-                            gen_baseline_batch = deepcopy(gen_batch)
-                            gen_baseline_batch.meta_info["do_sample"] = False
-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
-
-                            new_batch = new_batch.union(gen_baseline_output)
-                            reward_baseline_tensor = self.reward_fn(new_batch)
-                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
-
-                            new_batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
-
-                            new_batch.batch["reward_baselines"] = reward_baseline_tensor
-
-                            del gen_baseline_batch, gen_baseline_output
-
                     new_batch.non_tensor_batch["uid"] = np.array(
                         [str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object
                     )
@@ -230,7 +219,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
                             norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
                             gen_batch_output = compute_advantage(
                                 gen_batch_output,
-                                adv_estimator=self.config.algorithm.adv_estimator,
                                 gamma=self.config.algorithm.gamma,
                                 lam=self.config.algorithm.lam,
                                 num_repeat=self.config.actor_rollout_ref.rollout.n,
