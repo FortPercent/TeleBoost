@@ -20,6 +20,8 @@ from tqdm import tqdm
 from verl import DataProto
 from verl.trainer.ppo.metric_utils import reduce_metrics
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
+
+from recipe.dancegrpo.algorithms.grpo_advantage import per_prompt_zscore_advantage
 from verl.utils.debug import marked_timer
 
 from recipe.dancegrpo.algorithms import (
@@ -94,20 +96,25 @@ def compute_advantage(
     norm_adv_by_std_in_grpo=True,
     config=None,
 ):
-    """Group-relative GRPO advantage = (rewards - group_mean) / group_std.
+    """Per-prompt group-relative GRPO advantage.
 
-    The verl-side multi-estimator switch (GRPO / GAE / REMAX / etc.) was
-    replaced by this GRPO-only inline body in commit 33f9b00c (wxe X3
-    series).  ReMax / GAE are not supported here — adding either back
-    needs the verl-side switch reinstated, not just an `if` branch.
+    Paper: GRPO arxiv 2402.03300 §4.1.2 + DanceGRPO arxiv 2505.07818
+    Eq. 10.  The "group" is the ``num_repeat`` samples generated for
+    the same prompt — z-score is taken **within** that group, not
+    across the whole batch.
+
+    Pre-fix the function did a whole-batch z-score (TODO comment at
+    the original line was honest: "when batchsize not equal to 1").
+    This helper now plumbs ``num_repeat`` through to the actual
+    grouping (see ``algorithms/grpo_advantage.py:per_prompt_zscore_advantage``).
+
+    The verl-side multi-estimator switch (GRPO / GAE / REMAX / etc.)
+    was replaced by this GRPO-only inline body in commit 33f9b00c
+    (wxe X3 series); adding ReMax / GAE back needs the verl-side
+    switch reinstated, not just an ``if`` branch.
     """
     rewards = data.batch["rewards"]
-    advantages = torch.zeros_like(rewards)
-    # TODO: when batchsize not equal to 1
-    group_mean = rewards.mean()
-    group_std = rewards.std() + 1e-8
-    advantages = (rewards - group_mean) / group_std
-    data.batch["advantages"] = advantages
+    data.batch["advantages"] = per_prompt_zscore_advantage(rewards, num_repeat)
     return data
 
 

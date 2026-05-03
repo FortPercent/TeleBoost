@@ -23,6 +23,9 @@ from recipe.dancegrpo.algorithms.bgpo import (
     BGPOMixin,
     rerange_group_rewards,
 )
+from recipe.dancegrpo.algorithms.grpo_advantage import (
+    per_prompt_zscore_advantage,
+)
 from recipe.dancegrpo.algorithms.grpo_guard import (
     GRAD_REWEIGHT_FORMS,
     compute_grad_reweight_delta,
@@ -43,6 +46,8 @@ from recipe.dancegrpo.algorithms.vipo import (
 )
 
 __all__ = [
+    # GRPO advantage (paper arxiv 2402.03300 + 2505.07818)
+    "per_prompt_zscore_advantage",
     # BGPO (paper arxiv 2511.18919)
     "BGPOMixin",
     "rerange_group_rewards",

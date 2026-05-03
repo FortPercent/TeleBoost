@@ -32,6 +32,7 @@ import torch
 
 from verl import DataProto
 
+from recipe.dancegrpo.algorithms.grpo_advantage import per_prompt_zscore_advantage
 from recipe.dancegrpo.algorithms.multi_reward_aggregation import compute_joint_task_weights
 
 logger = logging.getLogger(__name__)
@@ -462,11 +463,15 @@ class JointRewardMixin:
         per_task_rewards = [reward_output.batch[k].float() for k in reward_keys]
         per_task_advantages = []
 
+        # Per-prompt grouping for the per-task z-score.  Same paper
+        # reasoning as the single-reward path in
+        # ``dancegrpo_ray_trainer.compute_advantage`` (GRPO arxiv
+        # 2402.03300 §4.1.2 + DanceGRPO Eq. 10).
+        num_repeat = int(self.config.actor_rollout_ref.rollout.n)
+
         for reward_key in reward_keys:
             reward_tensor = reward_output.batch[reward_key].float()
-            mean = reward_tensor.mean()
-            std = reward_tensor.std() + 1e-8
-            adv = (reward_tensor - mean) / std
+            adv = per_prompt_zscore_advantage(reward_tensor, num_repeat)
             task_name = reward_key[:-8]
             reward_output.batch[f"{task_name}_advantages"] = adv
             metrics[f"train/{task_name}_advantages"] = adv.mean().item()
@@ -482,8 +487,10 @@ class JointRewardMixin:
         if self._is_bgpo_enabled():
             reward_output = self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
             if self._get_bgpo_config().get("use_rerange", False):
+                # Re-derive advantage with the same per-prompt grouping
+                # as above (post-rerange rewards).
                 rewards = reward_output.batch["rewards"].float()
-                reward_output.batch["advantages"] = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+                reward_output.batch["advantages"] = per_prompt_zscore_advantage(rewards, num_repeat)
 
         for idx, reward_key in enumerate(reward_keys):
             task_name = reward_key[:-8]
