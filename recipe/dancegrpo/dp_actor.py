@@ -105,11 +105,40 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         pixel_enable = self._pixel_enabled()
         pixel_cfg = self._pixel_cfg()
 
-        # GRPO-Guard options (Flow-GRPO RatioNorm)
+        # GRPO-Guard options.  Paper: arxiv 2510.22319.  RatioNorm (Eq. 8)
+        # rewrites the importance-sampling ratio with a Δμ-derived bias term
+        # plus an outer ``σ_t · √Δt`` scale; grad-reweight ``δ`` rescales the
+        # final policy loss so the gradient magnitude is dt-invariant.  The
+        # paper's §4.3 ablation treats RatioNorm and grad-reweight as
+        # **separable** levers (Mean-revised / RatioNorm / GRPO-Guard combined),
+        # so we expose them as two flags:
+        #
+        #   ratio_norm       — apply Eq. 8 to the policy ratio
+        #   grad_reweight    — rescale the policy loss by δ (= β/dt)
+        #
+        # ``grad_reweight_form`` selects between the paper's two δ shapes:
+        #
+        #   flow_grpo  (default): δ = 1/dt           (β ≈ const, Flow-GRPO style)
+        #   dancegrpo:            δ = (1 + η²(1−t)/(2t)) / dt   (DanceGRPO form)
+        #
+        # Both ``ratio_norm`` and ``grad_reweight`` default to ``guard_enable``
+        # so legacy ``grpo_guard.enable=true`` configs keep their behaviour
+        # (the previous code bundled grad_reweight inside the ``if ratio_norm``
+        # branch with a hardcoded ``policy_loss /= sqrt_dt^2`` — i.e. the
+        # flow_grpo form).
         guard_cfg = self.config.get("grpo_guard", {})
         guard_enable = guard_cfg.get("enable", False)
         ratio_norm = guard_cfg.get("ratio_norm", guard_enable)
         ratio_norm_eps = guard_cfg.get("ratio_norm_eps", 1e-6)
+        grad_reweight = guard_cfg.get("grad_reweight", guard_enable)
+        grad_reweight_eps = guard_cfg.get("grad_reweight_eps", 1e-6)
+        grad_reweight_form = guard_cfg.get("grad_reweight_form", "flow_grpo")
+        if grad_reweight_form not in ("flow_grpo", "dancegrpo"):
+            raise ValueError(
+                f"Unsupported grpo_guard.grad_reweight_form={grad_reweight_form!r}; "
+                f"must be 'flow_grpo' (δ=1/dt) or 'dancegrpo' "
+                f"(δ=(1+η²(1−t)/(2t))/dt) per arxiv 2510.22319 §3.2.3."
+            )
 
         # Dense pixel-weighted advantages require a matching dense KL path.
         use_kl_loss = bool(self.config.get("use_kl_loss", False))
@@ -331,8 +360,37 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 )
 
                 policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                if ratio_norm:
-                    policy_loss = policy_loss / (sqrt_dt_scalar**2)
+                # GRPO-Guard grad-reweight (paper arxiv 2510.22319 §3.2.3,
+                # Eq. 12).  Note ``sqrt_dt_scalar`` is computed only inside
+                # the ``if ratio_norm`` branch above; recompute it here when
+                # grad_reweight is on without ratio_norm.
+                if grad_reweight:
+                    if not ratio_norm:
+                        sqrt_dt_scalar = sqrt_dt.mean() if sqrt_dt.ndim > 0 else sqrt_dt
+                    dt_scalar = sqrt_dt_scalar ** 2
+                    inv_dt = 1.0 / (dt_scalar + grad_reweight_eps)
+                    if grad_reweight_form == "dancegrpo":
+                        # δ = (1 + η²(1−t)/(2t)) / dt
+                        # ``t_t`` is the per-sample SDE time of this denoise
+                        # step (in [0, 1] for the flow-matching schedule);
+                        # use its scalar mean so δ is uniform across the
+                        # mini-batch (paper writes δ as a function of t at
+                        # the outer step level, not per-sample).
+                        eta = float(self.config.get("eta", 0.25))
+                        t_scalar = t_t.float().mean()
+                        # Numerical guard: clamp t away from 0 so the
+                        # (1−t)/(2t) factor doesn't blow up at the early-
+                        # noise end of the schedule.  ``grad_reweight_eps``
+                        # doubles as the t-floor.
+                        t_safe = torch.clamp(t_scalar, min=grad_reweight_eps)
+                        beta = 1.0 + (eta ** 2) * (1.0 - t_safe) / (2.0 * t_safe)
+                        delta = beta * inv_dt
+                    else:
+                        # flow_grpo: δ = 1/dt (β ≈ const).  Matches the
+                        # pre-fix behaviour where this was implemented as
+                        # ``policy_loss /= sqrt_dt^2``.
+                        delta = inv_dt
+                    policy_loss = policy_loss * delta
 
                 loss = policy_loss / (self.gradient_accumulation * train_timesteps)
 
@@ -345,6 +403,8 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     data_dict["actor/ratio_mean_bias"] = ratio_mean_bias.detach().mean().item()
                     data_dict["actor/ratio_scale"] = scale if isinstance(scale, float) else scale.item()
                     data_dict["actor/sqrt_dt"] = sqrt_dt_scalar if isinstance(sqrt_dt_scalar, float) else sqrt_dt_scalar.item()
+                if grad_reweight:
+                    data_dict["actor/grad_reweight_delta"] = delta if isinstance(delta, float) else delta.item()
                 append_to_dict(metrics, data_dict)
 
                 loss.backward()
