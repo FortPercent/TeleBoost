@@ -149,13 +149,17 @@ class VideoCLIPRewardModel(BaseRewardModel):
         step = max(1, total_frames // self.num_frames)
         sampled = frames_np[::step][:self.num_frames]
         
-        # Process each frame
+        # Process each frame.  Frames arrive RGB from the VAE decode path
+        # (`diffusion_rollout.py:193-201`: `vae.decode(...)` then
+        # `(x + 1) / 2; clamp(0, 1)`), and VideoCLIP-XL is RGB-trained
+        # (arxiv 2410.00741), so no channel flip is needed here.  An earlier
+        # ``if fr.shape[-1] == 3: fr = fr[:, :, ::-1]`` block (introduced in
+        # commit 3cb91077 alongside the rest of this preprocess routine,
+        # likely copy-pasted from a cv2.VideoCapture-based example) was
+        # silently flipping RGB→BGR on every frame, costing ~5% reward
+        # magnitude.  Removed.
         vid_tube = []
         for fr in sampled:
-            # BGR to RGB (if needed)
-            if fr.shape[-1] == 3:
-                fr = fr[:, :, ::-1]
-            
             # Resize
             fr = cv2.resize(fr, (self.target_size, self.target_size))
             

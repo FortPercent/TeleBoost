@@ -35,47 +35,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def compute_joint_task_weights(advantages: torch.Tensor) -> torch.Tensor:
-    """Compute per-sample convex weights from multi-reward advantages.
-
-    Used when BGPO is layered on top of a joint reward (multiple reward
-    models). Each row of ``advantages`` is one sample's per-task advantage
-    vector; the returned weights pick the (lo, hi) endpoints that bracket
-    zero so that the convex combination is signed correctly.
-    """
-    if advantages.numel() == 0:
-        return torch.zeros_like(advantages)
-    if advantages.dim() != 2:
-        raise ValueError(f"advantages must be 2D, got shape {tuple(advantages.shape)}")
-
-    weights = torch.zeros_like(advantages)
-    for i in range(advantages.shape[0]):
-        a = advantages[i].detach().cpu().numpy().astype(np.float32)
-        n = int(a.shape[0])
-        if n == 0:
-            continue
-
-        if a.min() <= 0 <= a.max():
-            idx_lo, idx_hi = int(np.argmin(a)), int(np.argmax(a))
-            if np.isclose(a[idx_hi], a[idx_lo]):
-                c = np.ones(n, dtype=np.float32) / n
-            else:
-                t = -a[idx_lo] / (a[idx_hi] - a[idx_lo])
-                c = np.zeros(n, dtype=np.float32)
-                c[idx_lo] = 1.0 - t
-                c[idx_hi] = t
-        elif a.min() > 0:
-            c = np.zeros(n, dtype=np.float32)
-            c[int(np.argmin(a))] = 1.0
-        else:
-            c = np.zeros(n, dtype=np.float32)
-            c[int(np.argmax(a))] = 1.0
-
-        weights[i] = torch.from_numpy(c).to(device=advantages.device, dtype=advantages.dtype)
-
-    return weights
-
-
 def rerange_group_rewards(
     group_rewards: torch.Tensor,
     prior: float,
@@ -118,7 +77,34 @@ class BGPOMixin:
         return algorithm_cfg.get("bgpo", {}) or {}
 
     def _is_bgpo_enabled(self) -> bool:
-        return bool(self._get_bgpo_config().get("enable", False))
+        enabled = bool(self._get_bgpo_config().get("enable", False))
+        if enabled:
+            # Fail-loud guard: BGPO paper (arxiv 2511.18919) specifies
+            # single-scalar-reward optimization only.  The joint reward path in
+            # this codebase uses an in-house multi-reward aggregation
+            # (``compute_joint_task_weights`` in
+            # ``algorithms/multi_reward_aggregation.py``) that is **not** part
+            # of the BGPO paper and has not been independently validated.
+            # Stacking BGPO on top of the joint path therefore mixes a
+            # paper-faithful BGPO with an in-house multi-reward scheme, which
+            # is misleading at best and possibly incorrect.  Refuse the
+            # combination explicitly so that nobody silently trains a
+            # "BGPO + joint" run thinking it is BGPO-paper-validated.
+            reward_type = self.config.get("reward_model", {}).get("type", "single")
+            if reward_type == "joint":
+                raise ValueError(
+                    "Configuration not supported: algorithm.bgpo.enable=true "
+                    "with reward_model.type=joint. The BGPO paper "
+                    "(arxiv 2511.18919) specifies single-scalar-reward "
+                    "optimization only; combining BGPO with the joint reward "
+                    "path runs an in-house multi-reward aggregation "
+                    "(compute_joint_task_weights) that is not paper-validated. "
+                    "Either set algorithm.bgpo.enable=false (use joint without "
+                    "BGPO scaling/CRT) or set reward_model.type=single (use "
+                    "BGPO with a single scalar reward, the paper-supported "
+                    "configuration)."
+                )
+        return enabled
 
     def _get_prior_array(self, source_batch: DataProto) -> Optional[np.ndarray]:
         """Return one prior per prompt group (rollout_n samples per group)."""
@@ -344,6 +330,5 @@ class BGPOMixin:
 
 __all__ = [
     "BGPOMixin",
-    "compute_joint_task_weights",
     "rerange_group_rewards",
 ]

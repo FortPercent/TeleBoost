@@ -21,13 +21,15 @@ training falls back to baseline GRPO bit-for-bit.
 
 from recipe.dancegrpo.algorithms.bgpo import (
     BGPOMixin,
-    compute_joint_task_weights,
     rerange_group_rewards,
 )
 from recipe.dancegrpo.algorithms.joint import (
     JointRewardMixin,
     _JointRewardRunner,
     merge_worker_results,
+)
+from recipe.dancegrpo.algorithms.multi_reward_aggregation import (
+    compute_joint_task_weights,
 )
 from recipe.dancegrpo.algorithms.vipo import (
     VIPOMixin,
@@ -36,14 +38,15 @@ from recipe.dancegrpo.algorithms.vipo import (
 )
 
 __all__ = [
-    # BGPO
+    # BGPO (paper arxiv 2511.18919)
     "BGPOMixin",
-    "compute_joint_task_weights",
     "rerange_group_rewards",
     # Joint reward
     "JointRewardMixin",
     "_JointRewardRunner",
     "merge_worker_results",
+    # Multi-reward aggregation (in-house, NOT from BGPO paper)
+    "compute_joint_task_weights",
     # VIPO
     "VIPOMixin",
     "compute_batch_pixel_weight_maps",

@@ -98,19 +98,38 @@ class HPSRewardModel(BaseRewardModel):
         video_frames: torch.Tensor,
         caption: str
     ) -> float:
-        """
-        Compute HPS score for a video frame.
+        """Compute HPS score for a video frame.
 
-        Uses the first frame of the video for scoring.
+        Scores **only the first frame** of each video as a proxy for the
+        whole clip.
+
+        HPS-v2 (arxiv 2306.09341, Wu et al. 2023) is an *image-only*
+        preference model: trained on HPDv2's 798k image preference pairs
+        with a CLIP-ViT-H/14 backbone, the model has no notion of
+        temporal coherence.  A paper-faithful application to video would
+        be a per-frame mean (treat each frame as an independent image,
+        average the scores) — but at ``num_frames=49`` that is 49× the
+        CLIP forward cost per reward call, which dominates wall-clock for
+        diffusion rollout.
+
+        First-frame is chosen here as an N×-cheaper proxy that empirically
+        correlates with overall clip aesthetic / appearance quality
+        (diffusion videos are usually stylistically committed by frame 0).
+        The trade-off is that **HPS will not see late-clip degradation**
+        — motion blur, jitter, last-frame collapse, and any temporal
+        artifact that emerges after frame 0 are invisible to this reward
+        and will not push the policy to fix them.  If you observe such
+        late-frame collapse during training while ``train/rewards_hps``
+        stays high, switch to a per-frame-mean aggregation here.
 
         Args:
-            video_frames: Video tensor, shape (T, C, H, W). This is the layout
-                produced by ``split_video_frames(permute_to_tchw=True)`` and matches
-                the other reward models (see ``aesthetic.py``).
-            caption: Text caption to evaluate alignment with
+            video_frames: Video tensor, shape (T, C, H, W). This is the
+                layout produced by ``split_video_frames(permute_to_tchw=True)``
+                and matches the other reward models (see ``aesthetic.py``).
+            caption: Text caption to evaluate alignment with.
 
         Returns:
-            HPS score (higher = better alignment with human preferences)
+            HPS score (higher = better alignment with human preferences).
         """
         # Take first frame: (T, C, H, W) -> (C, H, W).
         frame = video_frames[0]

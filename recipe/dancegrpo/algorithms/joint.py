@@ -32,7 +32,7 @@ import torch
 
 from verl import DataProto
 
-from recipe.dancegrpo.algorithms.bgpo import compute_joint_task_weights
+from recipe.dancegrpo.algorithms.multi_reward_aggregation import compute_joint_task_weights
 
 logger = logging.getLogger(__name__)
 

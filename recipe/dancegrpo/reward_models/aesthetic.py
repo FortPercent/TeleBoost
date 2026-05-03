@@ -110,21 +110,38 @@ class AestheticRewardModel(BaseRewardModel):
         return model
     
     def compute_single_score(
-        self, 
-        video_frames: torch.Tensor, 
+        self,
+        video_frames: torch.Tensor,
         caption: str
     ) -> float:
-        """
-        Compute aesthetic score for a single video.
-        
-        Uses the first frame of the video for scoring.
-        
+        """Compute aesthetic score for a single video.
+
+        Scores **only the first frame** of each video as a proxy for the
+        whole clip.
+
+        The LAION ``improved-aesthetic-predictor`` head we use here is an
+        *image-only* regression on top of CLIP ViT-L/14 (trained on
+        per-image aesthetic ratings); it has no notion of temporal
+        coherence.  A paper-faithful application to video would be a
+        per-frame mean (treat each frame as an independent image,
+        average the scores) — but at ``num_frames=49`` that is 49× the
+        CLIP forward cost per reward call.
+
+        First-frame is chosen as an N×-cheaper proxy that empirically
+        correlates with overall clip aesthetic quality (diffusion videos
+        are usually stylistically committed by frame 0).  The trade-off:
+        **aesthetic will not see late-clip degradation** — motion blur,
+        last-frame collapse, and any aesthetic drift after frame 0 are
+        invisible to this reward.  If you observe such late-frame
+        collapse during training while ``train/rewards_aesthetic`` stays
+        high, switch to a per-frame-mean aggregation here.
+
         Args:
-            video_frames: Video tensor, shape (T, C, H, W)
-            caption: Text caption (unused for aesthetic scoring)
-            
+            video_frames: Video tensor, shape (T, C, H, W).
+            caption: Text caption (unused for aesthetic scoring).
+
         Returns:
-            Normalized aesthetic score
+            Normalized aesthetic score.
         """
         # Take first frame: (T, C, H, W) -> (C, H, W)
         frame = video_frames[0]
