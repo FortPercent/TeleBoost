@@ -484,13 +484,26 @@ class JointRewardMixin:
         reward_output.batch["rewards"] = (weight_matrix * torch.stack(per_task_rewards, dim=-1)).sum(dim=-1)
         reward_output.batch["advantages"] = (weight_matrix * adv_matrix).sum(dim=-1)
 
-        if self._is_bgpo_enabled():
-            reward_output = self._apply_bgpo_on_rewards(reward_output, source_batch, metrics)
-            if self._get_bgpo_config().get("use_rerange", False):
-                # Re-derive advantage with the same per-prompt grouping
-                # as above (post-rerange rewards).
-                rewards = reward_output.batch["rewards"].float()
-                reward_output.batch["advantages"] = per_prompt_zscore_advantage(rewards, num_repeat)
+        # Historical note: a BGPO post-rerange branch lived here that
+        # rewrote ``advantages`` from post-rerange rewards.  It is now
+        # unreachable from the joint path because
+        # ``BGPOMixin._is_bgpo_enabled`` raises ``ValueError`` when
+        # ``algorithm.bgpo.enable=true`` is combined with
+        # ``reward_model.type=joint`` (committed in b65f12c6).  The
+        # combination mixes paper-faithful BGPO (single-scalar reward,
+        # arxiv 2511.18919) with this in-house multi-reward
+        # aggregation (``compute_joint_task_weights`` in
+        # ``algorithms/multi_reward_aggregation.py``), and the BGPO
+        # paper does not specify how the two should compose.
+        #
+        # If you ever remove the ``_is_bgpo_enabled`` guard to allow
+        # the combination, this branch must also rebuild
+        # ``reward_output.batch["task_weights"]`` from the post-rerange
+        # per-task advantages — otherwise the metric
+        # ``train/task_weight_*`` (logged at the loop below) reads the
+        # pre-rerange weight matrix that no longer matches the
+        # ``advantages`` written into the batch (paper-vs-code review
+        # v2, §12, caveat 2: "task_weights stale after BGPO rerange").
 
         for idx, reward_key in enumerate(reward_keys):
             task_name = reward_key[:-8]
