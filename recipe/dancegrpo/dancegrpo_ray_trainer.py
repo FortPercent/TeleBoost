@@ -191,8 +191,59 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
                         # See DiffusionActorRolloutRefWorker.generate_sequences.
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
-                    new_batch.non_tensor_batch["uid"] = np.array(
-                        [str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object
+                    # Per-prompt group identifier.  Reference: verl-upstream
+                    # ``RayPPOTrainer.fit`` (``ray_trainer.py:1033``) writes
+                    # the uid before ``batch.repeat(n)`` and unions the
+                    # repeated batch into the rollout output, so each
+                    # sample carries its prompt's uid post-repeat:
+                    #
+                    #     batch.non_tensor_batch["uid"] = ...
+                    #     batch = batch.repeat(n, interleave=True)
+                    #     batch = batch.union(gen_batch_output)
+                    #
+                    # DanceGRPO's flow does not have the ``union`` step
+                    # (``new_batch`` and ``gen_batch_output`` stay
+                    # separate), so the previous code wrote uid to
+                    # ``new_batch`` (length = prompt batch, one fresh
+                    # UUID per prompt) but never propagated it to
+                    # ``gen_batch_output`` — the array was written and
+                    # immediately stranded.  Confirmed by
+                    # ``grep -rn 'non_tensor_batch\[.uid.\]' recipe/``
+                    # → zero readers.
+                    #
+                    # This rewrite attaches the uid directly to
+                    # ``gen_batch_output`` at the sample level: one
+                    # UUID per prompt, broadcast n_resp_per_prompt
+                    # times so each sample gets its own prompt's uid.
+                    # ``per_prompt_zscore_advantage`` (algorithms/
+                    # grpo_advantage.py) currently uses layout-based
+                    # reshape grouping rather than uid scatter (b65f12c6
+                    # / b3c97a62), so this uid is unused at present —
+                    # but it is now a *valid* group identifier, so any
+                    # future grouping helper that prefers uid scatter
+                    # (e.g. switching to verl-upstream
+                    # ``compute_grpo_outcome_advantage(index=uid)``,
+                    # which is the right move if ``_balance_batch`` is
+                    # ever called between rollout and advantage) can
+                    # consume it directly.
+                    n_resp = int(self.config.actor_rollout_ref.rollout.n)
+                    total = len(gen_batch_output.batch)
+                    if total % n_resp != 0:
+                        raise RuntimeError(
+                            f"gen_batch_output length ({total}) is not a "
+                            f"multiple of rollout.n ({n_resp}); cannot "
+                            f"derive prompt count for uid broadcast."
+                        )
+                    prompt_count = total // n_resp
+                    prompt_uids = np.array(
+                        [str(uuid.uuid4()) for _ in range(prompt_count)],
+                        dtype=object,
+                    )
+                    # ``np.repeat`` with axis=0 = interleave: each prompt's
+                    # n samples share its uid (matches the rollout's
+                    # ``DataProto.repeat(interleave=True)`` layout).
+                    gen_batch_output.non_tensor_batch["uid"] = np.repeat(
+                        prompt_uids, n_resp, axis=0
                     )
 
                     # validate
