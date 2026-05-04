@@ -40,7 +40,6 @@ actor_rollout_ref:
       grad_reweight_form: flow_grpo   # 'flow_grpo' (δ=1/dt) or 'dancegrpo' (δ=(1+η²(1-t)/(2t))/dt)
       ratio_norm_eps: 1e-6
       grad_reweight_eps: 1e-6     # also doubles as the t-floor for the dancegrpo form
-      grad_reweight_alpha: 1.0    # currently unused; reserved for future weighting experiments
   
   rollout:
     ulysses_sequence_parallel_size: 1.0
