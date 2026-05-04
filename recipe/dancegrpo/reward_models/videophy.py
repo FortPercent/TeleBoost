@@ -325,28 +325,78 @@ class VideophyRewardModel(BaseRewardModel):
         return score
     
     def _extract_entailment_score(
-        self, 
-        logits: torch.Tensor, 
-        input_ids: torch.Tensor
+        self,
+        logits: torch.Tensor,
+        input_ids: torch.Tensor,
     ) -> float:
-        """Extract Yes/No probability from logits."""
+        """Extract Yes/No probability from logits.
+
+        Paper: VideoPhy / VideoCon-Physics (arxiv 2406.03520).  The
+        canonical prompt ends with ``AI:`` and the model emits the
+        Yes/No token at the position right before the first padding
+        token (or at the last position when the sequence fills the
+        whole input window with no padding).
+
+        Implementation notes:
+
+        * The previous Python-loop version
+          ``for i in range(...): if pad: i = i - 1; break`` only worked
+          by coincidence — the assignment to ``i`` doesn't affect the
+          ``range`` iterator, and the immediate ``break`` happens to
+          carry the post-decrement value out of the loop.  The same
+          loop also silently mishandles two edge cases:
+
+            (1) first token is pad → ``i = -1`` and Python negative
+                indexing reads ``logits[0][-1]`` (last position) which
+                is the wrong token to use as the entailment site;
+            (2) ``input_ids[0]`` is empty → loop body never runs and
+                ``i`` is undefined → ``NameError`` on the next line.
+
+          This rewrite makes the intent explicit, drops the Python
+          loop, and turns both edge cases into a fail-loud error
+          rather than a silent miscalibration.
+        * For the canonical prompt this is byte-identical with the
+          previous behaviour (the first pad sits right after the
+          ``AI:`` so the entailment position is one before it).
+        """
         softmax = nn.Softmax(dim=2)
         logits = softmax(logits)
-        
+
         token_id_yes = self.tokenizer.encode("Yes", add_special_tokens=False)[0]
         token_id_no = self.tokenizer.encode("No", add_special_tokens=False)[0]
-        
-        # Find the position just before padding
-        for i in range(len(input_ids[0])):
-            if input_ids[0][i] == self.tokenizer.pad_token_id:
-                i = i - 1
-                break
-            elif i == len(input_ids[0]) - 1:
-                break
-        
-        # Compute probability of "Yes"
-        prob_yes = logits[0][i][token_id_yes]
-        prob_no = logits[0][i][token_id_no]
+
+        seq = input_ids[0]
+        if seq.numel() == 0:
+            raise RuntimeError(
+                "VideoPhy: input_ids[0] is empty — cannot locate the "
+                "entailment position. This indicates an upstream "
+                "tokenization / collation bug."
+            )
+
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            # Tokenizer has no pad token: the prompt fills the whole
+            # window without padding, so the entailment site is the
+            # final position.
+            pos = seq.shape[0] - 1
+        else:
+            pad_positions = (seq == pad_id).nonzero(as_tuple=True)[0]
+            if pad_positions.numel() == 0:
+                # No padding at all — entailment site is the last token.
+                pos = seq.shape[0] - 1
+            else:
+                # Position just before the first pad.
+                pos = int(pad_positions[0].item()) - 1
+                if pos < 0:
+                    raise RuntimeError(
+                        "VideoPhy: input_ids[0] starts with a pad token "
+                        "(first-token padding leaves no entailment "
+                        "position to extract). Check the prompt + "
+                        "tokenizer alignment."
+                    )
+
+        prob_yes = logits[0][pos][token_id_yes]
+        prob_no = logits[0][pos][token_id_no]
         score = (prob_yes / (prob_yes + prob_no)).item()
-        
+
         return score
