@@ -15,7 +15,7 @@ then compute advantages within that group.
 **Pre-fix bug.**  The local `compute_advantage` and `joint.py`'s
 per-task advantage code computed mean/std over the **whole batch**,
 not per prompt — see the historical TODO comment at
-`dancegrpo_ray_trainer.py:106` ("TODO: when batchsize not equal to
+`teleboost_ray_trainer.py:106` ("TODO: when batchsize not equal to
 1") which acknowledged the placeholder.  When ``prompt_batch_size *
 n_resp_per_prompt = whole batch`` (i.e. only one prompt per batch)
 the whole-batch z-score happens to coincide with the per-prompt one,
@@ -28,7 +28,7 @@ the policy gradient signal.
 **interleaved per-prompt order** — i.e. samples 0..n-1 belong to
 prompt_0, samples n..2n-1 belong to prompt_1, etc.  This is the
 contract of ``DataProto.repeat(num_repeat, interleave=True)`` in
-DanceGRPO's rollout path (see ``dancegrpo_ray_trainer.py`` rollout
+DanceGRPO's rollout path (see ``teleboost_ray_trainer.py`` rollout
 side; verl-upstream ``RayPPOTrainer._balance_batch`` is **not**
 called in DanceGRPO's ``fit()``, so contiguous prompt-grouping is
 preserved end-to-end).  If a future change re-introduces a

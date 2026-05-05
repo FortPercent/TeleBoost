@@ -36,6 +36,7 @@ from verl.utils.torch_functional import get_response_mask
 from wan.modules.vae import WanVAE
 
 from verl.workers.rollout.base import BaseRollout  # import-verl: verl is pip-installed
+from recipe.teleboost.algorithms.sigma_schedule import compute_sde_step
 import logging
 
 __all__ = ['DiffusionRollout']
@@ -109,6 +110,12 @@ class DiffusionRollout(BaseRollout):
         pixel_cfg = self.config.get("pixel_weight", {}) or {}
         self._pixel_enable = bool(pixel_cfg.get("enable", False))
         self._pixel_cfg = pixel_cfg
+
+        # ----- σ_t SDE form (DanceGRPO vs Flow-GRPO) ---------------------
+        # See ``recipe/teleboost/algorithms/sigma_schedule.py``.  Default
+        # ``"dancegrpo"`` keeps the existing constant-eta noise schedule
+        # byte-equivalent to the pre-registry implementation.
+        self._sigma_form = self.config.actor.get("sigma_form", "dancegrpo")
 
     def generate_sequences(self, prompts: DataProto) -> DataProto:
         torch.cuda.memory._set_allocator_settings(f"expandable_segments:{False}")
@@ -302,7 +309,7 @@ class DiffusionRollout(BaseRollout):
                 # Local import to keep the pixel-weight code path lazy -
                 # we don't want to force DINOv2/transformers imports on
                 # users who never enable VIPO.
-                from recipe.dancegrpo.pixel_weight_utils import (
+                from recipe.teleboost.pixel_weight_utils import (
                     compute_batch_pixel_weight_maps,
                 )
 
@@ -446,31 +453,34 @@ class DiffusionRollout(BaseRollout):
                 if in_window:
                     if return_prev_sample_mean:
                         next_latents, pred_original, log_prob, prev_sample_mean = self.wan_step(
-                            model_output, 
+                            model_output,
                             latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
+                            self.config.actor.eta,
                             sigma_schedule,
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True,
+                            i,
+                            prev_sample=None,
+                            grpo=True,
                             return_prev_sample_mean=True,
                         )
                         all_prev_sample_mean.append(prev_sample_mean)
                     else:
                         next_latents, pred_original, log_prob = self.wan_step(
-                            model_output, 
+                            model_output,
                             latents[0].to(torch.float32),  # (16, 7, 64, 64)
-                            self.config.actor.eta, 
+                            self.config.actor.eta,
                             sigma_schedule,
-                            i, 
-                            prev_sample=None, 
-                            grpo=True, 
-                            sde_solver=True,
+                            i,
+                            prev_sample=None,
+                            grpo=True,
                         )
                     all_log_probs.append(log_prob)
                     all_latents.append(next_latents.to(torch.float32))
                 else:
+                    # Outside the SDE window we want a deterministic (ODE
+                    # Euler) step.  Setting ``eta=0.0`` zeros both the
+                    # score-correction term *and* the Gaussian noise std
+                    # in either σ_t form, so the step degenerates cleanly
+                    # to ``latents + dsigma · model_output``.
                     next_latents, pred_original = self.wan_step(
                         model_output,
                         latents[0].to(torch.float32),
@@ -479,7 +489,6 @@ class DiffusionRollout(BaseRollout):
                         i,
                         prev_sample=None,
                         grpo=False,
-                        sde_solver=True,
                     )
                 
                 latents=[next_latents.to(torch.float32)]
@@ -503,28 +512,34 @@ class DiffusionRollout(BaseRollout):
         index: int,                  # current timestep index
         prev_sample: torch.Tensor,   # previous-step sample (for GRPO re-computation)
         grpo: bool,                  # True -> also return logprob
-        sde_solver: bool,            # use SDE solver
         return_prev_sample_mean: bool = False,
     ):
         """One Wan Flow-Matching sampling step, recast as an SDE solver for GRPO."""
-        
+
         sigma = sigmas[index]
-        dsigma = sigmas[index + 1] - sigma  # sigma delta
-        
-        # Deterministic update
-        prev_sample_mean = latents + dsigma * model_output
-        
-        # Predicted original sample
+        sigma_next = sigmas[index + 1]
+
+        # Predicted original sample (universal flow-matching geometry; used
+        # by callers and by the DanceGRPO score-correction inside the
+        # registry).
         pred_original_sample = latents - sigma * model_output
-        
-        delta_t = sigma - sigmas[index + 1]  # time delta
-        std_dev_t = eta * torch.sqrt(delta_t)  # SDE noise std
-        
-        if sde_solver:  # SDE solver (matches FLUX)
-            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)  # score estimate
-            log_term = -0.5 * eta**2 * score_estimate  # log-term correction
-            prev_sample_mean = prev_sample_mean + log_term * dsigma  # corrected mean
-        
+
+        # Dispatch to the σ_t form's SDE step (DanceGRPO constant-η or
+        # Flow-GRPO t-dependent).  ``std_dev_t`` is the effective Gaussian
+        # std for both noise injection and the log-prob density.  Pure
+        # ODE Euler is reached via ``eta=0.0`` (e.g. outside the SDE
+        # window above), which zeros both the score correction and the
+        # noise std in either form.
+        prev_sample_mean, std_dev_t, _sqrt_dt = compute_sde_step(
+            form=self._sigma_form,
+            model_output=model_output,
+            latents=latents,
+            eta=eta,
+            sigma=sigma,
+            sigma_next=sigma_next,
+            pred_original_sample=pred_original_sample,
+        )
+
         if grpo and prev_sample is None:
             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 

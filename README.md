@@ -78,7 +78,7 @@ checkpoint files).
 
 ### 2.2 Run a smoke
 
-The unified launcher `run_dancegrpo_smoke.sh` covers every algorithm variant
+The unified launcher `run_teleboost_smoke.sh` covers every algorithm variant
 via env vars — pick one and go:
 
 ```bash
@@ -89,7 +89,7 @@ WAN_VERSION=wan21 \
 WAN_VAE_PATH=/path/to/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth \
 REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
 TELEBOOST_METHOD=baseline \
-bash recipe/dancegrpo/run_dancegrpo_smoke.sh
+bash recipe/teleboost/run_teleboost_smoke.sh
 ```
 
 Switch algorithm via `TELEBOOST_METHOD`:
@@ -138,7 +138,7 @@ Example — 8-GPU sp=8 BGPO+VIPO with non-zero gradient variance:
 TELEBOOST_METHOD=bgpo_vipo  N_GPUS_PER_NODE=8  SP_SIZE=8 \
 SAMPLING_STEPS=10  INIT_SAME_NOISE=False  TOTAL_TRAINING_STEPS=10 \
 TRAIN_FILE=...  TEST_FILE=...  WAN_MODEL_PATH=...  REWARD_MODEL_PATH=... \
-bash recipe/dancegrpo/run_dancegrpo_smoke.sh
+bash recipe/teleboost/run_teleboost_smoke.sh
 ```
 
 ### 2.3 Production training
@@ -159,7 +159,7 @@ WAN_MODEL_PATH=/path/to/Wan2.2-T2V-A14B \
 WAN_VERSION=wan22 \
 WAN_VAE_PATH=/path/to/Wan2.2-T2V-A14B/Wan2.1_VAE.pth \
 REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
-bash recipe/dancegrpo/run_dancegrpo_smoke.sh
+bash recipe/teleboost/run_teleboost_smoke.sh
 ```
 
 
@@ -168,15 +168,15 @@ bash recipe/dancegrpo/run_dancegrpo_smoke.sh
 ## 3. Repository layout
 
 ```
-recipe/dancegrpo/                     Recipe (entry point + workers + scripts)
-├── main_dancegrpo.py                     Hydra entry; spawns Ray workers
-├── dancegrpo_ray_trainer.py              RayPPOTrainer subclass
+recipe/teleboost/                     Recipe (entry point + workers + scripts)
+├── main_teleboost.py                     Hydra entry; spawns Ray workers
+├── teleboost_ray_trainer.py              RayPPOTrainer subclass
 ├── dp_actor.py                           DataParallelPPOActor subclass
-├── dancegrpo_fsdp_worker.py              7 reward workers + DiffusionActorRolloutRefWorker subclass
+├── teleboost_fsdp_worker.py              7 reward workers + DiffusionActorRolloutRefWorker subclass
 ├── unified_reward_worker.py              plugin-style reward worker
 ├── reward_models/                        reward registry + 5 plugins + composite + dynamic_joint
-├── config/dancegrpo_trainer.yaml         Hydra config (grpo_guard, flow_grpo, joint.* fields)
-└── run_dancegrpo_smoke.sh                unified env-driven launcher (smoke + production)
+├── config/teleboost_trainer.yaml         Hydra config (grpo_guard, flow_grpo, joint.* fields)
+└── run_teleboost_smoke.sh                unified env-driven launcher (smoke + production)
 
 teleboost/                            TeleBoost-only extensions
 ├── models/transformers/wan.py            Wan Ulysses SP forward + helper patches
@@ -200,7 +200,7 @@ tests/special_distributed/            distributed regression tests (CP grad redu
 
 `teleboost/__init__.py` runs `teleboost.patches.apply()` at import time, so
 any process that does `import teleboost` (or imports anything under
-`recipe.dancegrpo.*`, which imports teleboost) ends up with the patches
+`recipe.teleboost.*`, which imports teleboost) ends up with the patches
 applied automatically.
 
 ---
@@ -222,11 +222,11 @@ applied automatically.
 python3 - <<'PY'
 import importlib
 mods = [
-    "recipe.dancegrpo.main_dancegrpo",
-    "recipe.dancegrpo.dancegrpo_ray_trainer",
-    "recipe.dancegrpo.dancegrpo_fsdp_worker",
-    "recipe.dancegrpo.dp_actor",
-    "recipe.dancegrpo.unified_reward_worker",
+    "recipe.teleboost.main_teleboost",
+    "recipe.teleboost.teleboost_ray_trainer",
+    "recipe.teleboost.teleboost_fsdp_worker",
+    "recipe.teleboost.dp_actor",
+    "recipe.teleboost.unified_reward_worker",
     "teleboost.workers.reward_manager.dancegrpo",
     "teleboost.workers.rollout.diffusion_rollout",
     "teleboost.workers.sharding_manager.diffusion",

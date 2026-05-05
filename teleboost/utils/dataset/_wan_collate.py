@@ -4,7 +4,7 @@ Pads variable-length tensors in a batch to the max length along dim=0,
 records the original lengths under ``{key}_orig_lengths``, and returns
 a flat dict of stacked tensors + non-tensors.
 
-Used by recipe/dancegrpo dataloader path. Injected into
+Used by recipe/teleboost dataloader path. Injected into
 verl.utils.dataset.rl_dataset by teleboost.patches at startup so that
 recipe code's ``from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function``
 keeps working unchanged.

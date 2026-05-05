@@ -124,16 +124,12 @@ overrides=(
   "algorithm.bgpo.enable=${enable_bgpo}"
   "algorithm.bgpo.use_rerange=${use_rerange}"
   "algorithm.bgpo.append_rerange_samples=False"
-  "algorithm.bgpo.rerange_method=binary"
-  "algorithm.bgpo.rerange_a=${BGPO_RERANGE_A:-50.0}"
-  "algorithm.bgpo.rerange_temperature=${BGPO_RERANGE_TEMPERATURE:-5.0}"
-  "algorithm.bgpo.adaptive_weight_method=${BGPO_ADAPTIVE_WEIGHT_METHOD:-bayes}"
-  "algorithm.bgpo.adaptive_weight_discriminate_method=${BGPO_DISCRIMINATE_METHOD:-normal}"
-  "algorithm.bgpo.adaptive_weight_weight_method=${BGPO_WEIGHT_METHOD:-std_pos}"
-  "algorithm.bgpo.adaptive_weight_fix_weight=${BGPO_FIX_WEIGHT:-0.0}"
-  "algorithm.bgpo.prior_var=${BGPO_PRIOR_VAR:-1.0}"
-  "algorithm.bgpo.bayes_weight_range=[${BGPO_BAYES_WEIGHT_MIN:-0.5},${BGPO_BAYES_WEIGHT_MAX:-1.5}]"
-  "algorithm.bgpo.regularization_term_alpha=${BGPO_ALPHA:-1.0}"
+  # CRT (paper Eq. 4): R̃ = [λ·(R − R_prior) + 𝟙{R > R_prior}] · exp(R)
+  "algorithm.bgpo.lambda_contrast=${BGPO_LAMBDA_CONTRAST:-1.0}"
+  # RAS (paper Eq. 2): w = 1 + α·[2σ(k·(R̄ − R_prior)) − 1]
+  "algorithm.bgpo.adaptive_weight_method=${BGPO_ADAPTIVE_WEIGHT_METHOD:-paper}"
+  "algorithm.bgpo.k_sharpness=${BGPO_K_SHARPNESS:-1.0}"
+  "algorithm.bgpo.regularization_term_alpha=${BGPO_ALPHA:-0.5}"
   "algorithm.bgpo.min_adv_scale=${BGPO_MIN_ADV_SCALE:-0.01}"
   "algorithm.bgpo.max_adv_scale=${BGPO_MAX_ADV_SCALE:-10.0}"
   "algorithm.bgpo.exp_clamp=${BGPO_EXP_CLAMP:-30.0}"
@@ -181,7 +177,10 @@ overrides=(
   "actor_rollout_ref.actor.optim.lr=${ACTOR_LR:-2e-6}"
   "actor_rollout_ref.actor.optim.lr_warmup_steps=0"
   "actor_rollout_ref.actor.optim.weight_decay=0.1"
-  "actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE:-2}"
+  # Default to ``n_gpus`` so verl's world-size normalization
+  # (``ppo_mini_batch_size //= world_size``) doesn't floor to 0.
+  # Override via ``PPO_MINI_BATCH_SIZE`` for non-default sizing.
+  "actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE:-${n_gpus}}"
   "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1"
   "actor_rollout_ref.actor.fsdp_config.param_offload=${FSDP_OFFLOAD:-True}"
   "actor_rollout_ref.actor.fsdp_config.optimizer_offload=${FSDP_OFFLOAD:-True}"
@@ -240,4 +239,4 @@ else
   )
 fi
 
-HYDRA_FULL_ERROR=1 python3 -m recipe.dancegrpo.main_dancegrpo "${overrides[@]}"
+HYDRA_FULL_ERROR=1 python3 -m recipe.teleboost.main_teleboost "${overrides[@]}"

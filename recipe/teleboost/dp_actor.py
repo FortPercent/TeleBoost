@@ -1,3 +1,4 @@
+import functools
 import logging
 import math
 import os
@@ -10,11 +11,12 @@ from verl.utils.device import get_device_id
 from verl.utils.py_functional import append_to_dict
 from verl.workers.actor import DataParallelPPOActor
 
-from recipe.dancegrpo.algorithms.grpo_guard import (
+from recipe.teleboost.algorithms.grpo_guard import (
     GRAD_REWEIGHT_FORMS,
     compute_grad_reweight_delta,
     compute_ratio_norm_bias,
 )
+from recipe.teleboost.algorithms.sigma_schedule import compute_sde_step
 
 __all__ = ["DiffusionDataParallelPPOActor"]
 
@@ -61,6 +63,16 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
 
     def _pixel_enabled(self) -> bool:
         return bool(self._pixel_cfg().get("enable", False))
+
+    @functools.cached_property
+    def _sigma_form(self) -> str:
+        """SDE σ_t form (cached at first access).
+
+        Mirrors ``DiffusionRollout._sigma_form`` so the rollout and the
+        actor's own ``wan_step`` agree on the σ_t convention.  See
+        ``algorithms/sigma_schedule.py``.
+        """
+        return self.config.get("sigma_form", "dancegrpo")
 
     @staticmethod
     def _build_perms(timesteps: torch.Tensor, shuffle: bool = True) -> torch.Tensor:
@@ -500,7 +512,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                 i,
                 prev_sample=pre_latents,
                 grpo=True,
-                sde_solver=True,
                 return_stats=True,
             )
             return log_prob, prev_sample_mean, std_dev_t, sqrt_dt
@@ -513,7 +524,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             i,
             prev_sample=pre_latents,
             grpo=True,
-            sde_solver=True,
         )
 
         return log_prob
@@ -527,22 +537,28 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         index: int,
         prev_sample: torch.Tensor,
         grpo: bool,
-        sde_solver: bool,
         return_stats: bool = False,
     ):
         """One Wan Flow-Matching sampling step, recast as an SDE solver for GRPO."""
         sigma = sigmas[index]
-        dsigma = sigmas[index + 1] - sigma
-        prev_sample_mean = latents + dsigma * model_output
+        sigma_next = sigmas[index + 1]
         pred_original_sample = latents - sigma * model_output
 
-        delta_t = sigma - sigmas[index + 1]
-        std_dev_t = eta * torch.sqrt(delta_t)
-
-        if sde_solver:
-            score_estimate = -(latents - pred_original_sample * (1 - sigma)) / (sigma**2)
-            log_term = -0.5 * eta**2 * score_estimate
-            prev_sample_mean = prev_sample_mean + log_term * dsigma
+        # Dispatch to σ_t form's SDE step (DanceGRPO / Flow-GRPO).  The
+        # returned ``std_dev_t`` and ``sqrt_dt`` keep the contract the
+        # GRPO-Guard RatioNorm path expects:
+        #   sigma_t = std_dev_t / sqrt_dt
+        # which equals η for DanceGRPO form and η·√(t/(1−t)) for
+        # Flow-GRPO form (see ``algorithms/sigma_schedule.py``).
+        prev_sample_mean, std_dev_t, sqrt_dt = compute_sde_step(
+            form=self._sigma_form,
+            model_output=model_output,
+            latents=latents,
+            eta=eta,
+            sigma=sigma,
+            sigma_next=sigma_next,
+            pred_original_sample=pred_original_sample,
+        )
 
         if grpo and prev_sample is None:
             prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
@@ -571,11 +587,9 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             else:
                 log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
             if return_stats:
-                sqrt_dt = torch.sqrt(delta_t)
                 return prev_sample, pred_original_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
             return prev_sample, pred_original_sample, log_prob
 
         if return_stats:
-            sqrt_dt = torch.sqrt(delta_t)
             return prev_sample_mean, pred_original_sample, prev_sample_mean, std_dev_t, sqrt_dt
         return prev_sample_mean, pred_original_sample

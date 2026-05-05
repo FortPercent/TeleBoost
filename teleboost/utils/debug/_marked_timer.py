@@ -2,7 +2,7 @@
 
 Upstream verl v0.4.0 doesn't ship `verl.utils.debug.marked_timer`; it was
 introduced in a later upstream release as a unified API replacing the older
-`_timer` context manager. dancegrpo_ray_trainer.py uses it. We backport the
+`_timer` context manager. teleboost_ray_trainer.py uses it. We backport the
 simple non-NVTX variant here and patch it into `verl.utils.debug` at import
 time via teleboost.patches.
 """

@@ -1,11 +1,36 @@
-"""VIPO: pixel-weighted dense advantage broadcast.
+"""VIPO: Visual Preference Policy Optimization for visual generation.
+
+Paper: arxiv 2511.18719 — "Seeing What Matters: Visual Preference
+Policy Optimization for Visual Generation".
+
+Paper-faithful pieces
+---------------------
+* DINOv2 feature extraction → mean-centered PCA → per-pixel semantic
+  importance map (paper §3 "allocation map ``M(p)``").
+* Dense advantage broadcast: ``A^p = M(p) · A`` (paper Eq. equivalent —
+  the spatially-resolved advantage is the allocation map times the
+  scalar group advantage).  Implemented in
+  :meth:`VIPOMixin._apply_vipo_broadcast` and consumed by the actor's
+  per-pixel policy loss.
+
+In-house design choices (NOT from paper)
+----------------------------------------
+* ``pca_method="weighted"`` (variance-weighted reverse-normalized sum
+  of top-3 PCs) is one of three locally-tested pooling schemes; the
+  paper does not specify a single PCA scheme.  The other two
+  (``"first_pc"``, ``"average"``) are kept for ablation parity with
+  reference implementations.
+* The reverse-mapping ``(max − x) / (max − min)`` over PC values, the
+  default Gaussian σ = 1.0 smoothing, and the bilinear resize to
+  latent resolution are convention-driven; the paper does not pin
+  them.  They are documented as in-house choices, not paper claims.
 
 Pipeline
 --------
 1. The diffusion rollout decodes generated videos to ``(B, C, T, H, W)``.
 2. :func:`compute_batch_pixel_weight_maps` runs DINOv2 on each frame and
-   collapses patch features into a per-pixel "semantic importance" map at
-   the latent resolution ``(B, T_lat, H_lat, W_lat)``.
+   collapses patch features into a per-pixel allocation map at the
+   latent resolution ``(B, T_lat, H_lat, W_lat)``.
 3. The trainer's :meth:`VIPOMixin._apply_vipo_broadcast` multiplies the
    scalar GRPO advantage by that map, producing a dense advantage that
    the actor uses to weight the per-pixel policy loss.
@@ -21,7 +46,7 @@ Design notes
 * All public entry points accept ``videos`` in shape ``(B, C, T, H, W)``
   (channels-first, batch-first). A ``ValueError`` is raised otherwise.
 * ``pca_method`` controls how the top-3 principal components are folded
-  into a scalar weight per patch:
+  into a scalar weight per patch (in-house):
     - ``"weighted"``  : variance-weighted sum of reverse-normalized PCs
       (default; preserves smooth weighting)
     - ``"first_pc"``  : negated first PC only (matches several reference

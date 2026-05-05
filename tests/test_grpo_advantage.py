@@ -14,7 +14,7 @@ import math
 import pytest
 import torch
 
-from recipe.dancegrpo.algorithms.grpo_advantage import per_prompt_zscore_advantage
+from recipe.teleboost.algorithms.grpo_advantage import per_prompt_zscore_advantage
 
 
 def test_single_prompt_matches_whole_batch_zscore():

@@ -1,6 +1,6 @@
 """Test uid broadcast logic (fix for C9).
 
-Mirrors the broadcast that ``dancegrpo_ray_trainer.fit`` does on
+Mirrors the broadcast that ``teleboost_ray_trainer.fit`` does on
 ``gen_batch_output.non_tensor_batch["uid"]``: generate one fresh UUID
 per prompt, then ``np.repeat(uids, n_resp, axis=0)`` so each sample
 in the same prompt's n_resp rollouts shares the prompt's uid.
@@ -13,7 +13,7 @@ import pytest
 
 
 def _broadcast_prompt_uids(prompt_uids: np.ndarray, n_resp: int) -> np.ndarray:
-    """Same call dancegrpo_ray_trainer.fit makes."""
+    """Same call teleboost_ray_trainer.fit makes."""
     return np.repeat(prompt_uids, n_resp, axis=0)
 
 

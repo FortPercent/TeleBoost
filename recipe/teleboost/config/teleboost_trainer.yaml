@@ -28,7 +28,16 @@ actor_rollout_ref:
     adv_clip_max: 5.0
     eta: 0.3
     max_grad_norm: 1.0
-    
+
+    # SDE σ_t form (DanceGRPO arxiv 2505.07818 vs Flow-GRPO arxiv 2505.05470).
+    # ``dancegrpo`` uses constant-η noise (current upstream behaviour);
+    # ``flow_grpo`` uses η·√(t/(1−t)) per Flow-GRPO upstream
+    # ``sd3_sde_with_logprob.py``.  See ``algorithms/sigma_schedule.py``
+    # for the registry of SDE-step formulas.  Pairs with
+    # ``grpo_guard.grad_reweight_form`` below — both registries share the
+    # same key set so the loss-side and SDE-side σ_t conventions match.
+    sigma_form: dancegrpo
+
     # GRPO-Guard (paper arxiv 2510.22319).  RatioNorm and grad-reweight are
     # exposed as separable levers per the paper's §4.3 ablation
     # (Mean-revised / RatioNorm / GRPO-Guard combined).  See
@@ -56,10 +65,14 @@ actor_rollout_ref:
   shift: 8.0
   timestep_fraction: 0.6
   init_same_noise: True
-  
-  # Tokenizer path (relative to model path)
-  tokenizer_path: google/umt5-xxl
-  
+
+  # Tokenizer subpath, relative to ``actor_rollout_ref.model.path``.
+  # Distinct from verl's ``actor_rollout_ref.model.tokenizer_path`` (which
+  # is a full HF tokenizer path, defaulting to ``null`` in
+  # ``hf_model.yaml``); keeping this at recipe level under a different
+  # key prevents verl's null from clobbering us.
+  tokenizer_subpath: google/umt5-xxl
+
   # VAE configuration
   # vae_stride: Spatial/temporal compression ratio [temporal, height, width]
   vae_stride: [4, 8, 8]
@@ -67,11 +80,19 @@ actor_rollout_ref:
   latent_channels: 16
 
   pixel_weight:
+    # VIPO (paper arxiv 2511.18719).  Per-pixel allocation map M(p)
+    # derived from DINOv2 PCA; trainer multiplies the scalar advantage by
+    # M(p) to form a dense advantage A^p = M(p) · A.  See
+    # ``algorithms/vipo.py`` for in-house design choices (pca_method,
+    # sigma).
     enable: false
     model_path: "facebook/dinov2-large"
-    pca_method: weighted
-    sigma: 1.0
-    assert_latent_5d: true
+    pca_method: weighted   # weighted | first_pc | average  (in-house pooling)
+    sigma: 1.0             # in-house Gaussian smoothing kernel σ
+    # In-house guard: dense KL loss with VIPO is implemented and tested,
+    # but kept behind an explicit opt-in to surface accidental
+    # combinations (the wrong combination silently mixes scalar KL with
+    # dense advantage and hurts training).
     kl_loss_compatible: false
 
   # if fast flow-grpo
@@ -307,49 +328,48 @@ reward_model:
 use_rm: True # use_reward_model
 
 # ============================================================================
-# BGPO: Bayesian-Prior Group Optimization
+# BGPO: Bayesian-Prior Group Optimization (paper arxiv 2511.18919)
 # ----------------------------------------------------------------------------
-# Two branches:
-#   CRT (use_rerange)        : rearranges per-sample rewards before advantage
-#                              computation, using a prior-based sign + sigmoid.
-#   RAS (adaptive_weight_*)  : scales the scalar advantage with a per-group
-#                              weight computed from posterior statistics.
-# Both branches share the `enable` flag.  When `enable: false`, BGPO is a
-# no-op and the trainer runs the original baseline path.
+# Two branches share the `enable` flag:
+#   CRT (use_rerange)        — paper Eq. 4 reward rearrangement:
+#       R̃ = [λ·(R − R_prior) + 𝟙{R > R_prior}] · exp(R)
+#   RAS (adaptive_weight_*)  — paper Eq. 2 adaptive group weight:
+#       w_g = 1 + α · [2σ(k·(R̄_g − R_prior)) − 1]
+#       (applied to the advantage as in paper Eq. 3)
+# When `enable: false`, BGPO is a no-op and the trainer runs the original
+# baseline path bit-for-bit.
+#
+# 2026-05 audit removed three non-paper-faithful modes:
+#   * `rerange_method=binary`         — sigmoid-weighted reward (NOT Eq. 4)
+#   * `adaptive_weight_method=bayes`  — closed-form Bayesian posterior CDF
+#   * `adaptive_weight_method=cvpr`   — in-house std-based heuristic ablations
+# Their config keys (rerange_method, rerange_temperature, prior_var,
+# bayes_weight_range, adaptive_weight_*_method, adaptive_weight_fix_weight,
+# use_std_runningmean, neg_base, scale_neg) are no longer read.
 # ============================================================================
 algorithm:
   bgpo:
     enable: false
 
-    # --- CRT: reward rearrangement --------------------------------------
+    # --- CRT: reward rearrangement (paper Eq. 4) -----------------------
     use_rerange: false
-    rerange_method: binary         # currently only "binary"
-    rerange_a: 50.0                # slope term in the rerange formula
-    rerange_temperature: 5.0       # temperature in sigmoid; must be > 0
+    lambda_contrast: 1.0           # λ — slope on the (R − R_prior) term
     # When true, reward-only copies of the batch are appended with reranged
     # rewards. Keep this disabled unless the extra memory cost is intended.
     append_rerange_samples: false
 
-    # --- RAS: adaptive advantage scaling --------------------------------
-    adaptive_weight_method: bayes              # no | bayes | random | cvpr
-    adaptive_weight_discriminate_method: normal  # normal | reverse
-    adaptive_weight_weight_method: std_pos       # fix | std_pos | std_neg | random
-    adaptive_weight_fix_weight: 0.0
+    # --- RAS: adaptive advantage scaling (paper Eq. 2) -----------------
+    adaptive_weight_method: paper  # paper | no
+    k_sharpness: 1.0               # k — sigmoid sharpness on (R̄ − R_prior)
 
-    # bayes mode
-    prior_var: 1.0
-    bayes_weight_range: [0.5, 1.5]
-
-    # cvpr std mode
-    use_std_runningmean: false
-    neg_base: 1.005
-    scale_neg: 0.01
-
-    # Loss coupling with adaptive weight:
-    # `advantage *= clamp(1 + alpha * w, min_adv_scale, max_adv_scale)`.
-    regularization_term_alpha: 1.0
+    # Loss coupling with adaptive weight (paper Eq. 3 applied to advantage):
+    # `advantage *= clamp(1 + α · w, min_adv_scale, max_adv_scale)`.
+    # α is the paper's α (Table 3 recommends 0.5).  The clamp range is an
+    # in-house safety net; the paper's natural range is [1−α, 1+α].
+    regularization_term_alpha: 0.5
     min_adv_scale: 0.01
     max_adv_scale: 10.0
 
-    # Numerical-stability clamp for `exp(-r/T)` in CRT.
+    # Numerical clamp on the exponent in CRT exp(R) — paper has no clamp
+    # but rewards (e.g. HPS-v2) can exceed fp32 exp range without it.
     exp_clamp: 30.0

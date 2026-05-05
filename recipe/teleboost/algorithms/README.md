@@ -8,6 +8,7 @@
 | joint reward| [`joint.py`](joint.py)                | `reward_model.type=joint`                         | multi-head joint reward orchestration                               |
 | multi-reward agg | [`multi_reward_aggregation.py`](multi_reward_aggregation.py) | (always on under `joint`)        | in-house convex zero-bracket weights (NOT from BGPO paper)         |
 | GRPO-Guard  | [`grpo_guard.py`](grpo_guard.py)      | `actor_rollout_ref.actor.grpo_guard.enable=true` (+ `ratio_norm` / `grad_reweight` separable per paper §4.3) | flow-matching ratio-norm (Eq. 8) + grad-reweight δ (Eq. 12, ``flow_grpo`` / ``dancegrpo`` forms) — paper arxiv 2510.22319 |
+| σ_t schedule| [`sigma_schedule.py`](sigma_schedule.py) | `actor_rollout_ref.actor.sigma_form=dancegrpo\|flow_grpo` | SDE-step σ_t formula registry: DanceGRPO constant-η (arxiv 2505.07818) vs Flow-GRPO η·√(t/(1−t)) (arxiv 2505.05470). Pairs with ``grpo_guard.grad_reweight_form`` (same key set). |
 | flow-grpo   | (in `dp_actor.py` / `teleboost/workers/rollout/diffusion_rollout.py`) | `actor_rollout_ref.flow_grpo.enable=true`         | SDE-window subsampling for fast flow-grpo — paper arxiv 2505.05470  |
 
 ## Layout convention
@@ -30,6 +31,6 @@ Each algorithm module exposes:
    hooks. Use the same structure as `bgpo.py` / `vipo.py`.
 3. Re-export both helpers and the mixin from `algorithms/__init__.py`.
 4. Add a row to the table above.
-5. Wire the trainer to inherit the mixin (in `dancegrpo_ray_trainer.py`).
-6. Add an entry in `run_dancegrpo_smoke.sh` so the smoke launcher exposes
+5. Wire the trainer to inherit the mixin (in `teleboost_ray_trainer.py`).
+6. Add an entry in `run_teleboost_smoke.sh` so the smoke launcher exposes
    `TELEBOOST_METHOD=<name>`.

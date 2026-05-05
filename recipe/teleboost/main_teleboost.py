@@ -24,7 +24,7 @@ from pprint import pprint
 from verl.trainer.ppo.reward import get_custom_reward_fn
 from verl.utils.fs import copy_to_local
 
-from .dancegrpo_ray_trainer import RayDanceGRPOTrainer
+from .teleboost_ray_trainer import RayDanceGRPOTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -38,49 +38,48 @@ RAY_ENV_VARS = {
 
 
 def _init_ray(config: DictConfig) -> None:
-    """
-    Initialize Ray runtime if not already initialized.
-    
-    Args:
-        config: Configuration with ray_init settings
+    """Initialize Ray runtime if not already initialized.
+
+    verl 0.4.0 (which we pin in ``requirements-verl.txt``) places
+    ``num_cpus`` at ``config.ray_init.num_cpus``.  Note that newer
+    verl (≥0.6) moves this to ``ray_kwargs.ray_init.num_cpus``; do
+    not "fix" this access if a future bump changes the path —
+    update both here and the recipe yaml together.
     """
     if ray.is_initialized():
         logger.info("Ray already initialized, skipping")
         return
-    
+
+    num_cpus = config.ray_init.num_cpus
     ray.init(
         runtime_env={"env_vars": RAY_ENV_VARS},
-        num_cpus=config.ray_init.num_cpus,
+        num_cpus=num_cpus,
     )
-    logger.info(f"Ray initialized with {config.ray_init.num_cpus} CPUs")
+    logger.info(f"Ray initialized with num_cpus={num_cpus}")
 
 
 def _build_tokenizer_and_processor(
-    local_path: str, 
-    config: Optional[DictConfig] = None
+    local_path: str,
+    actor_rollout_ref_config: DictConfig,
 ) -> Tuple[Any, Any]:
-    """
-    Build tokenizer and processor for the model.
-    
-    Args:
-        local_path: Local path to the model
-        config: Optional config for custom tokenizer path
-        
-    Returns:
-        Tuple of (tokenizer, processor)
-        
+    """Build tokenizer and processor for the Wan model.
+
+    Reads ``actor_rollout_ref.tokenizer_subpath`` (default
+    ``google/umt5-xxl``) and joins it with ``local_path`` (the downloaded
+    Wan model directory).  This is **not** verl's
+    ``actor_rollout_ref.model.tokenizer_path`` — that key is a full HF
+    tokenizer path and defaults to null in ``hf_model.yaml``.  We keep
+    the two keys separate so verl's default cannot collide with the
+    recipe-level subpath.
+
     Raises:
-        RuntimeError: If tokenizer loading fails
+        RuntimeError: If tokenizer loading fails.
     """
     from verl.utils import hf_processor, hf_tokenizer
 
-    # Allow configurable tokenizer path with sensible default
-    tokenizer_subpath = "google/umt5-xxl"
-    if config is not None:
-        tokenizer_subpath = config.get("tokenizer_path", tokenizer_subpath)
-    
+    tokenizer_subpath = actor_rollout_ref_config.get("tokenizer_subpath", "google/umt5-xxl")
     tokenizer_path = os.path.join(local_path, tokenizer_subpath)
-    
+
     try:
         tokenizer = hf_tokenizer(tokenizer_path)
         processor = hf_processor(local_path, use_fast=True)
@@ -114,7 +113,7 @@ def _resolve_actor_worker_and_group(config: DictConfig) -> Tuple[type, type]:
 
     if strategy == "fsdp":
         from verl.single_controller.ray import RayWorkerGroup
-        from .dancegrpo_fsdp_worker import DiffusionActorRolloutRefWorker
+        from .teleboost_fsdp_worker import DiffusionActorRolloutRefWorker
         return RayWorkerGroup, DiffusionActorRolloutRefWorker
 
     if strategy == "megatron":
@@ -224,7 +223,7 @@ def _register_reward_workers(
         logger.info(f"Registered {role} with worker {worker_cls.__name__}")
     
     if strategy == "fsdp":
-        from .dancegrpo_fsdp_worker import RewardModelWorker
+        from .teleboost_fsdp_worker import RewardModelWorker
         register_role(Role.RewardModel, RewardModelWorker)
         
     elif strategy == "megatron":
@@ -236,7 +235,7 @@ def _register_reward_workers(
         model_name = config.reward_model.get("model_name", rm_type)
         
         if model_name == "qwen" or rm_type == "qwen":
-            from .dancegrpo_fsdp_worker import QwenRewardModelWorker
+            from .teleboost_fsdp_worker import QwenRewardModelWorker
             register_role(Role.RewardModel, QwenRewardModelWorker)
             logger.info("Using QwenRewardModelWorker for vLLM-based inference")
             
@@ -304,10 +303,11 @@ class TaskRunner:
                 f"Failed to download model from {config.actor_rollout_ref.model.path}: {e}"
             )
 
-        # Build tokenizer and processor
+        # Build tokenizer and processor (uses ``tokenizer_subpath`` from
+        # the recipe-level ``actor_rollout_ref`` config — see docstring).
         tokenizer, processor = _build_tokenizer_and_processor(
-            local_path, 
-            config.actor_rollout_ref.model
+            local_path,
+            config.actor_rollout_ref,
         )
 
         # Resolve worker classes
@@ -361,7 +361,7 @@ class TaskRunner:
         trainer.fit()
 
 
-@hydra.main(config_path="config", config_name="dancegrpo_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="teleboost_trainer", version_base=None)
 def main(config: DictConfig) -> None:
     """
     Main entry point for Dance-GRPO training.

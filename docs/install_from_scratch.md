@@ -1,7 +1,7 @@
 # Install from scratch
 
 End-to-end recipe for setting up a fresh Linux GPU host (no pre-built env, no
-PVC) to run a 4-GPU smoke through `recipe/dancegrpo/run_dancegrpo_*_smoke.sh`.
+PVC) to run a 4-GPU smoke through `recipe/teleboost/run_dancegrpo_*_smoke.sh`.
 Targets Python 3.10 + CUDA 12.4 + 4 × H800 80 GB (or H100). Adjust if your
 hardware differs.
 
@@ -166,7 +166,7 @@ it, CFG collapses to `(1+scale) * cond` and reward variance vanishes
 
 ## 6. Smoke
 
-Edit the paths at the top of `recipe/dancegrpo/run_dancegrpo_*_smoke.sh` (or
+Edit the paths at the top of `recipe/teleboost/run_dancegrpo_*_smoke.sh` (or
 override via `TRAIN_FILE` / `TEST_FILE` / `CKPTS_DIR` env vars), then:
 
 ```bash
@@ -174,16 +174,16 @@ source ~/.venvs/teleboost-py310/bin/activate
 cd /path/to/TeleBoost
 
 # 4-GPU 1.3B + HPSv2 (smallest)
-bash recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke.sh
+bash recipe/teleboost/run_dancegrpo_1p3B_4gpu_smoke.sh
 
 # 4-GPU 14B Wan2.2 + HPSv2
-bash recipe/dancegrpo/run_dancegrpo_single_4gpu_smoke.sh
+bash recipe/teleboost/run_dancegrpo_single_4gpu_smoke.sh
 
 # 4-GPU sp_size=2 (exercises the Wan Ulysses SP > 1 patches)
-bash recipe/dancegrpo/run_dancegrpo_single_4gpu_smoke_sp2.sh
+bash recipe/teleboost/run_dancegrpo_single_4gpu_smoke_sp2.sh
 
 # 8-GPU sp_size=8
-bash recipe/dancegrpo/run_dancegrpo_single_8gpu_smoke_sp8.sh
+bash recipe/teleboost/run_dancegrpo_single_8gpu_smoke_sp8.sh
 ```
 
 Smoke parameters: `n_gpus=4 (or 8), total_steps=2, train_bsz=2 (or 4 at sp=8),
@@ -201,7 +201,7 @@ python -c "import torch, vllm, flash_attn, transformers; print(torch.__version__
 # expected: 2.6.0+cu124  0.8.4  2.7.4.post1  4.57.1
 
 # 7.2 reward registry has all 5 entries
-python -c "from recipe.dancegrpo.reward_models import RewardRegistry; print(RewardRegistry.list_available())"
+python -c "from recipe.teleboost.reward_models import RewardRegistry; print(RewardRegistry.list_available())"
 # expected: ['aesthetic', 'raft', 'videoclip', 'videophy', 'hps']
 
 # 7.3 wan modules import
@@ -213,11 +213,11 @@ python -c "import torch; print([torch.cuda.get_device_name(i) for i in range(tor
 # 7.5 INSTALL.md 8-module import smoke (must print 8/8 OK)
 python3 - <<'PY'
 mods = [
-    "recipe.dancegrpo.main_dancegrpo",
-    "recipe.dancegrpo.dancegrpo_ray_trainer",
-    "recipe.dancegrpo.dancegrpo_fsdp_worker",
-    "recipe.dancegrpo.dp_actor",
-    "recipe.dancegrpo.unified_reward_worker",
+    "recipe.teleboost.main_teleboost",
+    "recipe.teleboost.teleboost_ray_trainer",
+    "recipe.teleboost.teleboost_fsdp_worker",
+    "recipe.teleboost.dp_actor",
+    "recipe.teleboost.unified_reward_worker",
     "teleboost.workers.reward_manager.dancegrpo",
     "teleboost.workers.rollout.diffusion_rollout",
     "teleboost.workers.sharding_manager.diffusion",

@@ -32,8 +32,8 @@ import torch
 
 from verl import DataProto
 
-from recipe.dancegrpo.algorithms.grpo_advantage import per_prompt_zscore_advantage
-from recipe.dancegrpo.algorithms.multi_reward_aggregation import compute_joint_task_weights
+from recipe.teleboost.algorithms.grpo_advantage import per_prompt_zscore_advantage
+from recipe.teleboost.algorithms.multi_reward_aggregation import compute_joint_task_weights
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class JointRewardMixin:
         )
 
         if use_driver_side_runner and joint_config and joint_config.get("models"):
-            from recipe.dancegrpo.reward_models.dynamic_joint import (
+            from recipe.teleboost.reward_models.dynamic_joint import (
                 DynamicJointRewardRunner,
                 JointRewardConfig,
             )
@@ -236,7 +236,7 @@ class JointRewardMixin:
     ) -> DataProto:
         """Joint rewards via the unified ``JointRewardModelWorker`` worker group.
 
-        The worker (registered as ``Role.RewardModel`` in ``main_dancegrpo.py``)
+        The worker (registered as ``Role.RewardModel`` in ``main_teleboost.py``)
         owns all per-task models and emits ``<name>_rewards`` keys plus a
         weighted-aggregate ``rewards`` key in a single ``compute_rm_score``
         call.  Earlier revisions exposed one worker group per task on
@@ -337,7 +337,7 @@ class JointRewardMixin:
           (aes/raft/videoclip/videophy); we manually weighted-sum.
         """
         from tensordict import TensorDict
-        from recipe.dancegrpo.reward_models.dynamic_joint import DynamicJointRewardRunner
+        from recipe.teleboost.reward_models.dynamic_joint import DynamicJointRewardRunner
 
         start_time = time.time()
 
@@ -465,7 +465,7 @@ class JointRewardMixin:
 
         # Per-prompt grouping for the per-task z-score.  Same paper
         # reasoning as the single-reward path in
-        # ``dancegrpo_ray_trainer.compute_advantage`` (GRPO arxiv
+        # ``teleboost_ray_trainer.compute_advantage`` (GRPO arxiv
         # 2402.03300 §4.1.2 + DanceGRPO Eq. 10).
         num_repeat = int(self.config.actor_rollout_ref.rollout.n)
 

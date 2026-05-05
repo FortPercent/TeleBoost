@@ -8,19 +8,20 @@
 #
 # Build:
 #   cd /path/to/TeleBoost
-#   docker build -f docker/Dockerfile.dancegrpo -t teleboost/dancegrpo:latest .
+#   docker build -f docker/Dockerfile.teleboost -t teleboost/teleboost:latest .
 #
 # China-mirror build (Tsinghua):
-#   docker build -f docker/Dockerfile.dancegrpo \
+#   docker build -f docker/Dockerfile.teleboost \
 #     --build-arg APT_SOURCE=https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ \
 #     --build-arg PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
-#     -t teleboost/dancegrpo:latest .
+#     -t teleboost/teleboost:latest .
 #
 # Run (4×H100, replace the smoke script and mount your own data):
 #   docker run --rm --gpus all --ipc=host --shm-size=32g \
 #     -v $PWD:/workspace/TeleBoost \
-#     teleboost/dancegrpo:latest \
-#     bash recipe/dancegrpo/run_dancegrpo_1p3B_4gpu_smoke.sh
+#     -e TORCH_COMPILE_DISABLE=1 \
+#     teleboost/teleboost:latest \
+#     bash recipe/teleboost/run_teleboost_smoke.sh
 # ============================================================
 
 # NGC PyTorch 24.08: Ubuntu 22.04 + CUDA 12.6 + Python 3.10 + torch 2.5 + TE 1.9
@@ -147,7 +148,7 @@ RUN pip config unset global.index-url || true && \
 RUN python - <<'PY'
 import torch, vllm, flash_attn, transformers, cv2, verl
 from wan.modules.t5 import T5EncoderModel  # noqa: F401
-from recipe.dancegrpo.reward_models import RewardRegistry
+from recipe.teleboost.reward_models import RewardRegistry
 from hpsv2.src.open_clip import create_model_and_transforms  # noqa: F401
 from decord import VideoReader  # noqa: F401
 print(f"torch={torch.__version__}  vllm={vllm.__version__}  flash_attn={flash_attn.__version__}")
@@ -157,9 +158,16 @@ print("OK")
 PY
 
 # ---------- runtime env ----------
+# TORCH_COMPILE_DISABLE=1: the Wan VAE decoder triggers torch._dynamo /
+# inductor compilation, and on first run with a fresh cache the autotune
+# JSON cache can race-corrupt across the 8 ranks (JSONDecodeError "Extra
+# data" inside ``codecache._read``).  Eager mode side-steps the cache
+# entirely and the perf hit on VAE decode is small (decode is not the
+# bottleneck).  Override at run-time if you have a warmed cache.
 ENV PYTHONPATH=/workspace/TeleBoost:${PYTHONPATH:-} \
     HYDRA_FULL_ERROR=1 \
     TOKENIZERS_PARALLELISM=false \
-    TORCH_NCCL_AVOID_RECORD_STREAMS=1
+    TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
+    TORCH_COMPILE_DISABLE=1
 
 CMD ["bash"]

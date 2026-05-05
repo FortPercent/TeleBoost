@@ -21,10 +21,10 @@ from verl import DataProto
 from verl.trainer.ppo.metric_utils import reduce_metrics
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 
-from recipe.dancegrpo.algorithms.grpo_advantage import per_prompt_zscore_advantage
+from recipe.teleboost.algorithms.grpo_advantage import per_prompt_zscore_advantage
 from verl.utils.debug import marked_timer
 
-from recipe.dancegrpo.algorithms import (
+from recipe.teleboost.algorithms import (
     BGPOMixin,
     JointRewardMixin,
     VIPOMixin,
@@ -122,7 +122,7 @@ def compute_advantage(
 class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer):
     """Driver-side Dance-GRPO trainer.
 
-    Algorithm hooks come from mixins in :mod:`recipe.dancegrpo.algorithms`:
+    Algorithm hooks come from mixins in :mod:`recipe.teleboost.algorithms`:
 
     * :class:`BGPOMixin` — reward rerange (CRT) + adaptive advantage scaling (RAS)
     * :class:`VIPOMixin` — pixel-weighted dense advantage broadcast
@@ -130,7 +130,7 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
       driver-side dynamic, legacy fixed-4 runners)
 
     Mixins are no-ops unless their enable flags are set in the Hydra
-    config.  See ``recipe/dancegrpo/algorithms/README.md`` for the
+    config.  See ``recipe/teleboost/algorithms/README.md`` for the
     feature-flag matrix.
     """
 
@@ -166,8 +166,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
 
         timing_raw = defaultdict(float)
         joint_reward_runner = self._maybe_create_joint_reward_runner()
-        # Running accumulator used by the CVPR-std adaptive-weight mode.
-        self._std_running_accumulation = 0.0
 
         for epoch in range(self.config.trainer.total_epochs):
             # ======== 1. Data ========

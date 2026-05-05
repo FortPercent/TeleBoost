@@ -1,20 +1,47 @@
-"""BGPO: Bayesian-Prior Group Optimization.
+"""BGPO: Bayesian-Prior Group Optimization (arxiv 2511.18919).
+
+Paper formulas implemented:
+
+* **CRT** — Contrastive Reward Transformation, Eq. 4::
+
+      R̃ᵢ⁽ʲ⁾ = [λ·(Rᵢ⁽ʲ⁾ − R_prior) + 𝟙{Rᵢ⁽ʲ⁾ > R_prior}] · exp(Rᵢ⁽ʲ⁾)
+
+* **RAS** — Reliability-Adaptive Scaling, Eq. 2::
+
+      wᵢ = 1 + α · [2·σ(k·(R̄ᵢ − R_prior)) − 1]
+
+  Output range is ``[1−α, 1+α]``; the paper recommends ``α=0.5`` (Table 3).
+
+* **Loss coupling**, Eq. 3::
+
+      ℒ_RAS,i = w_group,i · ℒ_GRPO,i
+
+  We apply ``w_group,i`` to the *advantage* (since the GRPO loss is linear
+  in the advantage, ``A · w · log_ratio · ...``, this is equivalent to
+  applying it to the loss directly).
 
 Two branches share the ``algorithm.bgpo.enable`` flag:
 
 * **CRT** (``use_rerange``): rearranges per-sample rewards before the
-  advantage computation, using a prior-based sign and sigmoid.
-* **RAS** (``adaptive_weight_*``): scales the scalar advantage by a
-  per-group weight derived from posterior statistics.
+  advantage computation.
+* **RAS** (``adaptive_weight_method=paper``): scales the scalar advantage
+  by a per-group weight ``w_g`` from Eq. 2.
 
 When ``enable=false`` the mixin is a no-op and the trainer follows the
 baseline GRPO path bit-for-bit.
 
 The implementation is exposed as :class:`BGPOMixin` so the trainer can
-inherit it and keep ``self.config`` / ``self.global_steps`` /
-``self._std_running_accumulation`` shared with the rest of the training
-loop. Pure helpers are module-level functions so they can be unit-tested
-without spinning up a full trainer.
+inherit it and keep ``self.config`` / ``self.global_steps`` shared with
+the rest of the training loop. Pure helpers are module-level functions
+so they can be unit-tested without spinning up a full trainer.
+
+Pre-paper-faithfulness audit (2026-05) the code carried two non-paper
+modes: ``rerange_method=binary`` (sigmoid-weighted reward, NOT Eq. 4)
+and ``adaptive_weight_method=bayes|cvpr|random`` (closed-form Bayesian
+posterior CDF / per-sample heuristic ablations, NOT Eq. 2).  Those have
+been removed in favour of the paper-verbatim formulas above; the legacy
+config keys (``rerange_method``, ``rerange_temperature``, ``prior_var``,
+``bayes_weight_range``, ``adaptive_weight_*`` sub-keys) no longer exist.
 """
 
 from __future__ import annotations
@@ -38,22 +65,60 @@ logger = logging.getLogger(__name__)
 def rerange_group_rewards(
     group_rewards: torch.Tensor,
     prior: float,
-    method: str,
-    a: float,
-    temperature: float,
+    lambda_contrast: float,
     exp_clamp: float = 30.0,
 ) -> torch.Tensor:
-    """CRT reward rearrangement (binary prior-threshold method)."""
-    if method != "binary":
-        return group_rewards
+    """CRT reward rearrangement (BGPO paper Eq. 4, verbatim).
 
+    .. math::
+
+        \\tilde{R} = \\big[\\lambda \\cdot (R - R_{prior})
+                     + \\mathbb{1}\\{R > R_{prior}\\}\\big]
+                     \\cdot \\exp(R)
+
+    Args:
+        group_rewards: raw rewards within a single rollout group, shape
+            ``(rollout_n,)``.
+        prior: ``R_prior`` for this prompt.
+        lambda_contrast: paper's ``λ`` — the contrast factor on the
+            ``(R − R_prior)`` term.
+        exp_clamp: numerical-safety clamp on the input to ``exp``.  The
+            paper does not clamp ``exp(R)`` but in practice rewards can
+            be unbounded (e.g. HPS-v2 producing ~30+); we clamp at ±30
+            so ``exp`` stays within fp32 range.  Set to a large value
+            (e.g. 1e9) to disable the clamp entirely.
+    """
     flag = group_rewards - prior
-    positive_sign = torch.clamp(torch.sign(flag), min=0.0)
-    numerator = a * flag + positive_sign
-    exponent = torch.clamp(-group_rewards / max(temperature, 1e-8), min=-exp_clamp, max=exp_clamp)
-    denom = 1.0 + torch.exp(exponent)
-    coef = numerator / denom
-    return coef * group_rewards
+    indicator = (flag > 0).to(group_rewards.dtype)  # paper's 𝟙{R > R_prior}
+    bracket = lambda_contrast * flag + indicator
+    exponent = torch.clamp(group_rewards, min=-exp_clamp, max=exp_clamp)
+    return bracket * torch.exp(exponent)
+
+
+def paper_ras_centered_weight(
+    group_rewards: torch.Tensor,
+    prior: float,
+    k_sharpness: float,
+) -> float:
+    """RAS centered weight (paper Eq. 2 inner term).
+
+    Returns ``2·σ(k·(R̄ − R_prior)) − 1``.  The outer ``1 + α·(...)``
+    yielding paper Eq. 2's ``w = 1 + α·[2σ(k·(R̄ − R_prior)) − 1]`` is
+    applied by the caller (see ``BGPOMixin._apply_bgpo_on_advantages``).
+
+    Output range is ``(−1, 1)``; multiplied by ``α`` and added to 1 it
+    becomes the paper's ``w ∈ (1−α, 1+α)``.
+
+    Args:
+        group_rewards: rewards in a single rollout group, shape
+            ``(rollout_n,)`` or ``(B,)``.
+        prior: ``R_prior`` for the prompt.
+        k_sharpness: paper's ``k`` — sigmoid sharpness on the mean
+            deviation ``(R̄ − R_prior)``.
+    """
+    group_mean = group_rewards.mean()
+    x = k_sharpness * (group_mean - prior)
+    return float(2.0 * torch.sigmoid(x).item() - 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +132,6 @@ class BGPOMixin:
     Attributes referenced from the trainer:
         - ``self.config`` (Hydra DictConfig)
         - ``self.global_steps`` (int, current training step)
-        - ``self._std_running_accumulation`` (float, RAS std running mean)
     """
 
     # -- config accessors ---------------------------------------------------
@@ -104,6 +168,30 @@ class BGPOMixin:
                     "BGPO with a single scalar reward, the paper-supported "
                     "configuration)."
                 )
+
+            # Soft warning: BGPO + VIPO is structurally compatible (BGPO's
+            # per-group scalar weight broadcasts cleanly across VIPO's dense
+            # ``[B, T, H, W]`` advantage), but neither paper studies the
+            # combination.  BGPO (arxiv 2511.18919) operates on scalar
+            # advantages; VIPO (arxiv 2511.18719) reshapes advantages to
+            # per-pixel.  Stacking them turns BGPO's per-group weight into a
+            # uniform multiplier across VIPO's pixel pattern — mathematically
+            # benign, research-wise unvalidated.
+            pixel_enable = bool(
+                self.config.get("actor_rollout_ref", {})
+                .get("pixel_weight", {})
+                .get("enable", False)
+            )
+            if pixel_enable:
+                logger.warning(
+                    "BGPO + VIPO are both enabled.  This combination is "
+                    "structurally compatible (smoke-tested) but not validated "
+                    "by either paper: BGPO (arxiv 2511.18919) and VIPO "
+                    "(arxiv 2511.18719) were developed independently.  BGPO's "
+                    "per-group scalar weight becomes a uniform multiplier "
+                    "across VIPO's pixel pattern, which preserves VIPO's "
+                    "shaping but is not a paper-supported configuration."
+                )
         return enabled
 
     def _get_prior_array(self, source_batch: DataProto) -> Optional[np.ndarray]:
@@ -122,77 +210,39 @@ class BGPOMixin:
         self,
         group_rewards: torch.Tensor,
         prior: float,
-        step: int,
+        step: int,  # kept for signature compat; unused in paper mode
     ) -> float:
-        """RAS weight; supports ``no | random | bayes | cvpr`` modes."""
-        bgpo_cfg = self._get_bgpo_config()
+        """RAS per-group weight (BGPO paper Eq. 2).
 
-        method = bgpo_cfg.get("adaptive_weight_method", "no")
+        Returns the *centered* weight ``2σ(k·(R̄ − R_prior)) − 1``;
+        ``_apply_bgpo_on_advantages`` then multiplies by ``α`` and adds
+        ``1`` to get the paper's ``w = 1 + α·[2σ(k·(R̄ − R_prior)) − 1]``.
+
+        Modes:
+          * ``"paper"`` (default): paper Eq. 2 verbatim.
+          * ``"no"``: returns ``0`` so the outer ``1 + α·0 = 1`` leaves
+            the advantage unchanged.  Useful when running CRT alone.
+        """
+        del step  # signature compat; paper Eq. 2 has no step dependence.
+        bgpo_cfg = self._get_bgpo_config()
+        method = bgpo_cfg.get("adaptive_weight_method", "paper")
+
         if method == "no":
             return 0.0
-        if method == "random":
-            return torch.rand(1).item() * 2 - 1
-        if method == "bayes":
-            n = int(group_rewards.shape[0])
-            if n <= 1:
-                sample_var = torch.tensor(1.0, device=group_rewards.device, dtype=group_rewards.dtype)
-            else:
-                sample_var = group_rewards.var(unbiased=True) + 1e-8
 
-            prior_var = float(bgpo_cfg.get("prior_var", 1.0))
-            weight_range = bgpo_cfg.get("bayes_weight_range", [0.5, 1.5])
-            if len(weight_range) != 2:
-                weight_range = [0.5, 1.5]
-            w_min, w_max = float(weight_range[0]), float(weight_range[1])
+        if method == "paper":
+            return paper_ras_centered_weight(
+                group_rewards,
+                prior=prior,
+                k_sharpness=float(bgpo_cfg.get("k_sharpness", 1.0)),
+            )
 
-            sample_mean = group_rewards.mean()
-            posterior_var = 1.0 / (n / sample_var + 1.0 / prior_var)
-            posterior_mean = posterior_var * (n * sample_mean / sample_var + prior / prior_var)
-            posterior_std = torch.sqrt(posterior_var)
-            z = (prior - posterior_mean) / posterior_std
-            sqrt_2 = torch.sqrt(torch.tensor(2.0, device=group_rewards.device, dtype=group_rewards.dtype))
-            prob_better = 1.0 - 0.5 * (1 + torch.erf(z / sqrt_2))
-            weight = w_min + (w_max - w_min) * prob_better
-
-            # Match dancegrpo-combine convention: weight is centered on 1.0.
-            return float(weight.item() - 1.0)
-
-        if method == "cvpr":
-            discriminate_method = bgpo_cfg.get("adaptive_weight_discriminate_method", "normal")
-            weight_method = bgpo_cfg.get("adaptive_weight_weight_method", "std_pos")
-            fixed_weight = float(bgpo_cfg.get("adaptive_weight_fix_weight", 0.0))
-
-            group_mean = float(group_rewards.mean().item())
-            if discriminate_method == "normal":
-                sign = 1.0 if group_mean > prior else -1.0
-            elif discriminate_method == "reverse":
-                sign = 1.0 if group_mean < prior else -1.0
-            else:
-                raise ValueError(f"Unsupported adaptive_weight_discriminate_method: {discriminate_method}")
-
-            if weight_method == "fix":
-                magnitude = fixed_weight
-            elif weight_method == "random":
-                magnitude = torch.rand(1).item()
-            elif "std" in weight_method:
-                use_running_mean = bool(bgpo_cfg.get("use_std_runningmean", False))
-                std_group = float(group_rewards.std().item() + 1e-8)
-                self._std_running_accumulation += std_group
-                std = self._std_running_accumulation / max(step, 1) if use_running_mean else std_group
-                if weight_method == "std_pos":
-                    magnitude = std
-                elif weight_method == "std_neg":
-                    neg_base = float(bgpo_cfg.get("neg_base", 1.005))
-                    scale_neg = float(bgpo_cfg.get("scale_neg", 0.01))
-                    magnitude = neg_base ** (scale_neg / max(std, 1e-8)) - 1
-                else:
-                    raise ValueError(f"Unsupported adaptive_weight_weight_method: {weight_method}")
-            else:
-                raise ValueError(f"Unsupported adaptive_weight_weight_method: {weight_method}")
-
-            return float(sign * magnitude)
-
-        raise ValueError(f"Unsupported adaptive_weight_method: {method}")
+        raise ValueError(
+            f"Unsupported adaptive_weight_method={method!r}; "
+            f"valid modes: 'paper' (Eq. 2), 'no'.  Pre-2026-05 the code "
+            f"carried 'bayes', 'cvpr', and 'random' modes that were not "
+            f"paper-faithful and have been removed; switch to 'paper'."
+        )
 
     # -- reward / advantage application ------------------------------------
 
@@ -202,7 +252,7 @@ class BGPOMixin:
         source_batch: DataProto,
         metrics: dict,
     ) -> DataProto:
-        """CRT branch: rearrange per-sample rewards using the binary method."""
+        """CRT branch: rearrange per-sample rewards via paper Eq. 4."""
         if "rewards" not in gen_batch_output.batch:
             return gen_batch_output
 
@@ -225,9 +275,7 @@ class BGPOMixin:
         rewards_for_groups = rewards[:group_rewards_len]
 
         use_rerange = bool(bgpo_cfg.get("use_rerange", False))
-        rerange_method = bgpo_cfg.get("rerange_method", "binary")
-        rerange_a = float(bgpo_cfg.get("rerange_a", 50.0))
-        rerange_temperature = float(bgpo_cfg.get("rerange_temperature", 5.0))
+        lambda_contrast = float(bgpo_cfg.get("lambda_contrast", 1.0))
         exp_clamp = float(bgpo_cfg.get("exp_clamp", 30.0))
         reranged_rewards = rewards_for_groups.clone()
 
@@ -238,9 +286,7 @@ class BGPOMixin:
                 reranged_rewards[start:end] = rerange_group_rewards(
                     rewards_for_groups[start:end],
                     prior=float(prior_arr[i]),
-                    method=rerange_method,
-                    a=rerange_a,
-                    temperature=rerange_temperature,
+                    lambda_contrast=lambda_contrast,
                     exp_clamp=exp_clamp,
                 )
         else:
@@ -331,4 +377,5 @@ class BGPOMixin:
 __all__ = [
     "BGPOMixin",
     "rerange_group_rewards",
+    "paper_ras_centered_weight",
 ]

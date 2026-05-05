@@ -4,7 +4,7 @@ TeleBoost is a video-generation RL training stack on top of upstream
 [`volcengine/verl`](https://github.com/volcengine/verl) v0.4.0.
 
 The repo is structured as:
-- `recipe/dancegrpo/` — training recipe (PPO/GRPO entrypoint, FSDP worker,
+- `recipe/teleboost/` — training recipe (PPO/GRPO entrypoint, FSDP worker,
   reward managers); imports `verl.*` from upstream + `teleboost.*` for
   TeleBoost-specific extensions.
 - `wan/` — Wan2.1 / Wan2.2 video generation model code.
@@ -60,11 +60,11 @@ pip install --no-deps -e .
 # Import sanity: must print 8/8 OK with no traceback.
 python3 - <<'PY'
 mods = [
-    "recipe.dancegrpo.main_dancegrpo",
-    "recipe.dancegrpo.dancegrpo_ray_trainer",
-    "recipe.dancegrpo.dancegrpo_fsdp_worker",
-    "recipe.dancegrpo.dp_actor",
-    "recipe.dancegrpo.unified_reward_worker",
+    "recipe.teleboost.main_teleboost",
+    "recipe.teleboost.teleboost_ray_trainer",
+    "recipe.teleboost.teleboost_fsdp_worker",
+    "recipe.teleboost.dp_actor",
+    "recipe.teleboost.unified_reward_worker",
     "teleboost.workers.reward_manager.dancegrpo",
     "teleboost.workers.rollout.diffusion_rollout",
     "teleboost.workers.sharding_manager.diffusion",
@@ -84,12 +84,73 @@ torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
 
 ## Run training
 
+The unified entrypoint is `recipe/teleboost/run_teleboost_smoke.sh`.
+Required env vars:
+
 ```bash
-# 5-step smoke on 8 GPUs (single reward, wan2.2 actor)
-bash recipe/dancegrpo/run_dancegrpo_single_8gpu_5step.sh
+export TRAIN_FILE=/path/to/processed_wan_prompt.json     # rl_embeddings JSON
+export TEST_FILE=$TRAIN_FILE                              # smoke can reuse train
+export WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B            # or Wan2.2-T2V-A14B
+export REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt  # for non-joint runs
+
+bash recipe/teleboost/run_teleboost_smoke.sh
 ```
 
-Replace the data / model paths inside the script for your environment.
+Optional knobs (defaults shown): `TELEBOOST_METHOD=baseline`, `WAN_VERSION=wan21`,
+`N_GPUS_PER_NODE=4`, `TRAIN_PROMPT_BSZ=2`, `PPO_MINI_BATCH_SIZE=2`,
+`TOTAL_TRAINING_STEPS=2`.  See script header for full list.
+
+## Known gotchas (verified 2026-05-05 on 8×H800)
+
+These are real failures we hit during fresh-box install / smoke runs.  The
+Dockerfile already encodes the fixes; if you install by hand, watch for them.
+
+1. **`pip install verl` pulls the wrong version.**  The latest PyPI verl
+   (0.7.x) has dropped `RewardModelWorker` and several worker symbols this
+   repo depends on.  Install the pinned v0.4.0 instead:
+   ```
+   pip install --no-deps -r requirements-verl.txt
+   ```
+
+2. **transformers 5.x breaks peft 0.17.**  peft tries to import
+   `HybridCache` which only exists in transformers 4.x.  Pin
+   `"transformers>=4.45,<5.0"`.
+
+3. **HPSv2 PyPI wheel is missing the BPE vocab.**  After
+   `pip install hpsv2==1.2.0`, drop the vocab file in:
+   ```
+   curl -fsSL -o $(python -c "import hpsv2.src.open_clip as m,os; print(os.path.dirname(m.__file__))")/bpe_simple_vocab_16e6.txt.gz \
+     https://raw.githubusercontent.com/tgxs002/HPSv2/master/hpsv2/src/open_clip/bpe_simple_vocab_16e6.txt.gz
+   ```
+   The Dockerfile does this for you.
+
+4. **`torch._dynamo` corrupts the inductor cache during VAE decode under
+   FSDP × 8 ranks.**  First-run JSONDecodeError in
+   ``codecache._read``.  Fix: run with `TORCH_COMPILE_DISABLE=1`.  The
+   Dockerfile sets this in the runtime ENV; bare-metal installs need it
+   exported.
+
+5. **`PPO_MINI_BATCH_SIZE` must be ≥ `n_gpus_per_node` after world-size
+   normalization.**  verl normalizes the mini-batch by world size with
+   floor division.  The smoke script now defaults
+   `PPO_MINI_BATCH_SIZE=${n_gpus}` so this scales automatically; if you
+   override, keep it ≥ `n_gpus`.
+
+6. **`tokenizer_subpath` (recipe-level), not `tokenizer_path` (verl).**
+   verl's `hf_model.yaml` exposes `actor_rollout_ref.model.tokenizer_path`
+   (a full HF tokenizer path, default `null` = use the model dir).
+   That is *not* the same as our recipe-level
+   `actor_rollout_ref.tokenizer_subpath` (a relative subpath joined onto
+   the model dir, default `google/umt5-xxl` for Wan).  The two have
+   different semantics; we keep them as different keys so verl's null
+   default cannot accidentally clobber the recipe value.
+
+7. **`actor_rollout_ref.actor.sigma_form=flow_grpo` needs the σ=1
+   substitution.**  The Flow-GRPO formula `σ_t = √(σ/(1−σ))·η` has a
+   pole at σ=1 (start of Wan/SD3 schedule).  Mirror upstream
+   `sd3_sde_with_logprob.py`: replace σ=1 with σ_next.  This is
+   already in `algorithms/sigma_schedule.py` and pinned by
+   `tests/test_sigma_schedule.py::test_flow_grpo_sigma_one_edge_case_no_nan`.
 
 ## How patches work
 

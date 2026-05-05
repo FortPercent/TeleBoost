@@ -1,6 +1,6 @@
 """Inject TeleBoost-only symbols into upstream verl namespaces.
 
-Upstream verl@v0.4.0 doesn't ship a few APIs that recipe/dancegrpo/* uses:
+Upstream verl@v0.4.0 doesn't ship a few APIs that recipe/teleboost/* uses:
   - verl.utils.debug: marked_timer, simple_timer, ProfilerConfig, WorkerProfiler,
                       WorkerProfilerExtension
   - verl.utils.device: get_device_id

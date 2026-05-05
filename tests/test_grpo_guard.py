@@ -20,7 +20,7 @@ import math
 import pytest
 import torch
 
-from recipe.dancegrpo.algorithms.grpo_guard import (
+from recipe.teleboost.algorithms.grpo_guard import (
     GRAD_REWEIGHT_FORMS,
     compute_grad_reweight_delta,
     compute_ratio_norm_bias,
