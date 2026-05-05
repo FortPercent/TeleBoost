@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+title: "TeleBoost — DanceGRPO recipe for Wan video diffusion"
+message: "If you use this codebase, please cite the underlying papers and (optionally) this repository."
+type: software
+authors:
+  - name: "TeleBoost contributors"
+    website: "https://github.com/FortPercent/TeleBoost"
+repository-code: "https://github.com/FortPercent/TeleBoost"
+license: Apache-2.0
+references:
+  - type: article
+    title: "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models (GRPO)"
+    authors:
+      - name: "Shao et al."
+    year: 2024
+    url: "https://arxiv.org/abs/2402.03300"
+  - type: article
+    title: "DanceGRPO: Unleashing GRPO on Visual Generation"
+    authors:
+      - name: "Xue et al."
+    year: 2025
+    url: "https://arxiv.org/abs/2505.07818"
+  - type: article
+    title: "Flow-GRPO: Training Flow Matching Models via Online RL"
+    authors:
+      - name: "Liu et al."
+    year: 2025
+    url: "https://arxiv.org/abs/2505.05470"
+  - type: article
+    title: "GRPO-Guard: Stable Diffusion-Style RL by Bias and Step-size Correction"
+    authors:
+      - name: "Sun, Wang, et al."
+    year: 2025
+    url: "https://arxiv.org/abs/2510.22319"
+  - type: article
+    title: "BGPO: Bayesian-Prior Group Policy Optimization"
+    authors:
+      - name: "BGPO authors"
+    year: 2025
+    url: "https://arxiv.org/abs/2511.18919"
+  - type: article
+    title: "VIPO: Visual Preference Policy Optimization for Visual Generation"
+    authors:
+      - name: "VIPO authors"
+    year: 2026
+    url: "https://arxiv.org/abs/2511.18719"

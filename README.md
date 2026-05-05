@@ -13,6 +13,30 @@ belong in upstream verl (model loader, FSDP wrap, Ulysses SP patches,
 checkpoint compatibility) lives under [`teleboost/`](teleboost/) and is
 applied at import time.
 
+## Algorithms & papers
+
+Each algorithm in `recipe/teleboost/algorithms/` is a paper-faithful
+translation; see the per-algorithm docstring for the equation pin.
+
+| Algorithm | Paper | What it does |
+|---|---|---|
+| **GRPO** | [DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300) | Per-prompt z-score advantage (group baseline) |
+| **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation; SDE recast with σ_t = η constant |
+| **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE |
+| **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
+| **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
+| **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
+
+Reward models / vendored components used:
+
+* **HPSv2** — [arXiv 2306.09341](https://arxiv.org/abs/2306.09341)
+* **VideoCLIP-XL** — [arXiv 2410.00741](https://arxiv.org/abs/2410.00741)
+* **RAFT (optical flow)** — [arXiv 2003.12039](https://arxiv.org/abs/2003.12039)
+* **VideoPhy** — [arXiv 2406.03520](https://arxiv.org/abs/2406.03520)
+* **LAION Aesthetic predictor** ([repo](https://github.com/LAION-AI/aesthetic-predictor))
+* **DINOv2** — [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) (used by VIPO)
+* **Wan video diffusion** — [Wan-AI](https://github.com/Wan-Video) (actor backbone)
+
 ---
 
 ## 1. Capability matrix
@@ -247,10 +271,63 @@ torchrun --nproc_per_node=8 tests/special_distributed/test_cp_grad_reduce.py
 
 Apache 2.0 (see [`LICENSE`](LICENSE) and [`Notice.txt`](Notice.txt)).
 
-Built on top of:
-- [volcengine/verl](https://github.com/volcengine/verl) — RLHF framework
-- [Wan-Video/Wan2.1](https://github.com/Wan-Video/Wan2.1) and Wan-Video/Wan2.2 — diffusion backbones
-- [tgxs002/HPSv2](https://github.com/tgxs002/HPSv2), [alibaba-pai/VideoCLIP-XL](https://huggingface.co/alibaba-pai/VideoCLIP-XL), [LAION-AI/aesthetic-predictor](https://github.com/LAION-AI/aesthetic-predictor), [princeton-vl/RAFT](https://github.com/princeton-vl/RAFT), [videophysics/videocon_physics](https://huggingface.co/videophysics/videocon_physics) — reward models
+This codebase stands on the shoulders of several open-source projects.
+We thank the authors of all of the following.
+
+**Framework — RL training infrastructure**
+
+* [**volcengine/verl**](https://github.com/volcengine/verl) (Apache 2.0,
+  Bytedance Seed) — the PPO / GRPO training engine.  We pin
+  `verl@v0.4.0` and consume it as a pip dependency rather than
+  vendoring; recipe-level extensions live under
+  [`recipe/teleboost/`](recipe/teleboost/) and
+  [`teleboost/`](teleboost/).
+
+**Algorithms — papers**
+
+The algorithm modules under
+[`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/) are
+paper-faithful translations of:
+
+* GRPO ([DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300))
+* DanceGRPO ([arXiv 2505.07818](https://arxiv.org/abs/2505.07818))
+* Flow-GRPO ([arXiv 2505.05470](https://arxiv.org/abs/2505.05470))
+* GRPO-Guard ([arXiv 2510.22319](https://arxiv.org/abs/2510.22319))
+* BGPO ([arXiv 2511.18919](https://arxiv.org/abs/2511.18919))
+* VIPO ([arXiv 2511.18719](https://arxiv.org/abs/2511.18719))
+
+See each module's docstring for the equation pin.
+
+**Models — actor backbones**
+
+* [**Wan-Video/Wan2.1**](https://github.com/Wan-Video/Wan2.1) and
+  Wan-Video/Wan2.2 — text-to-video diffusion actor.  The `wan/`
+  directory bundles their model code; the FSDP / Ulysses-SP wrap and
+  CP-grad-reduce fix in `teleboost/patches/` are our additions.
+
+**Reward models — preference / quality signals**
+
+* [**tgxs002/HPSv2**](https://github.com/tgxs002/HPSv2)
+  ([paper, arXiv 2306.09341](https://arxiv.org/abs/2306.09341))
+* [**alibaba-pai/VideoCLIP-XL**](https://huggingface.co/alibaba-pai/VideoCLIP-XL)
+  ([paper, arXiv 2410.00741](https://arxiv.org/abs/2410.00741))
+* [**LAION-AI/aesthetic-predictor**](https://github.com/LAION-AI/aesthetic-predictor)
+* [**princeton-vl/RAFT**](https://github.com/princeton-vl/RAFT)
+  ([paper, arXiv 2003.12039](https://arxiv.org/abs/2003.12039))
+* [**videophysics/videocon_physics**](https://huggingface.co/videophysics/videocon_physics)
+  ([paper, arXiv 2406.03520](https://arxiv.org/abs/2406.03520))
+* [**facebook/dinov2**](https://github.com/facebookresearch/dinov2)
+  ([paper, arXiv 2304.07193](https://arxiv.org/abs/2304.07193))
+  — used by VIPO for per-pixel allocation maps.
+
+**Compute & systems**
+
+* [**vllm-project/vllm**](https://github.com/vllm-project/vllm) — Qwen
+  reward worker rollout.
+* [**Dao-AILab/flash-attention**](https://github.com/Dao-AILab/flash-attention) —
+  flash-attn 2.7.4.post1 used in actor + reward rollouts.
+* [**flashinfer-ai/flashinfer**](https://github.com/flashinfer-ai/flashinfer) —
+  vLLM kernel backend.
 
 ---
 
