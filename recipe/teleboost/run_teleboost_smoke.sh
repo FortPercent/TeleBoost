@@ -239,4 +239,7 @@ else
   )
 fi
 
-HYDRA_FULL_ERROR=1 python3 -m recipe.teleboost.main_teleboost "${overrides[@]}"
+# Forward extra positional args ("$@") to Hydra so callers can append
+# overrides like ``actor_rollout_ref.actor.sigma_form=flow_grpo`` or
+# ``data.prompt_key=caption`` without editing this script.
+HYDRA_FULL_ERROR=1 python3 -m recipe.teleboost.main_teleboost "${overrides[@]}" "$@"
