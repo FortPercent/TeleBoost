@@ -12,10 +12,10 @@ import numpy as np
 
 OUT_DIR = Path(__file__).resolve().parent
 
-C_STANDARD = "#94A3B8"
-C_DECOUPLED = "#2563EB"
-C_OOM = "#B91C1C"
-C_CAP = "#6B6B6B"
+C_STANDARD = "#BC908A"
+C_DECOUPLED = "#9CAE9F"
+C_OOM = "#8B5A5A"
+C_CAP = "#7A7A7A"
 CAPACITY_GB = 80.0
 
 plt.rcParams.update({
@@ -74,7 +74,7 @@ def fig_memory_vs_sequence():
         else:
             _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                           f"{decoupled_mem[i]:.2f} GB",
-                          color="#1E40AF", weight="bold")
+                          color="#5A7762", weight="bold")
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
@@ -136,17 +136,17 @@ def fig_memory_vs_layers():
     for i, b in enumerate(bars_d):
         _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                       f"{decoupled[i]:.2f} GB",
-                      color="#1E40AF", weight="bold")
+                      color="#5A7762", weight="bold")
 
     for i, d in enumerate(deltas):
         top = max(standard[i], decoupled[i])
         ax.annotate(d, xy=(x[i], top + 6),
                     ha="center", va="center", fontsize=10.5,
-                    color="#1E40AF" if "−" in d else "#444",
+                    color="#3F5A47" if "−" in d else "#555",
                     fontweight="bold" if "−" in d else "normal",
                     bbox=dict(boxstyle="round,pad=0.3",
-                              fc="#DBEAFE" if "−" in d else "#F0F0F0",
-                              ec="#2563EB" if "−" in d else "#999",
+                              fc="#E5EDE3" if "−" in d else "#EFEFEF",
+                              ec="#7D9B83" if "−" in d else "#A8A8A8",
                               lw=0.8))
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)

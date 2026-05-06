@@ -172,7 +172,6 @@ Constraint: `(TP × CP)` must divide `num_attention_heads`. For Wan 14B
 |---|---|---|---|---|
 | Wan2.1 / Wan2.2 (T2V/I2V) | 14B | 5120 | 40 | 40 |
 | Wan2.1 1.3B | 1.3B | 1536 | 12 | 30 |
-| CausalWan2.1 1.3B | 1.3B | 1536 | 12 | 30 |
 
 Production focus is **Wan 14B I2V DPO** (`examples/teleai/`); other
 variants live under `examples/wan/`.
