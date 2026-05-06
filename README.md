@@ -5,14 +5,14 @@
   </picture>
 </p>
 <h3 align="center">
-Memory-efficient DPO training for video diffusion models.
+Memory-efficient DPO post-training for video diffusion models.
 </h3>
 
 📄 **Paper**: [*TeleBoost: A Systematic Alignment Framework for High-Fidelity, Controllable, and Robust Video Generation*](https://arxiv.org/abs/2602.07595) (arXiv:2602.07595)
 
-Training framework for video diffusion models, featuring **Gradient
-Decoupled DPO** — a per-branch backward + immediate reduce-scatter
-pattern that on Wan 14B 40-layer DPO at 32×H800:
+**Post-training framework for video diffusion models**, featuring
+**Gradient Decoupled DPO** — a per-branch backward + immediate
+reduce-scatter pattern that on Wan 14B 40-layer DPO at 32×H800:
 
 * **cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
 * **lets the production default (49 f / 480p) actually run** — standard DPO OOMs, Decoupled finishes at 42.90 GB
@@ -50,21 +50,6 @@ Three concrete wins on the same 32-GPU H800 hardware:
 1. **−40% peak memory on identical workload** (25 f / 480p ~11 k tokens)
 2. **Production default actually runs** (49 f / 480p ~20 k tokens crashes standard DPO with OOM)
 3. **~15× longer supported context length** (~11 k → ~163 k visual tokens)
-
-### Sequence-length scaling (32×H800, Wan 14B 40 layers, CP=8 DP=4)
-
-| Config | Visual tokens | Standard DPO | Gradient Decoupled DPO |
-|---|---|---|---|
-| 25 f / 480p (T=7) | ~11 k | ✅ 69.27 GB ← *standard's ceiling* | ✅ 41.39 GB |
-| 29 f / 480p (T=8) | ~12 k | ❌ OOM | (fits) |
-| 49 f / 480p (T=13, production) | ~20 k | ❌ OOM | ✅ 42.90 GB |
-| 65 f / 1080p (T=17) | ~139 k | ❌ OOM | ✅ 64.54 GB |
-| 121 f / 720p (T=31) | ~112 k | ❌ OOM | ✅ 67.73 GB |
-| 77 f / 1080p (T=20) | ~163 k | ❌ OOM | ✅ 69.32 GB ← *decoupled's ceiling* |
-
-→ Standard DPO ceiling at 32×H800: **~11 k visual tokens** (25 f / 480p ≈ 1.5 s of low-res video).
-Decoupled DPO ceiling: **~163 k visual tokens** (77 f / 1080p ≈ 4.8 s of full-res video).
-**Supported context length grows by ~15×** with the same 32-GPU H800 budget.
 
 ### Mathematical equivalence (verified element-wise)
 

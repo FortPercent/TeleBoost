@@ -160,11 +160,10 @@ def fig_memory_vs_layers():
     ax.grid(axis="y", ls=":", alpha=0.45, zorder=1)
 
     fig.text(0.5, -0.02,
-             "Dashed line = H800 80 GB capacity. n_iters=2 strict measurement. "
+             "Dashed line = H800 80 GB capacity.\n"
              "Decoupled DPO cuts peak memory by ~40% on identical workload (left), "
-             "lets production training (49 f / 480p, ~20k tokens) actually run (middle), "
-             "and scales to ~15× the visual-token length the standard implementation can handle (right).",
-             ha="center", fontsize=11, color="#444")
+             "lets production training run (middle), and scales to ~15× the token length standard can handle (right).",
+             ha="center", fontsize=14, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_layers.png"
