@@ -247,7 +247,7 @@ Teletron/
 @misc{teleboost2026,
   title  = {TeleBoost: Gradient Decoupled DPO for memory-efficient
             video diffusion model training},
-  author = {TeleAI Infra Team},
+  author = {TeleAI},
   year   = {2026},
   url    = {https://github.com/Tele-AI/TeleBoost},
 }
