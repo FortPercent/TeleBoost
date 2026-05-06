@@ -1,12 +1,48 @@
 cff-version: 1.2.0
 title: "TeleBoost — GRPO for video diffusion"
-message: "If you use this codebase, please cite the underlying papers and (optionally) this repository."
+message: "If you use this codebase, please cite the TeleBoost paper and the underlying algorithm papers."
 type: software
 authors:
   - name: "TeleBoost contributors"
     website: "https://github.com/FortPercent/TeleBoost"
 repository-code: "https://github.com/FortPercent/TeleBoost"
 license: Apache-2.0
+preferred-citation:
+  type: article
+  title: "TeleBoost: A Systematic Alignment Framework for High-Fidelity, Controllable, and Robust Video Generation"
+  authors:
+    - family-names: Liang
+      given-names: Yuanzhi
+    - family-names: Wu
+      given-names: "Xuan'er"
+    - family-names: Liu
+      given-names: Yirui
+    - family-names: Fang
+      given-names: Yijie
+    - family-names: Fan
+      given-names: Yizhen
+    - family-names: Hao
+      given-names: Ke
+    - family-names: Li
+      given-names: Rui
+    - family-names: Liu
+      given-names: Ruiying
+    - family-names: Ni
+      given-names: Ziqi
+    - family-names: Yu
+      given-names: Peng
+    - family-names: Wang
+      given-names: Yanbo
+    - family-names: Huang
+      given-names: Haibin
+    - family-names: Weng
+      given-names: Qizhen
+    - family-names: Zhang
+      given-names: Chi
+    - family-names: Li
+      given-names: Xuelong
+  year: 2026
+  url: "https://arxiv.org/abs/2602.07595"
 references:
   - type: article
     title: "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models (GRPO)"

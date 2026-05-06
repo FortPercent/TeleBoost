@@ -1,8 +1,13 @@
 # TeleBoost — GRPO for video diffusion
 
+[![TeleBoost arXiv](https://img.shields.io/badge/TeleBoost-arXiv%202602.07595-b31b1b.svg)](https://arxiv.org/abs/2602.07595)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![BGPO arXiv](https://img.shields.io/badge/BGPO-arXiv%202511.18919-b31b1b.svg)](https://arxiv.org/abs/2511.18919)
 [![VIPO arXiv](https://img.shields.io/badge/VIPO-arXiv%202511.18719-b31b1b.svg)](https://arxiv.org/abs/2511.18719)
+
+**Paper**: [*TeleBoost: A Systematic Alignment Framework for High-Fidelity,
+Controllable, and Robust Video Generation*](https://arxiv.org/abs/2602.07595)
+(arXiv 2602.07595).
 
 A production RL training stack for Wan2.1 / Wan2.2 text-to-video diffusion,
 built as a recipe on top of
@@ -376,8 +381,23 @@ applied automatically.
 
 ## Citation
 
-If TeleBoost is useful for your research, please cite the relevant
-paper. The two algorithms developed at TeleAI:
+If TeleBoost is useful for your work, please cite the framework paper:
+
+```bibtex
+@article{teleboost2026,
+  title   = {TeleBoost: A Systematic Alignment Framework for High-Fidelity,
+             Controllable, and Robust Video Generation},
+  author  = {Liang, Yuanzhi and Wu, Xuan'er and Liu, Yirui and Fang, Yijie
+             and Fan, Yizhen and Hao, Ke and Li, Rui and Liu, Ruiying
+             and Ni, Ziqi and Yu, Peng and Wang, Yanbo and Huang, Haibin
+             and Weng, Qizhen and Zhang, Chi and Li, Xuelong},
+  journal = {arXiv preprint arXiv:2602.07595},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2602.07595}
+}
+```
+
+The two TeleAI algorithms shipped day-0 in this codebase:
 
 ```bibtex
 @article{bgpo2025,
@@ -397,9 +417,9 @@ paper. The two algorithms developed at TeleAI:
 }
 ```
 
-For the codebase itself, see [`CITATION.cff`](CITATION.cff) — it lists
-every upstream paper TeleBoost depends on, ready for `cffconvert` /
-GitHub's "Cite this repository" widget.
+For the upstream papers TeleBoost builds on (DanceGRPO, Flow-GRPO,
+GRPO-Guard, GRPO), see [`CITATION.cff`](CITATION.cff) — ready for
+`cffconvert` / GitHub's "Cite this repository" widget.
 
 ## License & acknowledgments
 
