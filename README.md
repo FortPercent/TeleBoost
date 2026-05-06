@@ -393,17 +393,21 @@ If TeleBoost is useful for your work, please cite the framework paper:
 The two TeleAI algorithms shipped day-0 in this codebase:
 
 ```bibtex
-@article{bgpo2025,
-  title   = {BGPO: Bayesian-Prior Group Policy Optimization},
-  author  = {BGPO authors},
+@article{liu2025bgpo,
+  title   = {Learning What to Trust: Bayesian Prior-Guided Optimization
+             for Visual Generation},
+  author  = {Liu, Ruiying and Liang, Yuanzhi and Huang, Haibin
+             and Yu, Tianshu and Zhang, Chi},
   journal = {arXiv preprint arXiv:2511.18919},
   year    = {2025},
   url     = {https://arxiv.org/abs/2511.18919}
 }
 
-@article{vipo2025,
-  title   = {VIPO: Visual Preference Policy Optimization for Visual Generation},
-  author  = {VIPO authors},
+@article{ni2025vipo,
+  title   = {Seeing What Matters: Visual Preference Policy Optimization
+             for Visual Generation},
+  author  = {Ni, Ziqi and Liang, Yuanzhi and Li, Rui and Zhou, Yi
+             and Huang, Haibin and Zhang, Chi and Li, Xuelong},
   journal = {arXiv preprint arXiv:2511.18719},
   year    = {2025},
   url     = {https://arxiv.org/abs/2511.18719}

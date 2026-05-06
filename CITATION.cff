@@ -69,14 +69,36 @@ references:
     year: 2025
     url: "https://arxiv.org/abs/2510.22319"
   - type: article
-    title: "BGPO: Bayesian-Prior Group Policy Optimization"
+    title: "Learning What to Trust: Bayesian Prior-Guided Optimization for Visual Generation"
     authors:
-      - name: "BGPO authors"
+      - family-names: Liu
+        given-names: Ruiying
+      - family-names: Liang
+        given-names: Yuanzhi
+      - family-names: Huang
+        given-names: Haibin
+      - family-names: Yu
+        given-names: Tianshu
+      - family-names: Zhang
+        given-names: Chi
     year: 2025
     url: "https://arxiv.org/abs/2511.18919"
   - type: article
-    title: "VIPO: Visual Preference Policy Optimization for Visual Generation"
+    title: "Seeing What Matters: Visual Preference Policy Optimization for Visual Generation"
     authors:
-      - name: "VIPO authors"
-    year: 2026
+      - family-names: Ni
+        given-names: Ziqi
+      - family-names: Liang
+        given-names: Yuanzhi
+      - family-names: Li
+        given-names: Rui
+      - family-names: Zhou
+        given-names: Yi
+      - family-names: Huang
+        given-names: Haibin
+      - family-names: Zhang
+        given-names: Chi
+      - family-names: Li
+        given-names: Xuelong
+    year: 2025
     url: "https://arxiv.org/abs/2511.18719"
