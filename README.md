@@ -30,6 +30,9 @@ runs DanceGRPO with no add-ons.
 | Add-on | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
 | Add-on | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
 
+**BGPO** and **VIPO** are TeleAI papers; TeleBoost ships day-0
+implementations of both.
+
 `sigma_form` is selected automatically from `TELEBOOST_METHOD` /
 `ENABLE_FLOWGRPO`; you don't set it directly. The string is shown here so
 the per-algorithm docstrings are greppable.
