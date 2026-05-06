@@ -8,11 +8,6 @@ a CP gradient regression test that passes bit-exact at sp ∈ {1, 2, 4, 8},
 and a four-model joint reward (aesthetic + RAFT + VideoCLIP + VideoPhy)
 all out of the box.
 
-> **"Production" caveat.** Throughout this README, *verified* means an
-> end-to-end run completes with non-zero gradients and a decreasing loss
-> curve on the listed hardware. It is not a claim of paper-SOTA
-> reproduction.
-
 verl is consumed as a plain pip dependency, not vendored. Wan-specific
 behavior that doesn't belong in upstream verl (model loader, FSDP wrap,
 Ulysses SP patches, checkpoint compatibility) lives under
@@ -296,8 +291,6 @@ When `TELEBOOST_METHOD=joint`, four reward models (aesthetic, RAFT,
 VideoCLIP, VideoPhy) co-exist on every actor GPU and compute concurrently.
 
 ![Co-located reward + MPS-parallel multi-reward](docs/figures/colocate_mps.png)
-
-*Higher-resolution source: [colocate_mps.pdf](docs/figures/colocate_mps.pdf).*
 
 Two architectural choices matter here:
 
