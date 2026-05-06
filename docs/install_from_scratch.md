@@ -141,7 +141,7 @@ Use the unified, idempotent `prepare_wan_data.py`:
 
 ```bash
 python data_preprocess/prepare_wan_data.py \
-  --input prompts/hard_50.txt \
+  --input prompts/mini_test.txt \
   --output_dir data/processed/ \
   --wan_model_path /path/to/Wan2.1-T2V-1.3B
 ```
