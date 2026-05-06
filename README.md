@@ -162,20 +162,14 @@ The script:
 ## Train
 
 The unified launcher `run_teleboost.sh` covers every algorithm variant
-via env vars. Example for an 8-GPU 480×832 1000-step Wan2.2 run with
-HPSv2 reward:
+via env vars. Defaults match the upstream DanceGRPO recipe (Wan2.2-A14B,
+8 GPUs, 480×832×49, 1000 steps, sampling=16); the minimal command is
+just paths:
 
 ```bash
-TELEBOOST_METHOD=default \
-N_GPUS_PER_NODE=8 \
-TOTAL_TRAINING_STEPS=1000 \
-SAMPLING_STEPS=10 \
-VIDEO_HEIGHT=480 VIDEO_WIDTH=832 NUM_FRAMES=49 \
-INIT_SAME_NOISE=False \
 TRAIN_FILE=/path/to/processed_wan_prompt.json \
 TEST_FILE=/path/to/processed_wan_prompt.json \
 WAN_MODEL_PATH=/path/to/Wan2.2-T2V-A14B \
-WAN_VERSION=wan22 \
 WAN_VAE_PATH=/path/to/Wan2.2-T2V-A14B/Wan2.1_VAE.pth \
 REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
 bash recipe/teleboost/run_teleboost.sh
@@ -211,12 +205,12 @@ clip to `[0.05, 0.95]`. Example row:
 
 | Env var | Default | Notes |
 |---|---|---|
-| `N_GPUS_PER_NODE` | `4` | per-node world size |
-| `SAMPLING_STEPS` | `4` | denoising steps in rollout |
-| `TOTAL_TRAINING_STEPS` | `2` | total optimizer steps — bump for real training |
-| `VIDEO_HEIGHT`, `VIDEO_WIDTH`, `NUM_FRAMES` | `256`, `256`, `9` | resolution & frame count |
-| `TRAIN_PROMPT_BSZ`, `N_RESP_PER_PROMPT` | `2`, `2` | batch shape (effective batch = bsz × n_resp) |
-| `WAN_VERSION` | `wan21` | `wan22` for Wan2.2 dual-model A14B |
+| `N_GPUS_PER_NODE` | `8` | per-node world size |
+| `SAMPLING_STEPS` | `16` | denoising steps in rollout |
+| `TOTAL_TRAINING_STEPS` | `1000` | total optimizer steps |
+| `VIDEO_HEIGHT`, `VIDEO_WIDTH`, `NUM_FRAMES` | `480`, `832`, `49` | resolution & frame count |
+| `TRAIN_PROMPT_BSZ`, `N_RESP_PER_PROMPT` | `8`, `3` | batch shape (effective batch = bsz × n_resp) |
+| `WAN_VERSION` | `wan22` | `wan21` for Wan2.1-1.3B |
 | `VAL_BEFORE_TRAIN` | `False` | run validation before step 0 |
 | `TELEBOOST_OUTPUT_DIR` | `./outputs` | parent for `checkpoints/` and `tensorboard/` |
 
@@ -232,11 +226,10 @@ These layer on top of `TELEBOOST_METHOD` and combine freely:
 | `ENABLE_FLOWGRPO=True` | Flow-GRPO SDE solver path; auto-bumps `SAMPLING_STEPS` to 4 if it was 1 |
 | `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
 
-Example — 8-GPU sp=8 BGPO:
+Example — sp=8 BGPO:
 
 ```bash
-TELEBOOST_METHOD=bgpo N_GPUS_PER_NODE=8 SP_SIZE=8 \
-SAMPLING_STEPS=10 INIT_SAME_NOISE=False \
+TELEBOOST_METHOD=bgpo SP_SIZE=8 \
 TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh
 ```

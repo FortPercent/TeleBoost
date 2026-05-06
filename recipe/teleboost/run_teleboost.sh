@@ -48,25 +48,26 @@ output_dir="${TELEBOOST_OUTPUT_DIR:-"${working_dir}/outputs"}"
 ckpts_dir="${CKPTS_DIR:-"${output_dir}/checkpoints/${exp_name}"}"
 export TENSORBOARD_DIR="${TENSORBOARD_DIR:-"${output_dir}/tensorboard/${exp_name}"}"
 
-wan_version="${WAN_VERSION:-wan21}"
+wan_version="${WAN_VERSION:-wan22}"
 wan_vae_path="${WAN_VAE_PATH:-"${WAN_MODEL_PATH}/Wan2.1_VAE.pth"}"
 reward_model_name="${REWARD_MODEL_NAME:-hps}"
 reward_model_path="${REWARD_MODEL_PATH:-}"
 
 nnodes="${NNODES:-1}"
-n_gpus="${N_GPUS_PER_NODE:-4}"
-train_prompt_bsz="${TRAIN_PROMPT_BSZ:-2}"
-n_resp_per_prompt="${N_RESP_PER_PROMPT:-2}"
-total_training_steps="${TOTAL_TRAINING_STEPS:-2}"
+n_gpus="${N_GPUS_PER_NODE:-8}"
+train_prompt_bsz="${TRAIN_PROMPT_BSZ:-8}"
+n_resp_per_prompt="${N_RESP_PER_PROMPT:-3}"
+total_training_steps="${TOTAL_TRAINING_STEPS:-1000}"
 
-height="${VIDEO_HEIGHT:-256}"
-width="${VIDEO_WIDTH:-256}"
-num_frames="${NUM_FRAMES:-9}"
-# Default sampling_steps=4: the rollout drops the final sigma->0 step
-# (numerically unstable for log-prob), so train_timesteps = max(1,
-# int((sampling_steps-1) * timestep_fraction)).  sampling_steps in {1, 2}
-# would silently no-op the policy update for the default fraction=0.6.
-sampling_steps="${SAMPLING_STEPS:-4}"
+height="${VIDEO_HEIGHT:-480}"
+width="${VIDEO_WIDTH:-832}"
+num_frames="${NUM_FRAMES:-49}"
+# sampling_steps=16 matches the upstream DanceGRPO recipe.  The rollout
+# drops the final sigma->0 step (numerically unstable for log-prob), so
+# train_timesteps = max(1, int((sampling_steps-1) * timestep_fraction));
+# values <=2 silently no-op the policy update for the default
+# fraction=0.6, and <4 trips HPS into nan on near-noise inputs.
+sampling_steps="${SAMPLING_STEPS:-16}"
 
 max_prompt_length="${MAX_PROMPT_LENGTH:-2048}"
 max_response_length="${MAX_RESPONSE_LENGTH:-20480}"
