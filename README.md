@@ -18,17 +18,16 @@ Ulysses SP patches, checkpoint compatibility) lives under
 Each module in `recipe/teleboost/algorithms/` is a paper-faithful
 translation; see the per-algorithm docstring for the equation pin.
 
-Pick one **base** (DanceGRPO or Flow-GRPO); **add-ons** layer on either
-base. The default base is DanceGRPO; selecting `TELEBOOST_METHOD=default`
-runs DanceGRPO with no add-ons.
+DanceGRPO is the default; the others are selectable through
+`TELEBOOST_METHOD` and the `ENABLE_*` flags (see [Train](#train)).
 
-| Role | Algorithm | Paper | What it does |
-|---|---|---|---|
-| Base (default) | **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast (`sigma_form="dancegrpo"`) |
-| Base (alt) | **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE (`sigma_form="flow_grpo"`) |
-| Add-on | **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
-| Add-on | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
-| Add-on | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
+| Algorithm | Paper | What it does |
+|---|---|---|
+| **DanceGRPO** (default) | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast (`sigma_form="dancegrpo"`) |
+| **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE (`sigma_form="flow_grpo"`) |
+| **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
+| **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
+| **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
 
 **BGPO** and **VIPO** are TeleAI papers; TeleBoost ships day-0
 implementations of both.
@@ -50,7 +49,7 @@ the sole reward via `REWARD_MODEL_PATH`.
 | RAFT (optical flow) | [arXiv 2003.12039](https://arxiv.org/abs/2003.12039) | ✓ |
 | VideoCLIP-XL | [arXiv 2410.00741](https://arxiv.org/abs/2410.00741) | ✓ |
 | VideoPhy | [arXiv 2406.03520](https://arxiv.org/abs/2406.03520) | ✓ |
-| Qwen2-VL-7B / 32B | (vendored vLLM rollout) | — |
+| Qwen2.5-VL-7B / 32B | (vendored vLLM rollout) | — |
 | DINOv2 (advantage shaper, not a reward) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) | — (used by VIPO) |
 
 ## Supported
@@ -58,8 +57,8 @@ the sole reward via `REWARD_MODEL_PATH`.
 | Dimension | Supported |
 |---|---|
 | Actor | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) |
-| Reward | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + RAFT + VideoCLIP + VideoPhy) |
-| Algorithm | DanceGRPO (default), Flow-GRPO; GRPO-Guard / BGPO / VIPO add-ons |
+| Reward | HPSv2, Qwen2.5-VL-7B, 4-reward joint (aesthetic + RAFT + VideoCLIP + VideoPhy) |
+| Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
 | Sequence parallel | sp ∈ {1, 2, 4, 8}; CP grad bit-exact at fp32 |
 | Hardware | H800 / H100 80 GB |
@@ -160,36 +159,6 @@ The script:
 * the negative prompt defaults to Wan's official Chinese template; override
   with `--negative_prompt "..."` if you need a different one.
 
-## Smoke test
-
-Before kicking off a real run, verify the full pipeline on a tiny
-prompt list. The default `TOTAL_TRAINING_STEPS=2` is sized for exactly
-this purpose.
-
-```bash
-# 1. prep ~10 prompts
-python data_preprocess/prepare_wan_data.py \
-  --input prompts/mini_test.txt \
-  --output_dir data/smoke/ \
-  --wan_model_path /path/to/Wan2.1-T2V-1.3B
-
-# 2. 2-step training run on 4 GPUs at 256x256x9
-N_GPUS_PER_NODE=4 \
-TOTAL_TRAINING_STEPS=2 \
-SAMPLING_STEPS=4 \
-TRAIN_FILE=data/smoke/processed_wan_prompt.json \
-TEST_FILE=data/smoke/processed_wan_prompt.json \
-WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B \
-WAN_VERSION=wan21 \
-WAN_VAE_PATH=/path/to/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth \
-REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
-bash recipe/teleboost/run_teleboost.sh
-```
-
-On 4×H800 this finishes in ~10 minutes and writes a checkpoint and a
-TensorBoard log under `./outputs/`. If `grad_norm` is non-zero and the
-loss decreases between step 1 and step 2, your install is good.
-
 ## Train
 
 The unified launcher `run_teleboost.sh` covers every algorithm variant
@@ -216,7 +185,7 @@ bash recipe/teleboost/run_teleboost.sh
 
 | `TELEBOOST_METHOD` | Behavior | Required env vars (in addition to the core ones) |
 |---|---|---|
-| `default` | DanceGRPO base, no add-ons | — |
+| `default` | DanceGRPO, nothing else | — |
 | `bgpo` | DanceGRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field (see schema below) |
 | `vipo` | DanceGRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
 | `joint` | 4-reward joint (aesthetic + raft + videoclip + videophy) | `JOINT_AESTHETIC_CLIP_PATH`, `JOINT_AESTHETIC_MODEL_PATH`, `JOINT_RAFT_MODEL_PATH`, `JOINT_VIDEOCLIP_MODEL_PATH`, `JOINT_VIDEOPHY_MODEL_PATH` |
