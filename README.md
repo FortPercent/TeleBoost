@@ -8,16 +8,21 @@
 Memory-efficient DPO post-training for video diffusion models.
 </h3>
 
-📄 **Paper**: [*TeleBoost: A Systematic Alignment Framework for High-Fidelity, Controllable, and Robust Video Generation*](https://arxiv.org/abs/2602.07595) (arXiv:2602.07595)
+<p align="center">
+  <a href="https://arxiv.org/abs/2602.07595"><img alt="TeleBoost arXiv" src="https://img.shields.io/badge/TeleBoost-arXiv%202602.07595-B31B1B?labelColor=555555"></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=555555"></a>
+  <a href="https://arxiv.org/abs/2511.18919"><img alt="BGPO arXiv" src="https://img.shields.io/badge/BGPO-arXiv%202511.18919-B31B1B?labelColor=555555"></a>
+  <a href="https://arxiv.org/abs/2511.18719"><img alt="VIPO arXiv" src="https://img.shields.io/badge/VIPO-arXiv%202511.18719-B31B1B?labelColor=555555"></a>
+</p>
 
 This is a **Post-training framework for video diffusion models**,
 featuring **Gradient Decoupled DPO** — a per-branch backward +
 immediate reduce-scatter pattern that on Wan 14B 40-layer DPO at
 32×H800:
 
-* **cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
-* **lets the production default (49 f / 480p) actually run** — standard DPO OOMs, Decoupled finishes at 42.90 GB
-* **extends supported context length by ~15×** — standard DPO max-fits at 25 f / 480p (~11k visual tokens), Decoupled max-fits at 77 f / 1080p (~163k visual tokens) on the same hardware
+* **Cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
+* **Extends supported context length by ~15×** — Standard DPO max-fits at 25 f / 480p (~11k visual tokens), Decoupled max-fits at 77 f / 1080p (~163k visual tokens) on the same hardware
+* **Lets the production default (49 f / 480p) actually run** — Standard DPO OOMs, Decoupled finishes at 42.90 GB
 
 It is mathematically equivalent to the single-backward formulation
 (verified element-wise on 14.78 B gradient elements at 32-GPU
