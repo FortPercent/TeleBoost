@@ -3,9 +3,9 @@
 A video-generation RL training stack built on top of upstream
 [`volcengine/verl`](https://github.com/volcengine/verl) v0.4.0. The actor is a
 Wan2.1 / Wan2.2 text-to-video diffusion backbone; the reward signal can come
-from HPSv2, Qwen-VL, or a four-model joint setup (aesthetic + RAFT + VideoCLIP
-+ videophy). The base RL algorithm is GRPO, with optional GRPO-Guard and
-flow-grpo extensions.
+from HPSv2, Qwen-VL, or a four-model joint setup (aesthetic + RAFT +
+VideoCLIP + videophy). The base RL algorithm is GRPO, with optional
+GRPO-Guard and flow-grpo extensions.
 
 This repo is the *recipe* + Wan integration; verl itself is consumed as a
 plain pip dependency, not vendored. Wan-specific behaviour that doesn't
