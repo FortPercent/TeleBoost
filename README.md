@@ -2,11 +2,11 @@
 
 A production RL training stack for Wan2.1 / Wan2.2 text-to-video diffusion,
 built as a recipe on top of
-[`volcengine/verl`](https://github.com/volcengine/verl). Five paper-pinned
-algorithm variants (DanceGRPO, Flow-GRPO, GRPO-Guard, BGPO, VIPO),
-a CP gradient regression test that passes bit-exact at sp ∈ {1, 2, 4, 8},
-and a four-model joint reward (aesthetic + RAFT + VideoCLIP + VideoPhy)
-all out of the box.
+[`volcengine/verl`](https://github.com/volcengine/verl). It ships with five
+paper-pinned algorithm variants (DanceGRPO, Flow-GRPO, GRPO-Guard, BGPO,
+VIPO), a CP gradient regression test that passes bit-exact at
+sp ∈ {1, 2, 4, 8}, and a four-model joint reward (aesthetic + RAFT +
+VideoCLIP + VideoPhy) — all out of the box.
 
 verl is consumed as a plain pip dependency, not vendored. Wan-specific
 behavior that doesn't belong in upstream verl (model loader, FSDP wrap,
@@ -38,9 +38,9 @@ the per-algorithm docstrings are greppable.
 
 ### Reward models
 
-The full set of supported reward models. The four marked **(joint)** are
-the ones combined when `TELEBOOST_METHOD=joint`; the rest are usable as
-the sole reward via `REWARD_MODEL_PATH`.
+The table below lists every supported reward model. The four marked ✓
+are combined when `TELEBOOST_METHOD=joint`; the rest are usable as the
+sole reward via `REWARD_MODEL_PATH`.
 
 | Reward model | Paper / repo | Used in `joint`? |
 |---|---|---|
@@ -113,10 +113,11 @@ only reads the umT5 files.
 
 ## Prepare data
 
-Every training row must carry both `context_path` (positive prompt umT5
-embedding), `context_null_path` (a single shared negative-prompt umT5
-embedding for CFG), and `caption` (the original prompt text, kept for
-logging and reward models that consume the raw string). The dataset
+Every training row must carry three fields: `context_path` (positive
+prompt umT5 embedding), `context_null_path` (a single shared
+negative-prompt umT5 embedding for CFG), and `caption` (the original
+prompt text, kept for logging and reward models that consume the raw
+string). The dataset
 loader fails fast if `context_null_path` is missing — without it CFG
 collapses to `(1+scale) * cond` and reward variance vanishes
 (advantage=0, grad_norm=0).
