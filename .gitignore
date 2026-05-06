@@ -130,6 +130,7 @@ outputs
 *.npy
 *.jpg
 *.png
+!docs/figures/*.png
 events.*
 *.pickle
 

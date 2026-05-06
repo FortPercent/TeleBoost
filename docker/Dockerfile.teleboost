@@ -1,5 +1,5 @@
 # ============================================================
-# TeleBoost / DanceGRPO — single-file Dockerfile
+# TeleBoost — single-file Dockerfile
 # ============================================================
 # Builds a self-contained image: NGC PyTorch 24.08 base, then layered
 # torch 2.6 + vllm 0.8.4 + flash-attn 2.7.4.post1 + flashinfer 0.2.2.post1,
@@ -16,12 +16,12 @@
 #     --build-arg PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
 #     -t teleboost/teleboost:latest .
 #
-# Run (4×H100, replace the smoke script and mount your own data):
+# Run (4×H100, mount your own data):
 #   docker run --rm --gpus all --ipc=host --shm-size=32g \
 #     -v $PWD:/workspace/TeleBoost \
 #     -e TORCH_COMPILE_DISABLE=1 \
 #     teleboost/teleboost:latest \
-#     bash recipe/teleboost/run_teleboost_smoke.sh
+#     bash recipe/teleboost/run_teleboost.sh
 # ============================================================
 
 # NGC PyTorch 24.08: Ubuntu 22.04 + CUDA 12.6 + Python 3.10 + torch 2.5 + TE 1.9
@@ -107,10 +107,10 @@ RUN pip install --no-cache-dir --no-deps \
     "verl @ git+https://github.com/volcengine/verl.git@v0.4.0"
 
 # ==========================================================
-# DanceGRPO overlay (Wan + reward stack on top of the verl-compatible base)
+# TeleBoost overlay (Wan + reward stack on top of the verl-compatible base)
 # ==========================================================
 
-# ---------- DanceGRPO-specific deps ----------
+# ---------- TeleBoost-specific deps ----------
 # wan.modules.*  : easydict + diffusers
 # videoclip      : opencv-python
 # videophy       : decord

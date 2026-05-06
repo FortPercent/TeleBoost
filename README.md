@@ -18,14 +18,18 @@ Ulysses SP patches, checkpoint compatibility) lives under
 Each module in `recipe/teleboost/algorithms/` is a paper-faithful
 translation; see the per-algorithm docstring for the equation pin.
 
-| Algorithm | Paper | What it does |
-|---|---|---|
-| **GRPO** | [DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300) | Per-prompt z-score advantage (group baseline) |
-| **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation; SDE recast with σ_t = η constant |
-| **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE |
-| **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
-| **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
-| **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
+Plain GRPO ([DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300))
+is not supported as a standalone algorithm — diffusion training requires an
+SDE recast for the rollout step. Pick one **base** (DanceGRPO or Flow-GRPO);
+**add-ons** layer on either base.
+
+| Role | Algorithm | Paper | What it does |
+|---|---|---|---|
+| Base (default) | **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast (`sigma_form="dancegrpo"`) |
+| Base (alt) | **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE (`sigma_form="flow_grpo"`) |
+| Add-on | **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
+| Add-on | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
+| Add-on | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
 
 Reward models / vendored components:
 
@@ -46,21 +50,36 @@ a decreasing loss curve; not a claim of paper-SOTA reproduction.
 |---|---|---|
 | Actor    | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
 | Reward   | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + raft + videoclip + videophy) | Qwen-VL-32B, custom callable |
-| Algorithm | GRPO | GRPO-Guard, Flow-GRPO SDE path, GAE / RLOO (upstream) |
+| Algorithm | DanceGRPO (`TELEBOOST_METHOD=baseline`) | Flow-GRPO base, GRPO-Guard / BGPO / VIPO add-ons, GAE / RLOO (upstream) |
 | Rollout  | Diffusion (actor), vLLM (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
 | Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, CP grad bit-exact at fp32) | other Ulysses configs |
 | Hardware | 4×H800 80 GB, 8×H800 80 GB | 8 GPU multi-host |
 
 ## Install
 
-If you already have a verl-compatible Docker image (e.g.
-`verlai/verl:vllm017.latest`), see [`INSTALL.md`](INSTALL.md) — three pip
-commands plus an import check.
+Three paths, pick whichever matches your starting state:
 
-For a bare GPU host, see
+**1. Build from our Dockerfile.** Self-contained image: NGC PyTorch 24.08
+base + torch 2.6 + vllm 0.8.4 + flash-attn 2.7.4.post1 + flashinfer +
+verl v0.4.0 (`--no-deps`) + Wan and reward dependencies + the hpsv2 BPE
+vocab/`tkinter` fixes + TeleBoost as an editable install.
+
+```bash
+docker build -f docker/Dockerfile.teleboost -t teleboost:latest .
+```
+
+For region-mirrored builds (Tsinghua), pass
+`--build-arg APT_SOURCE=...  --build-arg PIP_INDEX=...`; see the
+Dockerfile header for the exact flags.
+
+**2. Existing verl-compatible image.** If you already have
+`verlai/verl:vllm017.latest` or similar, see [`INSTALL.md`](INSTALL.md)
+— three pip commands plus an import check.
+
+**3. Bare GPU host.** See
 [`docs/install_from_scratch.md`](docs/install_from_scratch.md) — full
-recipe including the flash-attn wheel, hpsv2 packaging fixes, and known
-gotchas.
+recipe from scratch, including the flash-attn wheel, hpsv2 packaging
+fixes, and known gotchas.
 
 ## Prepare data
 
@@ -166,6 +185,55 @@ SAMPLING_STEPS=10 INIT_SAME_NOISE=False \
 TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh
 ```
+
+## Multi-reward joint setup
+
+When `TELEBOOST_METHOD=joint`, four reward models (aesthetic, RAFT,
+VideoCLIP, VideoPhy) co-exist on every actor GPU and compute concurrently.
+
+![Co-located reward + MPS-parallel multi-reward](docs/figures/colocate_mps.png)
+
+Two architectural choices matter here:
+
+**1. Co-located reward + actor.** Reward workers share the actor GPUs
+(`dp_fraction=1.0, rank_offset=0` for every model). The earlier
+disaggregated layout (separate reward GPUs) was removed because
+`_allgather_rewards` calls `dist.all_gather` on the default world process
+group — any `dp_size != world_size` triggers a length-mismatch crash.
+Co-location also eliminates the rollout-idle / reward-idle stalls in the
+left half of the figure above. See
+[`recipe/teleboost/config/teleboost_trainer.yaml`](recipe/teleboost/config/teleboost_trainer.yaml#L172)
+for the dispatch comment.
+
+**2. MPS-parallel multi-reward.** Four reward forwards run serially on
+one GPU would block the actor on a wall-clock sum of all four model
+forwards. NVIDIA CUDA MPS lets each reward model occupy a fixed thread
+percentage of the same GPU; the four models compute concurrently and the
+joint forward finishes in roughly the time of the *slowest* single model,
+not the sum. Default thread allocation (sums to 100%):
+
+| Model | Approx. params | `mps_percentage` |
+|---|---|---|
+| `aesthetic` (LAION ViT-L/14 + linear head) | 5.3M | 20 |
+| `raft` (RAFT optical flow) | 5.3M | 30 |
+| `videoclip` (VideoCLIP-XL) | 0.42B | 25 |
+| `videophy` (videocon_physics) | 7B | 25 |
+
+Per-model Hydra overrides:
+
+```bash
+# tune one model's share
+bash recipe/teleboost/run_teleboost.sh \
+  reward_model.joint.mps.model_percentages.videophy=40
+
+# disable MPS — falls back to within-GPU serial
+bash recipe/teleboost/run_teleboost.sh \
+  reward_model.joint.mps.enabled=false
+```
+
+Aggregation across the four rewards is configurable
+(`reward_model.joint.aggregation`, default `weighted_sum`); per-model
+weights live under `reward_model.joint.models.<name>.weight`.
 
 ## Repository layout
 
