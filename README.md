@@ -335,35 +335,6 @@ any process that does `import teleboost` (or imports anything under
 `recipe.teleboost.*`, which imports teleboost) ends up with the patches
 applied automatically.
 
-## Tests
-
-```bash
-# Imports — must print 8/8 OK
-python3 - <<'PY'
-import importlib
-mods = [
-    "recipe.teleboost.main_teleboost",
-    "recipe.teleboost.teleboost_ray_trainer",
-    "recipe.teleboost.teleboost_fsdp_worker",
-    "recipe.teleboost.dp_actor",
-    "recipe.teleboost.unified_reward_worker",
-    "teleboost.workers.reward_manager.dancegrpo",
-    "teleboost.workers.rollout.diffusion_rollout",
-    "teleboost.workers.sharding_manager.diffusion",
-]
-ok = sum(bool(importlib.import_module(m)) for m in mods)
-print(f"{ok}/{len(mods)} pass")
-PY
-
-# CP grad reduce regression.
-# fp32 must print exact bit-equality: rel_err == 0.
-torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
-torchrun --nproc_per_node=8 tests/special_distributed/test_cp_grad_reduce.py
-
-# bf16 is expected to have non-zero rounding error; pass threshold is rel_err < 1e-3.
-DTYPE=bf16 torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
-```
-
 ## Documentation
 
 | File | Topic |
