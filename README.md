@@ -32,11 +32,9 @@ dual-model + FSDP working set does not fit.
 Each module in `recipe/teleboost/algorithms/` is a paper-faithful
 translation; see the per-algorithm docstring for the equation pin.
 
-Plain GRPO ([DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300))
-is **not supported** as a standalone algorithm — diffusion training requires an
-SDE recast for the rollout step. Pick one **base** (DanceGRPO or Flow-GRPO);
-**add-ons** layer on either base. The default base is DanceGRPO; selecting
-`TELEBOOST_METHOD=default` runs DanceGRPO with no add-ons.
+Pick one **base** (DanceGRPO or Flow-GRPO); **add-ons** layer on either
+base. The default base is DanceGRPO; selecting `TELEBOOST_METHOD=default`
+runs DanceGRPO with no add-ons.
 
 | Role | Algorithm | Paper | What it does |
 |---|---|---|---|
