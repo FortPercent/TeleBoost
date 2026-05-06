@@ -167,23 +167,6 @@ TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh
 ```
 
-## Known footguns
-
-These are the failure modes that look like training but aren't:
-
-1. **Low `SAMPLING_STEPS` + HPSv2 → silent NaN.** HPSv2 returns `nan` on
-   near-noise inputs. Below `SAMPLING_STEPS=4` you get
-   `train/rewards = nan`, `actor/grad_norm = 0`, and a loop that runs
-   end-to-end without learning. Joint and Qwen-VL rewards return finite
-   values even at low step counts; HPS is uniquely sensitive.
-2. **`init_same_noise=True` → zero advantage.** When all responses for a
-   prompt share starting noise, generations are near-identical, reward
-   variance ≈ 0, and advantage ≈ 0 even when reward is finite. Set
-   `INIT_SAME_NOISE=False` for any real training run.
-3. **Missing `context_null_path` → CFG collapse.** Covered above in
-   *Prepare data*; the loader fails fast, but if you bypass it you get
-   advantage=0.
-
 ## Repository layout
 
 ```
