@@ -12,25 +12,25 @@ import numpy as np
 
 OUT_DIR = Path(__file__).resolve().parent
 
-C_STANDARD = "#BC908A"
-C_DECOUPLED = "#9CAE9F"
-C_OOM = "#8B5A5A"
+C_STANDARD = "#D67878"
+C_DECOUPLED = "#5C8AB5"
+C_OOM = "#A03E3E"
 C_CAP = "#7A7A7A"
 CAPACITY_GB = 80.0
 
 plt.rcParams.update({
     "font.family": "DejaVu Sans",
-    "font.size": 11,
+    "font.size": 14,
     "axes.spines.top": False,
     "axes.spines.right": False,
     "axes.titleweight": "bold",
-    "axes.titlesize": 13,
+    "axes.titlesize": 16,
 })
 
 
 def _annotate_bar(ax, x, height, text, color="black", weight="normal", dy=1.2):
     ax.text(x, height + dy, text, ha="center", va="bottom",
-            fontsize=10, color=color, fontweight=weight)
+            fontsize=13, color=color, fontweight=weight)
 
 
 def fig_memory_vs_sequence():
@@ -74,7 +74,7 @@ def fig_memory_vs_sequence():
         else:
             _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                           f"{decoupled_mem[i]:.2f} GB",
-                          color="#5A7762", weight="bold")
+                          color="#2C5587", weight="bold")
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
@@ -93,7 +93,7 @@ def fig_memory_vs_sequence():
              "Dashed line = H800 80 GB capacity. "
              "Decoupled DPO unlocks production-config training (49 f/480p) "
              "that standard DPO cannot fit, and scales to ~8.5× the visual-token length.",
-             ha="center", fontsize=10, color="#444")
+             ha="center", fontsize=12, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_sequence.png"
@@ -116,7 +116,7 @@ def fig_memory_vs_layers():
     x = np.arange(len(configs))
     width = 0.36
 
-    fig, ax = plt.subplots(figsize=(8.5, 6.2), dpi=160)
+    fig, ax = plt.subplots(figsize=(11.5, 7.5), dpi=160)
     bars_s = ax.bar(x - width / 2, standard, width,
                     color=C_STANDARD, label="Standard DPO", zorder=3)
     bars_d = ax.bar(x + width / 2, decoupled, width,
@@ -136,23 +136,23 @@ def fig_memory_vs_layers():
     for i, b in enumerate(bars_d):
         _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                       f"{decoupled[i]:.2f} GB",
-                      color="#5A7762", weight="bold")
+                      color="#2C5587", weight="bold")
 
     for i, d in enumerate(deltas):
         top = max(standard[i], decoupled[i])
         ax.annotate(d, xy=(x[i], top + 6),
-                    ha="center", va="center", fontsize=10.5,
-                    color="#3F5A47" if "−" in d else "#555",
+                    ha="center", va="center", fontsize=13,
+                    color="#2C5587" if "−" in d else "#555",
                     fontweight="bold" if "−" in d else "normal",
                     bbox=dict(boxstyle="round,pad=0.3",
-                              fc="#E5EDE3" if "−" in d else "#EFEFEF",
-                              ec="#7D9B83" if "−" in d else "#A8A8A8",
+                              fc="#DCE7F3" if "−" in d else "#EFEFEF",
+                              ec="#5C8AB5" if "−" in d else "#A8A8A8",
                               lw=0.8))
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(configs, fontsize=10)
+    ax.set_xticklabels(configs, fontsize=12.5)
     ax.set_ylabel("Peak GPU memory (GB)")
     ax.set_ylim(0, 102)
     ax.set_title("Wan 14B I2V DPO — peak GPU memory at production depth\n"
@@ -165,7 +165,7 @@ def fig_memory_vs_layers():
              "Dashed line = H800 80 GB capacity. "
              "At full production scale (32×H800, 49 f / 480p, ~20k visual tokens), "
              "Gradient Decoupled DPO cuts peak memory by ~46% — from a standard-DPO OOM down to 42.91 GB.",
-             ha="center", fontsize=10, color="#444")
+             ha="center", fontsize=12, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_layers.png"
