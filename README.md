@@ -61,7 +61,6 @@ Three concrete wins on the same 32-GPU H800 hardware:
 | 65 f / 1080p (T=17) | ~139 k | ❌ OOM | ✅ 64.54 GB |
 | 121 f / 720p (T=31) | ~112 k | ❌ OOM | ✅ 67.73 GB |
 | 77 f / 1080p (T=20) | ~163 k | ❌ OOM | ✅ 69.32 GB ← *decoupled's ceiling* |
-| 81 f / 1080p (T=21) | ~171 k | ❌ OOM | ❌ OOM |
 
 → Standard DPO ceiling at 32×H800: **~11 k visual tokens** (25 f / 480p ≈ 1.5 s of low-res video).
 Decoupled DPO ceiling: **~163 k visual tokens** (77 f / 1080p ≈ 4.8 s of full-res video).
