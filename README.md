@@ -1,5 +1,9 @@
 # TeleBoost — GRPO for video diffusion
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![BGPO arXiv](https://img.shields.io/badge/BGPO-arXiv%202511.18919-b31b1b.svg)](https://arxiv.org/abs/2511.18919)
+[![VIPO arXiv](https://img.shields.io/badge/VIPO-arXiv%202511.18719-b31b1b.svg)](https://arxiv.org/abs/2511.18719)
+
 A production RL training stack for Wan2.1 / Wan2.2 text-to-video diffusion,
 built as a recipe on top of
 [`volcengine/verl`](https://github.com/volcengine/verl). It ships with five
@@ -368,6 +372,34 @@ applied automatically.
 | [`INSTALL.md`](INSTALL.md) | Fast install path on a verl-ready Docker image |
 | [`docs/install_from_scratch.md`](docs/install_from_scratch.md) | Bare-host install + every gotcha |
 | [`requirements-pinned.txt`](requirements-pinned.txt) | Full pin file (every transitive dep) |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to send a PR, run tests, file an issue |
+
+## Citation
+
+If TeleBoost is useful for your research, please cite the relevant
+paper. The two algorithms developed at TeleAI:
+
+```bibtex
+@article{bgpo2025,
+  title   = {BGPO: Bayesian-Prior Group Policy Optimization},
+  author  = {BGPO authors},
+  journal = {arXiv preprint arXiv:2511.18919},
+  year    = {2025},
+  url     = {https://arxiv.org/abs/2511.18919}
+}
+
+@article{vipo2025,
+  title   = {VIPO: Visual Preference Policy Optimization for Visual Generation},
+  author  = {VIPO authors},
+  journal = {arXiv preprint arXiv:2511.18719},
+  year    = {2025},
+  url     = {https://arxiv.org/abs/2511.18719}
+}
+```
+
+For the codebase itself, see [`CITATION.cff`](CITATION.cff) — it lists
+every upstream paper TeleBoost depends on, ready for `cffconvert` /
+GitHub's "Cite this repository" widget.
 
 ## License & acknowledgments
 

@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "TeleBoost — DanceGRPO recipe for Wan video diffusion"
+title: "TeleBoost — GRPO for video diffusion"
 message: "If you use this codebase, please cite the underlying papers and (optionally) this repository."
 type: software
 authors:
