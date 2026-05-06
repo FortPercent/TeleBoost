@@ -13,20 +13,6 @@ behavior that doesn't belong in upstream verl (model loader, FSDP wrap,
 Ulysses SP patches, checkpoint compatibility) lives under
 [`teleboost/`](teleboost/) and is applied at import time.
 
-## Hardware requirements
-
-TeleBoost targets H800 / H100-class clusters. Anything smaller is
-unsupported.
-
-| Configuration | Min GPUs | Min VRAM / GPU | Notes |
-|---|---|---|---|
-| Wan2.1-1.3B + HPSv2 | 4 | 80 GB | smallest verified config |
-| Wan2.2-A14B + HPSv2 | 8 | 80 GB | dual-model, sp=8 |
-| Wan2.2-A14B + 4-reward joint | 8 | 80 GB | reward models co-located on actor GPUs via MPS |
-
-Consumer cards (24/48 GB) are not a supported target — the Wan2.2-A14B
-dual-model + FSDP working set does not fit.
-
 ## Algorithms
 
 Each module in `recipe/teleboost/algorithms/` is a paper-faithful
