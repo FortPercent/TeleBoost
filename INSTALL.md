@@ -84,16 +84,16 @@ torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_reduce.py
 
 ## Run training
 
-The unified entrypoint is `recipe/teleboost/run_teleboost_smoke.sh`.
+The unified entrypoint is `recipe/teleboost/run_teleboost.sh`.
 Required env vars:
 
 ```bash
 export TRAIN_FILE=/path/to/processed_wan_prompt.json     # rl_embeddings JSON
-export TEST_FILE=$TRAIN_FILE                              # smoke can reuse train
+export TEST_FILE=$TRAIN_FILE                              # can reuse train file
 export WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B            # or Wan2.2-T2V-A14B
 export REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt  # for non-joint runs
 
-bash recipe/teleboost/run_teleboost_smoke.sh
+bash recipe/teleboost/run_teleboost.sh
 ```
 
 Optional knobs (defaults shown): `TELEBOOST_METHOD=baseline`, `WAN_VERSION=wan21`,
@@ -102,7 +102,7 @@ Optional knobs (defaults shown): `TELEBOOST_METHOD=baseline`, `WAN_VERSION=wan21
 
 ## Known gotchas (verified 2026-05-05 on 8×H800)
 
-These are real failures we hit during fresh-box install / smoke runs.  The
+These are real failures we hit during fresh-box install / end-to-end runs.  The
 Dockerfile already encodes the fixes; if you install by hand, watch for them.
 
 1. **`pip install verl` pulls the wrong version.**  The latest PyPI verl
@@ -132,7 +132,7 @@ Dockerfile already encodes the fixes; if you install by hand, watch for them.
 
 5. **`PPO_MINI_BATCH_SIZE` must be ≥ `n_gpus_per_node` after world-size
    normalization.**  verl normalizes the mini-batch by world size with
-   floor division.  The smoke script now defaults
+   floor division.  The launcher now defaults
    `PPO_MINI_BATCH_SIZE=${n_gpus}` so this scales automatically; if you
    override, keep it ≥ `n_gpus`.
 

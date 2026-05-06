@@ -190,7 +190,7 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
         # rollout already trims the final step (sigma -> 0 yields a peaked
         # log-prob and produces NaN gradients), so the available pool is
         # ``len(timesteps) = sampling_steps - 1``.  Use ``max(1, ...)`` so
-        # that small smoke configs (sampling_steps=2,3) still execute at
+        # that small test configs (sampling_steps=2,3) still execute at
         # least one policy-gradient step instead of silently no-op'ing.
         timestep_count = len(data.batch["timesteps"][0])
         if timestep_count <= 0:

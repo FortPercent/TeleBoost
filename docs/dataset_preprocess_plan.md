@@ -41,9 +41,9 @@ Outputs (under `--output_dir`):
   `/workspace`-style mounts will lose the embeddings on container
   restart.
 
-## Smoke validation after regen
+## Validation after regen
 
-Re-run baseline smoke against the new dataset; `train/rewards` should
+Re-run a baseline against the new dataset; `train/rewards` should
 land in HPS-v2's typical ~0.15–0.30 range for random Wan2.2 outputs.
 
 ```bash
@@ -51,12 +51,12 @@ TRAIN_FILE=<output_dir>/processed_wan_prompt.json \
 TEST_FILE=$TRAIN_FILE \
 WAN_MODEL_PATH=<wan_ckpt_dir> \
 REWARD_MODEL_PATH=<hps_v2.1_compressed.pt> \
-bash recipe/teleboost/run_teleboost_smoke.sh data.prompt_key=caption
+bash recipe/teleboost/run_teleboost.sh data.prompt_key=caption
 ```
 
 If `train/rewards` is still 0, two things to check:
 
-* `data.prompt_key` — the smoke script defaults to `prompt`; the JSON
+* `data.prompt_key` — the launcher defaults to `prompt`; the JSON
   written by `prepare_wan_data.py` uses `caption`, so pass
   `data.prompt_key=caption` as a Hydra override.
 * `reward_model.normalize` — defaults to `true`, which z-scores rewards
@@ -73,7 +73,7 @@ The non-obvious parts are:
    data).
 2. **Output location** — depends on storage quota and persistence
    guarantees.
-3. **Quality check** — post-regen smoke + visual VAE-decode dump that
+3. **Quality check** — post-regen run + visual VAE-decode dump that
    verifies the prompt → video alignment is real.
 
 These belong to the operator, not encoded in the script.

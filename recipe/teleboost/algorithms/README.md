@@ -21,7 +21,7 @@ Each algorithm module exposes:
 2. **A `*Mixin` class** that `RayDanceGRPOTrainer` inherits from. Mixins read
    `self.config`, `self.global_steps`, etc. from the trainer.
 3. **A no-op fallback** when the enable flag is False — every algorithm must
-   degrade cleanly to baseline GRPO so smokes are comparable.
+   degrade cleanly to baseline GRPO so runs are comparable.
 
 ## Adding a new algorithm
 
@@ -32,5 +32,5 @@ Each algorithm module exposes:
 3. Re-export both helpers and the mixin from `algorithms/__init__.py`.
 4. Add a row to the table above.
 5. Wire the trainer to inherit the mixin (in `teleboost_ray_trainer.py`).
-6. Add an entry in `run_teleboost_smoke.sh` so the smoke launcher exposes
+6. Add an entry in `run_teleboost.sh` so the launcher exposes
    `TELEBOOST_METHOD=<name>`.

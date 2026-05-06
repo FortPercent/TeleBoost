@@ -1,21 +1,21 @@
 # TeleBoost — GRPO for video diffusion
 
-A video-generation RL training stack built on top of upstream
-[`volcengine/verl`](https://github.com/volcengine/verl) v0.4.0. The actor is a
-Wan2.1 / Wan2.2 text-to-video diffusion backbone; the reward signal can come
-from HPSv2, Qwen-VL, or a four-model joint setup (aesthetic + RAFT +
-VideoCLIP + videophy). The base RL algorithm is GRPO, with optional
-GRPO-Guard and flow-grpo extensions.
+A production RL training stack for Wan2.1 / Wan2.2 text-to-video diffusion,
+built as a recipe on top of
+[`volcengine/verl`](https://github.com/volcengine/verl). Six paper-pinned
+algorithm variants (GRPO, DanceGRPO, Flow-GRPO, GRPO-Guard, BGPO, VIPO),
+a CP gradient regression test that passes bit-exact at sp ∈ {1, 2, 4, 8},
+and a four-model joint reward (aesthetic + RAFT + VideoCLIP + VideoPhy)
+all out of the box.
 
-This repo is the *recipe* + Wan integration; verl itself is consumed as a
-plain pip dependency, not vendored. Wan-specific behaviour that doesn't
-belong in upstream verl (model loader, FSDP wrap, Ulysses SP patches,
-checkpoint compatibility) lives under [`teleboost/`](teleboost/) and is
-applied at import time.
+verl is consumed as a plain pip dependency, not vendored. Wan-specific
+behavior that doesn't belong in upstream verl (model loader, FSDP wrap,
+Ulysses SP patches, checkpoint compatibility) lives under
+[`teleboost/`](teleboost/) and is applied at import time.
 
-## Algorithms & papers
+## Algorithms
 
-Each algorithm in `recipe/teleboost/algorithms/` is a paper-faithful
+Each module in `recipe/teleboost/algorithms/` is a paper-faithful
 translation; see the per-algorithm docstring for the equation pin.
 
 | Algorithm | Paper | What it does |
@@ -27,7 +27,7 @@ translation; see the per-algorithm docstring for the equation pin.
 | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
 | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
 
-Reward models / vendored components used:
+Reward models / vendored components:
 
 * **HPSv2** — [arXiv 2306.09341](https://arxiv.org/abs/2306.09341)
 * **VideoCLIP-XL** — [arXiv 2410.00741](https://arxiv.org/abs/2410.00741)
@@ -37,39 +37,38 @@ Reward models / vendored components used:
 * **DINOv2** — [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) (used by VIPO)
 * **Wan video diffusion** — [Wan-AI](https://github.com/Wan-Video) (actor backbone)
 
----
+## Capability matrix
 
-## 1. Capability matrix
+"Verified" = end-to-end training run completes with non-zero gradients and
+a decreasing loss curve; not a claim of paper-SOTA reproduction.
 
 | Dimension | Verified | Code present (untested) |
 |---|---|---|
 | Actor    | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
 | Reward   | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + raft + videoclip + videophy) | Qwen-VL-32B, custom callable |
-| Algorithm | GRPO | GRPO-Guard, flow-grpo SDE path, GAE / RLOO (upstream) |
+| Algorithm | GRPO | GRPO-Guard, Flow-GRPO SDE path, GAE / RLOO (upstream) |
 | Rollout  | Diffusion (actor), vLLM (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
-| Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, smoke + CP grad bit-exact at fp32) | other Ulysses configs |
+| Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, CP grad bit-exact at fp32) | other Ulysses configs |
 | Hardware | 4×H800 80 GB, 8×H800 80 GB | 8 GPU multi-host |
 
----
+## Install
 
-## 2. Quickstart
+If you already have a verl-compatible Docker image (e.g.
+`verlai/verl:vllm017.latest`), see [`INSTALL.md`](INSTALL.md) — three pip
+commands plus an import check.
 
-If you already have a verl-compatible Docker image (e.g. `verlai/verl:vllm017.latest`):
-see [`INSTALL.md`](INSTALL.md) — three pip commands plus an import-smoke check.
+For a bare GPU host, see
+[`docs/install_from_scratch.md`](docs/install_from_scratch.md) — full
+recipe including the flash-attn wheel, hpsv2 packaging fixes, and known
+gotchas.
 
-If you're starting from a bare GPU host:
-see [`docs/install_from_scratch.md`](docs/install_from_scratch.md) — full
-recipe including the flash-attn wheel, hpsv2 packaging fixes, and the
-gotchas you'll otherwise hit.
-
-### 2.1 Prepare data
+## Prepare data
 
 Every training row must carry both `context_path` (positive prompt umT5
 embedding) and `context_null_path` (a single shared negative-prompt umT5
 embedding for CFG). The dataset loader fails fast if `context_null_path`
 is missing — without it CFG collapses to `(1+scale) * cond` and reward
-variance vanishes (advantage=0, grad_norm=0; documented training-killer
-in the pre-X3 fork).
+variance vanishes (advantage=0, grad_norm=0).
 
 One unified, idempotent prep script handles both flat prompt lists and
 existing JSON layouts:
@@ -81,7 +80,7 @@ python data_preprocess/prepare_wan_data.py \
   --output_dir data/processed/ \
   --wan_model_path /path/to/Wan2.1-T2V-1.3B
 
-# patching an existing JSON that's missing context_null_path
+# patching an existing JSON missing context_null_path
 python data_preprocess/prepare_wan_data.py \
   --input data/processed/processed_wan_prompt.json \
   --output_dir data/processed/ \
@@ -89,93 +88,30 @@ python data_preprocess/prepare_wan_data.py \
 ```
 
 The script:
-- accepts `.txt` (one prompt per line) or `.json` (`[{"caption": ...}, ...]`);
-- only loads the umT5 encoder if something actually needs encoding;
-- per row, skips T5 if `context_path` already points at an existing `.npy`;
-- produces `processed_wan_prompt.json` with all three fields populated, plus
+
+* accepts `.txt` (one prompt per line) or `.json` (`[{"caption": ...}, ...]`);
+* only loads the umT5 encoder if something actually needs encoding;
+* per row, skips T5 if `context_path` already points at an existing `.npy`;
+* produces `processed_wan_prompt.json` with all three fields populated, plus
   per-row `context_<i>.npy` and a single shared `context_null.npy`;
-- the negative prompt defaults to Wan's official Chinese template; override
+* the negative prompt defaults to Wan's official Chinese template; override
   with `--negative_prompt "..."` if you need a different one.
 
-Same `--wan_model_path` works for 1.3B and 14B (the script only uses its umT5
-checkpoint files).
+The same `--wan_model_path` works for 1.3B and 14B (the script only uses
+its umT5 checkpoint files).
 
-### 2.2 Run a smoke
+## Train
 
-The unified launcher `run_teleboost_smoke.sh` covers every algorithm variant
-via env vars — pick one and go:
-
-```bash
-TRAIN_FILE=/path/to/processed_wan_prompt.json \
-TEST_FILE=/path/to/processed_wan_prompt.json \
-WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B \
-WAN_VERSION=wan21 \
-WAN_VAE_PATH=/path/to/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth \
-REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
-TELEBOOST_METHOD=baseline \
-bash recipe/teleboost/run_teleboost_smoke.sh
-```
-
-Switch algorithm via `TELEBOOST_METHOD`:
-
-| Method | Behavior | Required env vars (in addition to the 4 core ones) |
-|---|---|---|
-| `baseline` (default) | plain GRPO | — |
-| `bgpo` | GRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field |
-| `vipo` | GRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
-| `bgpo_vipo` | both | both |
-| `joint` | 4-reward joint (aesthetic + raft + videoclip + videophy) | `JOINT_AESTHETIC_CLIP_PATH`, `JOINT_AESTHETIC_MODEL_PATH`, `JOINT_RAFT_MODEL_PATH`, `JOINT_VIDEOCLIP_MODEL_PATH`, `JOINT_VIDEOPHY_MODEL_PATH` |
-
-Common knobs (env vars):
-
-| Env var | Default | Notes |
-|---|---|---|
-| `N_GPUS_PER_NODE` | 4 | per-node world size |
-| `SAMPLING_STEPS` | 1 | denoising steps in rollout — see *gotchas* below |
-| `TOTAL_TRAINING_STEPS` | 2 | smoke = 2; bump for real training |
-| `VIDEO_HEIGHT`, `VIDEO_WIDTH`, `NUM_FRAMES` | 256, 256, 9 | resolution & frame count |
-| `TRAIN_PROMPT_BSZ`, `N_RESP_PER_PROMPT` | 2, 2 | batch shape (real_batch = bsz × n_resp) |
-| `WAN_VERSION` | wan21 | `wan22` for Wan2.2 dual-model A14B |
-| `VAL_BEFORE_TRAIN` | False | run validation before step 0 |
-| `TELEBOOST_OUTPUT_DIR` | `./outputs` | parent for `checkpoints/` and `tensorboard/` |
-
-**Gotchas — smoke ≠ training**:
-
-1. `SAMPLING_STEPS=1` (the default) is fast but the actor produces near-noise videos. **HPSv2 returns `nan` on near-noise inputs**, so `train/rewards` shows `nan` and `actor/grad_norm` ends up exactly 0 — the loop runs end-to-end but no actual training happens. Bump `SAMPLING_STEPS=4` (minimum for HPS to give finite values) or `SAMPLING_STEPS=10` (matches production) once you want to verify gradients flow. Joint and Qwen-VL rewards return finite values even at `SAMPLING_STEPS=1`; HPS is uniquely sensitive.
-2. The launcher hard-codes `init_same_noise=True` (smoke determinism). With `n_resp_per_prompt=2`, the two responses share starting noise → near-identical generations → reward variance ≈ 0 → advantage ≈ 0 even when reward is finite. For a real-gradient smoke, edit the script (or override on the command line) to `actor_rollout_ref.init_same_noise=False`.
-3. `total_training_steps=2` exits before the LR scheduler / GRPO statistics warm up. Bump to 5+ to see meaningful loss curves.
-
-Orthogonal flags layer on top of `TELEBOOST_METHOD` (combine freely):
-
-| Env var | Effect |
-|---|---|
-| `SP_SIZE=2` (or 4, 8) | Wan Ulysses sequence parallel; needs world_size divisible by `SP_SIZE` |
-| `INIT_SAME_NOISE=False` | per-prompt responses get different starting noise — required for non-zero reward variance when measuring real gradients |
-| `ENABLE_GRPOGUARD=True` | GRPO-Guard ratio_norm + grad_reweight |
-| `ENABLE_FLOWGRPO=True` | flow-grpo SDE solver path; auto-bumps `SAMPLING_STEPS` to 4 if it was 1 |
-| `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
-| `VAL_BEFORE_TRAIN=True` | run validation before step 0 |
-
-Example — 8-GPU sp=8 BGPO+VIPO with non-zero gradient variance:
-
-```bash
-TELEBOOST_METHOD=bgpo_vipo  N_GPUS_PER_NODE=8  SP_SIZE=8 \
-SAMPLING_STEPS=10  INIT_SAME_NOISE=False  TOTAL_TRAINING_STEPS=10 \
-TRAIN_FILE=...  TEST_FILE=...  WAN_MODEL_PATH=...  REWARD_MODEL_PATH=... \
-bash recipe/teleboost/run_teleboost_smoke.sh
-```
-
-### 2.3 Production training
-
-Production = same launcher, just bigger numbers. Example for 8-GPU 480×832
-1000-step run with HPSv2 reward:
+The unified launcher `run_teleboost.sh` covers every algorithm variant
+via env vars. Example for an 8-GPU 480×832 1000-step Wan2.2 run with
+HPSv2 reward:
 
 ```bash
 TELEBOOST_METHOD=baseline \
 N_GPUS_PER_NODE=8 \
 TOTAL_TRAINING_STEPS=1000 \
 SAMPLING_STEPS=10 \
-VIDEO_HEIGHT=480  VIDEO_WIDTH=832  NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 VIDEO_WIDTH=832 NUM_FRAMES=49 \
 INIT_SAME_NOISE=False \
 TRAIN_FILE=/path/to/processed_wan_prompt.json \
 TEST_FILE=/path/to/processed_wan_prompt.json \
@@ -183,13 +119,72 @@ WAN_MODEL_PATH=/path/to/Wan2.2-T2V-A14B \
 WAN_VERSION=wan22 \
 WAN_VAE_PATH=/path/to/Wan2.2-T2V-A14B/Wan2.1_VAE.pth \
 REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
-bash recipe/teleboost/run_teleboost_smoke.sh
+bash recipe/teleboost/run_teleboost.sh
 ```
 
+### Algorithm selector
 
----
+| `TELEBOOST_METHOD` | Behavior | Required env vars (in addition to the core ones) |
+|---|---|---|
+| `baseline` (default) | plain GRPO | — |
+| `bgpo` | GRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field |
+| `vipo` | GRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
+| `bgpo_vipo` | both | both |
+| `joint` | 4-reward joint (aesthetic + raft + videoclip + videophy) | `JOINT_AESTHETIC_CLIP_PATH`, `JOINT_AESTHETIC_MODEL_PATH`, `JOINT_RAFT_MODEL_PATH`, `JOINT_VIDEOCLIP_MODEL_PATH`, `JOINT_VIDEOPHY_MODEL_PATH` |
 
-## 3. Repository layout
+### Common knobs
+
+| Env var | Default | Notes |
+|---|---|---|
+| `N_GPUS_PER_NODE` | `4` | per-node world size |
+| `SAMPLING_STEPS` | `4` | denoising steps in rollout |
+| `TOTAL_TRAINING_STEPS` | `2` | total optimizer steps — bump for real training |
+| `VIDEO_HEIGHT`, `VIDEO_WIDTH`, `NUM_FRAMES` | `256`, `256`, `9` | resolution & frame count |
+| `TRAIN_PROMPT_BSZ`, `N_RESP_PER_PROMPT` | `2`, `2` | batch shape (effective batch = bsz × n_resp) |
+| `WAN_VERSION` | `wan21` | `wan22` for Wan2.2 dual-model A14B |
+| `VAL_BEFORE_TRAIN` | `False` | run validation before step 0 |
+| `TELEBOOST_OUTPUT_DIR` | `./outputs` | parent for `checkpoints/` and `tensorboard/` |
+
+### Orthogonal flags
+
+These layer on top of `TELEBOOST_METHOD` and combine freely:
+
+| Env var | Effect |
+|---|---|
+| `SP_SIZE=2` (or 4, 8) | Wan Ulysses sequence parallel; needs world_size divisible by `SP_SIZE` |
+| `INIT_SAME_NOISE=False` | per-prompt responses get different starting noise — required for non-zero reward variance |
+| `ENABLE_GRPOGUARD=True` | GRPO-Guard ratio_norm + grad_reweight |
+| `ENABLE_FLOWGRPO=True` | Flow-GRPO SDE solver path; auto-bumps `SAMPLING_STEPS` to 4 if it was 1 |
+| `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
+| `VAL_BEFORE_TRAIN=True` | run validation before step 0 |
+
+Example — 8-GPU sp=8 BGPO+VIPO:
+
+```bash
+TELEBOOST_METHOD=bgpo_vipo N_GPUS_PER_NODE=8 SP_SIZE=8 \
+SAMPLING_STEPS=10 INIT_SAME_NOISE=False \
+TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
+bash recipe/teleboost/run_teleboost.sh
+```
+
+## Known footguns
+
+These are the failure modes that look like training but aren't:
+
+1. **Low `SAMPLING_STEPS` + HPSv2 → silent NaN.** HPSv2 returns `nan` on
+   near-noise inputs. Below `SAMPLING_STEPS=4` you get
+   `train/rewards = nan`, `actor/grad_norm = 0`, and a loop that runs
+   end-to-end without learning. Joint and Qwen-VL rewards return finite
+   values even at low step counts; HPS is uniquely sensitive.
+2. **`init_same_noise=True` → zero advantage.** When all responses for a
+   prompt share starting noise, generations are near-identical, reward
+   variance ≈ 0, and advantage ≈ 0 even when reward is finite. Set
+   `INIT_SAME_NOISE=False` for any real training run.
+3. **Missing `context_null_path` → CFG collapse.** Covered above in
+   *Prepare data*; the loader fails fast, but if you bypass it you get
+   advantage=0.
+
+## Repository layout
 
 ```
 recipe/teleboost/                     Recipe (entry point + workers + scripts)
@@ -199,8 +194,9 @@ recipe/teleboost/                     Recipe (entry point + workers + scripts)
 ├── teleboost_fsdp_worker.py              7 reward workers + DiffusionActorRolloutRefWorker subclass
 ├── unified_reward_worker.py              plugin-style reward worker
 ├── reward_models/                        reward registry + 5 plugins + composite + dynamic_joint
+├── algorithms/                           paper-pinned algorithm modules
 ├── config/teleboost_trainer.yaml         Hydra config (grpo_guard, flow_grpo, joint.* fields)
-└── run_teleboost_smoke.sh                unified env-driven launcher (smoke + production)
+└── run_teleboost.sh                      unified env-driven launcher
 
 teleboost/                            TeleBoost-only extensions
 ├── models/transformers/wan.py            Wan Ulysses SP forward + helper patches
@@ -218,7 +214,7 @@ wan/                                  Wan2.1 / Wan2.2 backbone (vendored, lightl
 data_preprocess/prepare_wan_data.py   umT5 prompt-embedding prep (idempotent)
 models/videoalign/                    Qwen2VL-based video-alignment reward model trainer (standalone)
 prompts/                              prompt lists for preprocess
-docs/                                 docs (see §4)
+docs/                                 docs
 tests/special_distributed/            distributed regression tests (CP grad reduce)
 ```
 
@@ -227,19 +223,7 @@ any process that does `import teleboost` (or imports anything under
 `recipe.teleboost.*`, which imports teleboost) ends up with the patches
 applied automatically.
 
----
-
-## 4. Documentation
-
-| File | Topic |
-|---|---|
-| [`INSTALL.md`](INSTALL.md) | Fast install path on a verl-ready Docker image |
-| [`docs/install_from_scratch.md`](docs/install_from_scratch.md) | Bare-host install + every gotcha |
-| [`requirements-pinned.txt`](requirements-pinned.txt) | Full pin file (every transitive dep) |
-
----
-
-## 5. Tests
+## Tests
 
 ```bash
 # Imports — must print 8/8 OK
@@ -265,25 +249,31 @@ DTYPE=bf16 torchrun --nproc_per_node=4 tests/special_distributed/test_cp_grad_re
 torchrun --nproc_per_node=8 tests/special_distributed/test_cp_grad_reduce.py
 ```
 
----
+## Documentation
 
-## 6. License & acknowledgments
+| File | Topic |
+|---|---|
+| [`INSTALL.md`](INSTALL.md) | Fast install path on a verl-ready Docker image |
+| [`docs/install_from_scratch.md`](docs/install_from_scratch.md) | Bare-host install + every gotcha |
+| [`requirements-pinned.txt`](requirements-pinned.txt) | Full pin file (every transitive dep) |
+
+## License & acknowledgments
 
 Apache 2.0 (see [`LICENSE`](LICENSE) and [`Notice.txt`](Notice.txt)).
 
 This codebase stands on the shoulders of several open-source projects.
 We thank the authors of all of the following.
 
-**Framework — RL training infrastructure**
+**Framework**
 
 * [**volcengine/verl**](https://github.com/volcengine/verl) (Apache 2.0,
-  Bytedance Seed) — the PPO / GRPO training engine.  We pin
-  `verl@v0.4.0` and consume it as a pip dependency rather than
-  vendoring; recipe-level extensions live under
+  Bytedance Seed) — the PPO / GRPO training engine. We pin
+  `verl@v0.4.0` and consume it as a pip dependency rather than vendoring;
+  recipe-level extensions live under
   [`recipe/teleboost/`](recipe/teleboost/) and
   [`teleboost/`](teleboost/).
 
-**Algorithms — papers**
+**Algorithms**
 
 The algorithm modules under
 [`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/) are
@@ -301,43 +291,31 @@ See each module's docstring for the equation pin.
 **Models — actor backbones**
 
 * [**Wan-Video/Wan2.1**](https://github.com/Wan-Video/Wan2.1) and
-  Wan-Video/Wan2.2 — text-to-video diffusion actor.  The `wan/`
+  Wan-Video/Wan2.2 — text-to-video diffusion actor. The `wan/`
   directory bundles their model code; the FSDP / Ulysses-SP wrap and
-  CP-grad-reduce fix in `teleboost/patches/` are our additions.
+  CP-grad-reduce fix in [`teleboost/patches/`](teleboost/patches/) are
+  our additions.
 
-**Reward models — preference / quality signals**
+**Reward models**
 
 * [**tgxs002/HPSv2**](https://github.com/tgxs002/HPSv2)
-  ([paper, arXiv 2306.09341](https://arxiv.org/abs/2306.09341))
+  ([arXiv 2306.09341](https://arxiv.org/abs/2306.09341))
 * [**alibaba-pai/VideoCLIP-XL**](https://huggingface.co/alibaba-pai/VideoCLIP-XL)
-  ([paper, arXiv 2410.00741](https://arxiv.org/abs/2410.00741))
+  ([arXiv 2410.00741](https://arxiv.org/abs/2410.00741))
 * [**LAION-AI/aesthetic-predictor**](https://github.com/LAION-AI/aesthetic-predictor)
 * [**princeton-vl/RAFT**](https://github.com/princeton-vl/RAFT)
-  ([paper, arXiv 2003.12039](https://arxiv.org/abs/2003.12039))
+  ([arXiv 2003.12039](https://arxiv.org/abs/2003.12039))
 * [**videophysics/videocon_physics**](https://huggingface.co/videophysics/videocon_physics)
-  ([paper, arXiv 2406.03520](https://arxiv.org/abs/2406.03520))
+  ([arXiv 2406.03520](https://arxiv.org/abs/2406.03520))
 * [**facebook/dinov2**](https://github.com/facebookresearch/dinov2)
-  ([paper, arXiv 2304.07193](https://arxiv.org/abs/2304.07193))
-  — used by VIPO for per-pixel allocation maps.
+  ([arXiv 2304.07193](https://arxiv.org/abs/2304.07193)) — used by VIPO
+  for per-pixel allocation maps.
 
 **Compute & systems**
 
 * [**vllm-project/vllm**](https://github.com/vllm-project/vllm) — Qwen
   reward worker rollout.
-* [**Dao-AILab/flash-attention**](https://github.com/Dao-AILab/flash-attention) —
-  flash-attn 2.7.4.post1 used in actor + reward rollouts.
-* [**flashinfer-ai/flashinfer**](https://github.com/flashinfer-ai/flashinfer) —
-  vLLM kernel backend.
-
----
-
-## 7. FLUX training notes (legacy)
-
-Earlier iterations of this codebase trained FLUX, not Wan. The notes below
-were valid for that path; they're recorded here for reference but do not
-apply to the current Wan-on-verl mainline.
-
-1. We set the inference batch size to 1 because we observed differences in probability outputs when it exceeds the training batch size.
-2. A stronger SFT stage can suppress exploration during the GRPO phase.
-3. For extreme cases (same prompt + same initial noise + reward can't distinguish), try varying initial noise within a prompt.
-4. Extended training (larger `max_train_steps`) may not improve visualization quality due to reward model limits (HPS-v2.1 not optimized for FLUX). EMA support is planned.
+* [**Dao-AILab/flash-attention**](https://github.com/Dao-AILab/flash-attention)
+  — flash-attn 2.7.4.post1 used in actor + reward rollouts.
+* [**flashinfer-ai/flashinfer**](https://github.com/flashinfer-ai/flashinfer)
+  — vLLM kernel backend.

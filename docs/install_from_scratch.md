@@ -1,7 +1,7 @@
 # Install from scratch
 
 End-to-end recipe for setting up a fresh Linux GPU host (no pre-built env, no
-PVC) to run a 4-GPU smoke through `recipe/teleboost/run_dancegrpo_*_smoke.sh`.
+PVC) to run a 4-GPU baseline through `recipe/teleboost/run_teleboost.sh`.
 Targets Python 3.10 + CUDA 12.4 + 4 × H800 80 GB (or H100). Adjust if your
 hardware differs.
 
@@ -99,8 +99,8 @@ sed -i "/from turtle import forward/d" "$HPS_DIR/src/open_clip/factory.py"
 
 ## 4. Model weights
 
-Place the actor + reward model checkpoints anywhere; the smoke scripts read
-their paths from env vars (`TRAIN_FILE`, `TEST_FILE`, `CKPTS_DIR`) or accept
+Place the actor + reward model checkpoints anywhere; the launcher reads
+their paths from env vars (`TRAIN_FILE`, `TEST_FILE`, `CKPTS_DIR`) or accepts
 Hydra overrides on the command line. Below is the canonical layout used in
 the docs.
 
@@ -160,34 +160,43 @@ at an existing file, and the negative-prompt encode is skipped if
 
 The dataset loader fails fast if `context_null_path` is missing — without
 it, CFG collapses to `(1+scale) * cond` and reward variance vanishes
-(grad_norm=0 across every smoke). That used to be a silent footgun.
+(grad_norm=0 across every run). That used to be a silent footgun.
 
 ---
 
-## 6. Smoke
+## 6. End-to-end test
 
-Edit the paths at the top of `recipe/teleboost/run_dancegrpo_*_smoke.sh` (or
-override via `TRAIN_FILE` / `TEST_FILE` / `CKPTS_DIR` env vars), then:
+The unified launcher `recipe/teleboost/run_teleboost.sh` covers every variant
+via env vars. Defaults (`n_gpus=4, total_steps=2, h=w=256, frames=9,
+sampling_steps=4, train_bsz=2, n_resp=2`) match a quick 4-GPU sanity check —
+not training quality. Override env vars for production.
 
 ```bash
 source ~/.venvs/teleboost-py310/bin/activate
 cd /path/to/TeleBoost
 
 # 4-GPU 1.3B + HPSv2 (smallest)
-bash recipe/teleboost/run_dancegrpo_1p3B_4gpu_smoke.sh
+TRAIN_FILE=... TEST_FILE=... \
+WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B WAN_VERSION=wan21 \
+REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
+bash recipe/teleboost/run_teleboost.sh
 
 # 4-GPU 14B Wan2.2 + HPSv2
-bash recipe/teleboost/run_dancegrpo_single_4gpu_smoke.sh
+TRAIN_FILE=... TEST_FILE=... \
+WAN_MODEL_PATH=/path/to/Wan2.2-T2V-A14B WAN_VERSION=wan22 \
+REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt \
+bash recipe/teleboost/run_teleboost.sh
 
 # 4-GPU sp_size=2 (exercises the Wan Ulysses SP > 1 patches)
-bash recipe/teleboost/run_dancegrpo_single_4gpu_smoke_sp2.sh
+SP_SIZE=2 TRAIN_FILE=... TEST_FILE=... \
+WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
+bash recipe/teleboost/run_teleboost.sh
 
 # 8-GPU sp_size=8
-bash recipe/teleboost/run_dancegrpo_single_8gpu_smoke_sp8.sh
+N_GPUS_PER_NODE=8 SP_SIZE=8 TRAIN_FILE=... TEST_FILE=... \
+WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
+bash recipe/teleboost/run_teleboost.sh
 ```
-
-Smoke parameters: `n_gpus=4 (or 8), total_steps=2, train_bsz=2 (or 4 at sp=8),
-n_resp=2, h=w=256, frames=9, sampling_steps=1`. Not for training quality.
 
 ---
 
@@ -210,7 +219,7 @@ python -c "from wan.modules.t5 import T5EncoderModel; print('wan t5 ok')"
 # 7.4 GPUs visible
 python -c "import torch; print([torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])"
 
-# 7.5 INSTALL.md 8-module import smoke (must print 8/8 OK)
+# 7.5 INSTALL.md 8-module import check (must print 8/8 OK)
 python3 - <<'PY'
 mods = [
     "recipe.teleboost.main_teleboost",
@@ -254,7 +263,7 @@ PY
    `pip install "transformers==4.57.1"` after vllm.
 
 5. **`reward_models/__init__.py` eager-imports every reward.** Even an
-   HPS-only smoke triggers the videoclip / videophy / raft / aesthetic
+   HPS-only run triggers the videoclip / videophy / raft / aesthetic
    imports, so `opencv-python` (videoclip needs `cv2`) and the others
    listed in §3 step 8 must all be installed.
 
@@ -274,20 +283,20 @@ PY
    like the loop runs but the model is not training. Generate via
    `data_preprocess/prepare_wan_data.py` before any real run.
 
-9. **HPSv2 returns `nan` on near-noise videos.** The default smoke runs
-   `actor_rollout_ref.sampling_steps=1`, which leaves the rollout output
-   essentially as noise. HPSv2 is trained on clean images and produces
-   `nan` on such inputs, which propagates to `train/rewards=nan`,
-   `train/advantage=nan`, `actor/grad_norm=0.0`. The smoke loop still runs
-   end-to-end (good for shape/integration testing), but no learning happens.
-   Fix when verifying gradients: `SAMPLING_STEPS=4` (HPS minimum to return
-   finite scores) or `SAMPLING_STEPS=10` (production). Joint and Qwen-VL
-   rewards return finite values even at `SAMPLING_STEPS=1`.
+9. **HPSv2 returns `nan` on near-noise videos.** Below `SAMPLING_STEPS=4`
+   the rollout output is essentially noise. HPSv2 is trained on clean
+   images and produces `nan` on such inputs, which propagates to
+   `train/rewards=nan`, `train/advantage=nan`, `actor/grad_norm=0.0`.
+   The training loop still runs end-to-end (good for shape/integration
+   testing), but no learning happens. Fix when verifying gradients:
+   `SAMPLING_STEPS=4` (HPS minimum to return finite scores) or
+   `SAMPLING_STEPS=10` (production). Joint and Qwen-VL rewards return
+   finite values even at low step counts.
 
-10. **`init_same_noise=True` collapses reward variance.** The smoke launcher
+10. **`init_same_noise=True` collapses reward variance.** The launcher
     sets it for deterministic outputs. With `n_resp_per_prompt>1` it makes
     every response within a prompt start from the same noise; combined with
     a small number of sampling steps the responses end up near-identical
     and GRPO advantage = `(reward - mean) / std` ≈ 0 even when rewards are
-    finite. For a real-gradient smoke, override
+    finite. For a real-gradient run, override
     `actor_rollout_ref.init_same_noise=False`.

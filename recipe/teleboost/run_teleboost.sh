@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Public smoke launcher for TeleBoost DanceGRPO.
+# Public launcher for TeleBoost.
 #
 # Required:
 #   TRAIN_FILE=/path/to/processed_wan_prompt.json
@@ -41,7 +41,7 @@ esac
 
 project_name="${PROJECT_NAME:-TeleBoost-DanceGRPO}"
 timestamp="$(date +"%m-%d_%H-%M-%S")"
-exp_name="${EXPERIMENT_NAME:-${project_name}_${method}_smoke_${timestamp}}"
+exp_name="${EXPERIMENT_NAME:-${project_name}_${method}_${timestamp}}"
 
 working_dir="${WORKING_DIR:-"${PWD}"}"
 output_dir="${TELEBOOST_OUTPUT_DIR:-"${working_dir}/outputs"}"
@@ -101,13 +101,13 @@ fi
 
 if [[ "${method}" == "joint" ]]; then
   reward_type=joint
-  : "${JOINT_AESTHETIC_CLIP_PATH:?Set JOINT_AESTHETIC_CLIP_PATH for joint reward smoke runs}"
-  : "${JOINT_AESTHETIC_MODEL_PATH:?Set JOINT_AESTHETIC_MODEL_PATH for joint reward smoke runs}"
-  : "${JOINT_RAFT_MODEL_PATH:?Set JOINT_RAFT_MODEL_PATH for joint reward smoke runs}"
-  : "${JOINT_VIDEOCLIP_MODEL_PATH:?Set JOINT_VIDEOCLIP_MODEL_PATH for joint reward smoke runs}"
-  : "${JOINT_VIDEOPHY_MODEL_PATH:?Set JOINT_VIDEOPHY_MODEL_PATH for joint reward smoke runs}"
+  : "${JOINT_AESTHETIC_CLIP_PATH:?Set JOINT_AESTHETIC_CLIP_PATH for joint reward runs}"
+  : "${JOINT_AESTHETIC_MODEL_PATH:?Set JOINT_AESTHETIC_MODEL_PATH for joint reward runs}"
+  : "${JOINT_RAFT_MODEL_PATH:?Set JOINT_RAFT_MODEL_PATH for joint reward runs}"
+  : "${JOINT_VIDEOCLIP_MODEL_PATH:?Set JOINT_VIDEOCLIP_MODEL_PATH for joint reward runs}"
+  : "${JOINT_VIDEOPHY_MODEL_PATH:?Set JOINT_VIDEOPHY_MODEL_PATH for joint reward runs}"
 else
-  : "${reward_model_path:?Set REWARD_MODEL_PATH=/path/to/reward_model.pt for non-joint smoke runs}"
+  : "${reward_model_path:?Set REWARD_MODEL_PATH=/path/to/reward_model.pt for non-joint runs}"
 fi
 
 overrides=(

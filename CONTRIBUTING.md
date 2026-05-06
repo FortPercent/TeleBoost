@@ -39,16 +39,16 @@ Key suites:
 * `tests/test_grpo_guard.py` — RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12)
 * `tests/test_uid_broadcast.py` — UUID alignment with `repeat_interleave`
 
-GPU smokes (8×H800 verified):
+GPU runs (8×H800 verified):
 
 ```bash
 TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
-  bash recipe/teleboost/run_teleboost_smoke.sh
+  bash recipe/teleboost/run_teleboost.sh
 ```
 
 `TELEBOOST_METHOD=baseline|bgpo|vipo|bgpo_vipo|joint` for the matrix.
 Set `actor_rollout_ref.actor.sigma_form=flow_grpo` etc. via `"$@"`
-(the smoke script forwards trailing args to Hydra).
+(the launcher forwards trailing args to Hydra).
 
 ## Pull request etiquette
 
@@ -57,10 +57,10 @@ Set `actor_rollout_ref.actor.sigma_form=flow_grpo` etc. via `"$@"`
   `refactor(scope):`, `chore(scope):`, `docs(scope):`).
 * If your PR touches an algorithm formula, include the paper +
   equation reference in the commit body.
-* Run at least one smoke against the change if it touches the rollout
-  / actor / loss path.  Mention the smoke result in the PR body.
+* Run at least one end-to-end run against the change if it touches the
+  rollout / actor / loss path.  Mention the run result in the PR body.
 * Don't push commits that contain absolute paths, internal cluster
-  hostnames, or credentials — `INSTALL.md` and the smoke env are the
+  hostnames, or credentials — `INSTALL.md` and the launcher env are the
   only place such things should live (and even there as placeholders).
 
 ## Reporting issues
@@ -70,6 +70,6 @@ gotchas", open an issue with:
 
 * Hardware (GPU model + count)
 * `pip freeze | grep -E "torch|verl|transformers|vllm|flash-attn|hpsv2"`
-* Full Hydra command (smoke shell or your own)
+* Full Hydra command (launcher script or your own)
 * The first traceback line (not the Ray-wrapped one) and the
   worker stdout near the error

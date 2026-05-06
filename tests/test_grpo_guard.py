@@ -8,7 +8,7 @@ These tests pin the exact numerical formulas from the paper:
 * :func:`compute_grad_reweight_delta` — Eq. 12 (grad-reweight δ for both forms)
 
 If a future refactor changes the math, these tests fail before any
-smoke run is needed.  Run with:
+end-to-end run is needed.  Run with:
 
     pytest tests/test_grpo_guard.py -v
 """

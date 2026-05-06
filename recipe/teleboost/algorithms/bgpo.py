@@ -185,7 +185,7 @@ class BGPOMixin:
             if pixel_enable:
                 logger.warning(
                     "BGPO + VIPO are both enabled.  This combination is "
-                    "structurally compatible (smoke-tested) but not validated "
+                    "structurally compatible (briefly tested) but not validated "
                     "by either paper: BGPO (arxiv 2511.18919) and VIPO "
                     "(arxiv 2511.18719) were developed independently.  BGPO's "
                     "per-group scalar weight becomes a uniform multiplier "

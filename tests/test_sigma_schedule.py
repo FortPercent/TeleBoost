@@ -10,7 +10,7 @@ These tests pin two things:
 
 1. **Byte-equivalence** with the pre-registry inline ``wan_step`` math
    for ``sigma_form="dancegrpo"`` (the default).  This guards against
-   silent drift in any future refactor — default smokes will stay
+   silent drift in any future refactor — default runs will stay
    identical to the pre-merge baseline.
 
 2. **Paper-faithfulness** for ``sigma_form="flow_grpo"`` against the
@@ -241,7 +241,7 @@ def test_flow_grpo_sigma_one_edge_case_no_nan():
     (paper's ``sigma_max``) so ``std_dev_t`` stays finite.
 
     Without this, the first denoise step produces ``inf`` σ_t →
-    NaN log-probs → NaN gradients (verified in remote smoke 2026-05-05).
+    NaN log-probs → NaN gradients (verified in remote run 2026-05-05).
     """
     latents, model_output, _, _, eta, _ = _make_inputs()
     sigma = torch.tensor(1.0, dtype=torch.float64)

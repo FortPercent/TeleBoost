@@ -390,7 +390,7 @@ class VIPOMixin:
 
         Contract: the rollout worker stores ``pixel_weight_maps`` with shape
         ``(B, T_lat, H_lat, W_lat)`` in ``gen_batch_output.batch``.  When
-        this is missing (e.g. during smoke tests on non-VIPO rollouts) we
+        this is missing (e.g. during tests on non-VIPO rollouts) we
         silently leave the scalar advantage untouched and warn.
         """
         if "pixel_weight_maps" not in gen_batch_output.batch:

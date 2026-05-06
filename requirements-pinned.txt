@@ -1,5 +1,5 @@
 # ============================================================
-# TeleBoost / DanceGRPO smoke — pinned requirements
+# TeleBoost — pinned requirements
 # Python 3.10 + CUDA 12.4 + torch 2.6.0 + vllm 0.8.4
 # ============================================================
 # INSTALL ORDER MATTERS:
