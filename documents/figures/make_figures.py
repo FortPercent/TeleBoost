@@ -12,9 +12,9 @@ import numpy as np
 
 OUT_DIR = Path(__file__).resolve().parent
 
-C_STANDARD = "#E07A5F"
-C_DECOUPLED = "#2A9D8F"
-C_OOM = "#B23A48"
+C_STANDARD = "#94A3B8"
+C_DECOUPLED = "#2563EB"
+C_OOM = "#B91C1C"
 C_CAP = "#6B6B6B"
 CAPACITY_GB = 80.0
 
@@ -74,7 +74,7 @@ def fig_memory_vs_sequence():
         else:
             _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                           f"{decoupled_mem[i]:.2f} GB",
-                          color="#1F6F65", weight="bold")
+                          color="#1E40AF", weight="bold")
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
@@ -116,7 +116,7 @@ def fig_memory_vs_layers():
     x = np.arange(len(configs))
     width = 0.36
 
-    fig, ax = plt.subplots(figsize=(9.5, 5.8), dpi=160)
+    fig, ax = plt.subplots(figsize=(8.5, 6.2), dpi=160)
     bars_s = ax.bar(x - width / 2, standard, width,
                     color=C_STANDARD, label="Standard DPO", zorder=3)
     bars_d = ax.bar(x + width / 2, decoupled, width,
@@ -136,17 +136,17 @@ def fig_memory_vs_layers():
     for i, b in enumerate(bars_d):
         _annotate_bar(ax, b.get_x() + b.get_width() / 2, b.get_height(),
                       f"{decoupled[i]:.2f} GB",
-                      color="#1F6F65", weight="bold")
+                      color="#1E40AF", weight="bold")
 
     for i, d in enumerate(deltas):
         top = max(standard[i], decoupled[i])
         ax.annotate(d, xy=(x[i], top + 6),
                     ha="center", va="center", fontsize=10.5,
-                    color="#1F6F65" if "−" in d else "#444",
+                    color="#1E40AF" if "−" in d else "#444",
                     fontweight="bold" if "−" in d else "normal",
                     bbox=dict(boxstyle="round,pad=0.3",
-                              fc="#EAF6F3" if "−" in d else "#F0F0F0",
-                              ec="#2A9D8F" if "−" in d else "#999",
+                              fc="#DBEAFE" if "−" in d else "#F0F0F0",
+                              ec="#2563EB" if "−" in d else "#999",
                               lw=0.8))
 
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)

@@ -7,15 +7,15 @@ pattern that **cuts Wan 14B production DPO peak memory by ~46%** on
 and extends to **≥8× the sequence length** the standard implementation
 can handle on the same hardware — with no ceiling reached yet.
 
-Standard DPO at this config OOMs at 79 GB on the 80 GB H800; Decoupled
-DPO finishes with ~37 GB headroom and is mathematically equivalent to
-the single-backward formulation (verified element-wise on 14.78 B
-gradient elements at 32-GPU production shape).
+Standard DPO at this config crashes with OOM on the 80 GB H800;
+Decoupled DPO finishes with ~37 GB headroom and is mathematically
+equivalent to the single-backward formulation (verified element-wise
+on 14.78 B gradient elements at 32-GPU production shape).
 
 Built on [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
-long-context multi-modal training framework — and
+long-context multi-modal training framework — together with
 [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
-+ DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family
+and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family
 training; this is the OSS release.
 
 <p align="center">
@@ -211,7 +211,7 @@ multi-call epilogue that Gradient Decoupled DPO depends on).
 ## Repository layout
 
 ```
-Teletron/
+TeleBoost/
 ├── README.md           ← you are here
 ├── QUICKSTART.md       ← full setup + first-run guide
 ├── Dockerfile          ← reproducible NGC 25.09 + flash-attn 2/3
