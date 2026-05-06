@@ -235,6 +235,38 @@ TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh
 ```
 
+### Multi-node
+
+Run the same command on every node; the launcher self-routes based on
+`NODE_RANK`. The master (rank 0) starts a Ray head and proceeds to the
+training loop; workers join the cluster and block on `ray start`.
+
+| Env var | Required | Notes |
+|---|---|---|
+| `NNODES` | yes (>1) | total node count |
+| `NODE_RANK` | yes | this node's rank; `0` = master |
+| `MASTER_ADDR` | yes | hostname / IP of the master, reachable from every worker |
+| `MASTER_PORT` | no | Ray head port; default `6379` |
+
+Example — 4 nodes × 8 GPUs (32 GPUs total):
+
+```bash
+# on the master (NODE_RANK=0):
+NNODES=4 NODE_RANK=0 MASTER_ADDR=node-0.example.com \
+TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... \
+WAN_VAE_PATH=... REWARD_MODEL_PATH=... \
+bash recipe/teleboost/run_teleboost.sh
+
+# on each worker (NODE_RANK=1, 2, 3):
+NNODES=4 NODE_RANK=1 MASTER_ADDR=node-0.example.com \
+TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... \
+WAN_VAE_PATH=... REWARD_MODEL_PATH=... \
+bash recipe/teleboost/run_teleboost.sh
+```
+
+`NNODES=1` (the default) skips the Ray head/worker step entirely;
+`main_teleboost` calls `ray.init()` itself for single-node runs.
+
 ## Multi-reward joint setup
 
 When `TELEBOOST_METHOD=joint`, four reward models (aesthetic, RAFT,

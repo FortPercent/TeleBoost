@@ -25,6 +25,13 @@ set -euo pipefail
 #   N_GPUS_PER_NODE=N
 #   N_RESP_PER_PROMPT=N  TRAIN_PROMPT_BSZ=N  PPO_MINI_BATCH_SIZE=N
 #   VIDEO_HEIGHT=N  VIDEO_WIDTH=N  NUM_FRAMES=N
+#
+# Multi-node (run the same command on every node; the script self-routes
+# based on NODE_RANK):
+#   NNODES=N                                 (total number of nodes; default 1)
+#   NODE_RANK=0..NNODES-1                    (this node's rank; 0 = master)
+#   MASTER_ADDR=hostname-or-ip               (rank-0 host, reachable from workers)
+#   MASTER_PORT=6379                         (Ray head port; default 6379)
 
 : "${TRAIN_FILE:?Set TRAIN_FILE=/path/to/processed_wan_prompt.json}"
 : "${TEST_FILE:?Set TEST_FILE=/path/to/processed_wan_prompt.json}"
@@ -238,6 +245,26 @@ else
     "reward_model.model.path=${reward_model_path}"
     "reward_model.extra_config.model_type=${HPS_MODEL_TYPE:-ViT-H-14}"
   )
+fi
+
+# Multi-node: dispatch master vs worker before launching training.
+# Same script runs on every node — NODE_RANK selects the role.
+#   - master (rank 0): start Ray head, then fall through to main_teleboost
+#   - worker (rank >0): join the Ray cluster and block; main_teleboost
+#                       runs only on master, but Ray schedules workers
+#                       across the joined nodes.
+node_rank="${NODE_RANK:-0}"
+master_addr="${MASTER_ADDR:-127.0.0.1}"
+master_port="${MASTER_PORT:-6379}"
+
+if [[ "${nnodes}" -gt 1 ]]; then
+  if [[ "${node_rank}" == "0" ]]; then
+    echo "[teleboost] master (rank 0): starting Ray head on ${master_addr}:${master_port}"
+    ray start --head --port="${master_port}" --num-gpus="${n_gpus}"
+  else
+    echo "[teleboost] worker (rank ${node_rank}): joining Ray cluster at ${master_addr}:${master_port}"
+    exec ray start --address="${master_addr}:${master_port}" --num-gpus="${n_gpus}" --block
+  fi
 fi
 
 # Forward extra positional args ("$@") to Hydra so callers can append
