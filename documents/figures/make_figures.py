@@ -153,9 +153,8 @@ def fig_memory_vs_layers():
     ax.set_xticklabels(configs, fontsize=12.5)
     ax.set_ylabel("Peak GPU memory (GB)")
     ax.set_ylim(0, 100)
-    ax.set_title("Wan 14B I2V DPO — peak GPU memory at production depth\n"
-                 "bf16 + ZeRO-2 + recompute=full + flash-attn 3",
-                 loc="left")
+    ax.set_title("Wan 14B I2V DPO  ·  Peak GPU memory at 32×H800",
+                 loc="center", pad=18)
     ax.legend(loc="upper left", frameon=False)
     ax.grid(axis="y", ls=":", alpha=0.45, zorder=1)
 

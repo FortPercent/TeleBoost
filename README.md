@@ -10,9 +10,10 @@ Memory-efficient DPO post-training for video diffusion models.
 
 📄 **Paper**: [*TeleBoost: A Systematic Alignment Framework for High-Fidelity, Controllable, and Robust Video Generation*](https://arxiv.org/abs/2602.07595) (arXiv:2602.07595)
 
-**Post-training framework for video diffusion models**, featuring
-**Gradient Decoupled DPO** — a per-branch backward + immediate
-reduce-scatter pattern that on Wan 14B 40-layer DPO at 32×H800:
+This is a **Post-training framework for video diffusion models**,
+featuring **Gradient Decoupled DPO** — a per-branch backward +
+immediate reduce-scatter pattern that on Wan 14B 40-layer DPO at
+32×H800:
 
 * **cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
 * **lets the production default (49 f / 480p) actually run** — standard DPO OOMs, Decoupled finishes at 42.90 GB
