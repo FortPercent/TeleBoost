@@ -134,13 +134,13 @@ own dataset — see QUICKSTART for the 30-line template.
 │  examples/teleai/train_dpo.sh                               │
 │  └─→ examples/teleai/pretrain_dpo_i2v.py                    │
 │      └─→ teletron.train.Trainer                             │
-│           ├─ ParallelWanModel (40-layer DiT)                │
+│           ├─ ParallelWanModel                               │
 │           ├─ DistributedVAE (text + image + video encoder)  │
 │           └─ DeepSpeedZeroOptimizer (ZeRO-2 partition_grads)│
 │                └─ deepspeed_backward_step (split DPO path)  │
 └─────────────────────────────────────────────────────────────┘
        │
-       ├─ CP=8  : context parallelism via Ulysses (head-dim sharding)
+       ├─ CP     : context parallelism via Ulysses (head-dim sharding)
        ├─ ZeRO-2: optimizer state partitioned across DP_with_CP group
        ├─ recompute=full+block : every block input checkpointed
        └─ bf16 : mixed precision with fp32 master weights
