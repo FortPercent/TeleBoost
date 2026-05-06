@@ -1,8 +1,8 @@
 import os
 import torch
-from teletron.train import parse_args
-from teletron.train.trainer import Trainer
-from teletron.train.utils import average_losses_across_data_parallel_group, get_args
+from teleboost.train import parse_args
+from teleboost.train.trainer import Trainer
+from teleboost.train.utils import average_losses_across_data_parallel_group, get_args
 import debugpy
 
 def causal_loss_func(output_tensor):
@@ -68,7 +68,7 @@ def forward_step(data_iterator, ddpmodel):
     image_latent = clean_latent[:, 0:1, ]
     image_or_video_shape = args.image_or_video_shape
 
-    from teletron.utils.aux_func import get_attr_wrapped_model
+    from teleboost.utils.aux_func import get_attr_wrapped_model
     with torch.no_grad():
         conditional_dict = {'prompt_embeds':batch["prompt_emb"]}
         if not getattr(ddpmodel, "unconditional_dict", None):

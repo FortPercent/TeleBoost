@@ -152,10 +152,10 @@ reduce-scatter — irrelevant to numerical training stability.
 * Built on megatron-core 0.16.1 + DeepSpeed ZeRO-2 + flash-attn 3.
 * Pinned to `deepspeed==0.17.5` — the last release with a multi-call-friendly
   epilogue (0.17.6+ refactored to require `DeepSpeedEngine`-driven
-  `is_gradient_accumulation_boundary` toggling, which teletron, using the
+  `is_gradient_accumulation_boundary` toggling, which teleboost, using the
   optimizer alone, doesn't provide).
 * Drop-in: any user with a DPO dataset just subclasses
-  `teletron.datasets.DPODatasetBase` and trains via `examples/teleai/train_dpo.sh`.
+  `teleboost.datasets.DPODatasetBase` and trains via `examples/teleai/train_dpo.sh`.
 * `FakeDPODataset` ships for instant smoke-test without real video data.
 
 #### Open source

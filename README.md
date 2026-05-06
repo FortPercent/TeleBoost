@@ -17,11 +17,10 @@ TeleBoost is a **post-training framework for video diffusion models**.
 Its core feature, **Gradient Decoupled DPO**, is a per-branch backward
 with immediate reduce-scatter pattern that **applies to any diffusion
 model TeleTron supports** (Wan 2.1 / 2.2, T2V / I2V, …). Measured on
-Wan 14B 40-layer DPO at 32×H800:
+Wan 14B DPO at 32×H800:
 
-* **Cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
-* **Extends supported context length by ~15×** — Standard DPO max-fits at 25 f / 480p (~11k visual tokens), Decoupled max-fits at 77 f / 1080p (~163k visual tokens) on the same hardware
-* **Lets the production default (49 f / 480p) actually run** — Standard DPO OOMs, Decoupled finishes at 42.90 GB
+* 🔥 **Cuts peak GPU memory by ~40%** on identical workload (69.27 → 41.39 GB)
+* 📐 **Extends context length by ~15×** (~11k → ~163k visual tokens)
 
 It is mathematically equivalent to the single-backward formulation
 (verified element-wise on 14.78 B gradient elements at 32-GPU
@@ -37,13 +36,13 @@ and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family training.
 </p>
 
 <p align="center"><sub><i>
-Wan 14B DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800.
+Wan 14B DPO, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800.
 <b>Left</b>: same workload, ~40% memory cut. <b>Middle</b>: production default, standard OOMs and Decoupled fits. <b>Right</b>: Decoupled scales to ~15× longer context than standard.
 </i></sub></p>
 
 ---
 
-## Headline numbers — Wan 14B 40-layer DPO at 32×H800
+## Headline numbers — Wan 14B DPO at 32×H800
 
 | Setting | Visual tokens | Standard DPO | **Gradient Decoupled DPO** | Δ |
 |---|---|---|---|---|
@@ -51,10 +50,9 @@ Wan 14B DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800.
 | 49 f / 480p — *production default* | ~20 k | ❌ OOM | **42.90 GB ✓** | passes ✓ |
 | 77 f / 1080p — *decoupled's max-fit* | ~163 k | ❌ OOM | **69.32 GB ✓** | **~15× tokens** |
 
-Three concrete wins on the same 32-GPU H800 hardware:
+Two concrete wins on the same 32-GPU H800 hardware:
 1. **−40% peak memory on identical workload** (25 f / 480p ~11 k tokens)
 2. **~15× longer supported context length** (~11 k → ~163 k visual tokens)
-3. **Production default actually runs** (49 f / 480p ~20 k tokens crashes standard DPO with OOM)
 
 ### Mathematical equivalence
 
@@ -123,7 +121,7 @@ bash examples/teleai/train_dpo.sh
 ```
 
 For users without `teleai_data_tool` (the internal data-infrastructure
-package), subclass `teletron.datasets.DPODatasetBase` and register your
+package), subclass `teleboost.datasets.DPODatasetBase` and register your
 own dataset — see QUICKSTART for the 30-line template.
 
 ---
@@ -134,7 +132,7 @@ own dataset — see QUICKSTART for the 30-line template.
 ┌─────────────────────────────────────────────────────────────┐
 │  examples/teleai/train_dpo.sh                               │
 │  └─→ examples/teleai/pretrain_dpo_i2v.py                    │
-│      └─→ teletron.train.Trainer                             │
+│      └─→ teleboost.train.Trainer                             │
 │           ├─ ParallelWanModel                               │
 │           ├─ DistributedVAE (text + image + video encoder)  │
 │           └─ DeepSpeedZeroOptimizer (ZeRO-2 partition_grads)│
@@ -211,7 +209,7 @@ TeleBoost/
 │       ├── pretrain_wan.py
 │       ├── pretrain_wan2_2.py
 │       └── ...
-├── teletron/
+├── teleboost/
 │   ├── train/
 │   │   ├── utils.py            ← deepspeed_backward_step (split path)
 │   │   ├── lr_scheduler.py     ← optimizer wiring

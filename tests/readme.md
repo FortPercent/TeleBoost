@@ -1,7 +1,7 @@
 # TeleTron Testing
 
 ## 测试分布式方法
-* 在teletron中很多方法需要在分布式场景下才能充分测试，比如split, gather, all-to-all等，因此需要测试用例本身包含多进程。然而pytest本身对多进程测试用例的支持度不好，1）子进程没法使用self.assertTrue这样的断言来告知pytest测试用例的成败 2）子进程中的报错pytest不会捕捉，所以当子进程报错时从pytest层面只能看到进程自己退出了，不知道是什么报错，不利于分析和调试。因此在teletron testing中开发了一个简单的`spawn`接口便于启动pytorch分布式进程并且便于和pytest框架做交互。
+* 在teleboost中很多方法需要在分布式场景下才能充分测试，比如split, gather, all-to-all等，因此需要测试用例本身包含多进程。然而pytest本身对多进程测试用例的支持度不好，1）子进程没法使用self.assertTrue这样的断言来告知pytest测试用例的成败 2）子进程中的报错pytest不会捕捉，所以当子进程报错时从pytest层面只能看到进程自己退出了，不知道是什么报错，不利于分析和调试。因此在teleboost testing中开发了一个简单的`spawn`接口便于启动pytorch分布式进程并且便于和pytest框架做交互。
 
 接口描述：
 ```

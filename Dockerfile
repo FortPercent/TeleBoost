@@ -1,4 +1,4 @@
-# Teletron / TeleBoost training image, aligned with megatron-core 0.16.1.
+# TeleBoost / TeleBoost training image, aligned with megatron-core 0.16.1.
 #
 # NGC tag is taken from the *official* Megatron-LM repo at the v0.16.1
 # tag — `docker/.ngc_version.lts` pins it explicitly:
@@ -54,7 +54,7 @@ RUN rm -f /etc/pip.conf /etc/xdg/pip/pip.conf /root/.pip/pip.conf /root/.config/
 
 # ─── delete NGC-bundled opencv to avoid version conflicts ─────────────
 # NGC ships an opencv variant whose cv2/typing module references newer
-# attributes than what teletron's pinned opencv-python==4.10 expects.
+# attributes than what teleboost's pinned opencv-python==4.10 expects.
 # Glob across Python versions (24.10=py3.10, 25.04=py3.10, 25.09=py3.12).
 # Also wipe any opencv-contrib-python that might have been pulled by a
 # transitive dep — it shadows opencv-python-headless and breaks cv2.dnn.
@@ -62,7 +62,7 @@ RUN find /usr/local/lib/python3*/dist-packages -maxdepth 2 -name cv2 -type d -ex
  && pip3 uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless 2>/dev/null \
  && true
 
-# ─── teletron python deps (driven by requirements.txt) ────────────────
+# ─── teleboost python deps (driven by requirements.txt) ────────────────
 # Single source of truth lives in requirements.txt. DO NOT pip-install
 # torch / transformer_engine / apex / NVIDIA CUDA libs here — NGC's
 # pre-built versions are ABI-aligned with each other; replacing any one

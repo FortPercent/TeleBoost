@@ -7,7 +7,7 @@ from unittest.mock import patch, Mock
 from unit_tests.test_utils import spawn
 from megatron.core import mpu
 
-from teletron.models.flow_match import FlowMatchScheduler
+from teleboost.models.flow_match import FlowMatchScheduler
 
 DPO_CP_FWD_SUCCESS = "DPO i2v forward CP compare success"
 DPO_CP_FWD_FAIL = "DPO i2v forward CP compare fail"
@@ -200,12 +200,12 @@ def _compute_single_loss(
     return output_tensor, loss
 
 
-@patch("teletron.utils.set_config")
-@patch("teletron.utils.get_args")
+@patch("teleboost.utils.set_config")
+@patch("teleboost.utils.get_args")
 def dpo_i2v_cp_compare_worker(rank, world_size, q, tp_size, cp_size, seed, run_tag, enable_tensorwatch, mock_get_args, mock_set_config):
-    from teletron.models.teleai import ParallelTeleaiModel
+    from teleboost.models.teleai import ParallelTeleaiModel
     from megatron.core.transformer import TransformerConfig
-    from teletron.core.parallel_state import initialize_model_parallel_base
+    from teleboost.core.parallel_state import initialize_model_parallel_base
 
     args = Mock()
     args.recompute_method = "block"

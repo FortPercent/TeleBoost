@@ -72,7 +72,7 @@ config = dict(
                 video_key="video",
                 output_key="raw_first_image",  # 这个是PIL list的首帧
             ),
-            # Compare DiffSynth image-embed preprocess dumps against Teletron output.
+            # Compare DiffSynth image-embed preprocess dumps against TeleBoost output.
             # dict(
             #     type="CompareImageEmbedFromVideo",
             #     video_key="video",

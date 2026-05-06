@@ -1,17 +1,17 @@
 import types
 import math
-from teletron.models.teleai.models.dit import TeleaiPrompter
-from teletron.models.teleai.models.dit import TeleaiTextEncoder
-from teletron.models.teleai.models.dit import TeleaiVideoVAE
-from teletron.models.teleai.models.dit import TeleaiVideoVAE_2_2
-from teletron.models.teleai.models.dit import TeleaiImageEncoder
-from teletron.models.teleai import TeleaiModel
+from teleboost.models.teleai.models.dit import TeleaiPrompter
+from teleboost.models.teleai.models.dit import TeleaiTextEncoder
+from teleboost.models.teleai.models.dit import TeleaiVideoVAE
+from teleboost.models.teleai.models.dit import TeleaiVideoVAE_2_2
+from teleboost.models.teleai.models.dit import TeleaiImageEncoder
+from teleboost.models.teleai import TeleaiModel
 
 from torch.nn import functional as F
 from torchvision.transforms.functional import center_crop
 
 
-from teletron.models.flow_match import FlowMatchScheduler
+from teleboost.models.flow_match import FlowMatchScheduler
 from .base import BasePipeline
 import torch, os
 from einops import rearrange

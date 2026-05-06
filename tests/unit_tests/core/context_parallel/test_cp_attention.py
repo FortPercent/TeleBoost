@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from megatron.core import mpu
 from einops import rearrange
-from teletron.core.context_parallel.mappings import SeqAllToAll, split_forward_gather_backward, gather_forward_split_backward
+from teleboost.core.context_parallel.mappings import SeqAllToAll, split_forward_gather_backward, gather_forward_split_backward
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -100,12 +100,12 @@ class CPAttn(Attn, ):
         return o
 
 
-@patch("teletron.utils.get_args")
-def buffer_test_func(rank, world_size, q, mock_teletron):
-    from teletron.core.parallel_state import initialize_model_parallel_base 
+@patch("teleboost.utils.get_args")
+def buffer_test_func(rank, world_size, q, mock_teleboost):
+    from teleboost.core.parallel_state import initialize_model_parallel_base 
     args = Mock()
     args.consumer_models_num = 1
-    mock_teletron.return_value = args
+    mock_teleboost.return_value = args
 
     torch.distributed.init_process_group(world_size=world_size, rank=rank)
     torch.cuda.set_device(rank)

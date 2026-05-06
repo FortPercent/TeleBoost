@@ -1,11 +1,11 @@
 import os
 import torch
-from teletron.train import Trainer, parse_args
+from teleboost.train import Trainer, parse_args
 import torch.distributed as dist
 from megatron.core import mpu
-from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train.utils import get_batch, loss_func as base_loss_func, average_losses_across_data_parallel_group
-from teletron.utils import get_timers, set_config
+from teleboost.models.flow_match import FlowMatchScheduler
+from teleboost.train.utils import get_batch, loss_func as base_loss_func, average_losses_across_data_parallel_group
+from teleboost.utils import get_timers, set_config
 import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):

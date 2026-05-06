@@ -2,9 +2,9 @@ import torch
 import torch.distributed as dist
 from megatron.core import mpu
 
-from teletron.models.flow_match import FlowMatchScheduler
-from teletron.train import Trainer, parse_args
-from teletron.train.utils import average_losses_across_data_parallel_group
+from teleboost.models.flow_match import FlowMatchScheduler
+from teleboost.train import Trainer, parse_args
+from teleboost.train.utils import average_losses_across_data_parallel_group
 
 def wan_loss_func(output_tensor):
     """

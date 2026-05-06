@@ -71,10 +71,10 @@ def _setup_tensorwatch(model, rank, run_tag, enable_tensorwatch=True):
     return TensorWatch
 
 
-@patch("teletron.utils.set_config")
-@patch("teletron.utils.get_args")
+@patch("teleboost.utils.set_config")
+@patch("teleboost.utils.get_args")
 def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_get_args, mock_set_config):
-    from teletron.models.teleai import ParallelTeleaiModel,TeleaiModel
+    from teleboost.models.teleai import ParallelTeleaiModel,TeleaiModel
     
     args = Mock()
     args.recompute_method = "block"
@@ -128,7 +128,7 @@ def parallel_teleai_model_testing(rank, world_size, q, tp_size, cp_size, mock_ge
     cuda_rank = CUDA_DEVICES[rank]
     torch.cuda.set_device(cuda_rank)
     
-    from teletron.core.parallel_state import initialize_model_parallel_base
+    from teleboost.core.parallel_state import initialize_model_parallel_base
     initialize_model_parallel_base(
             tensor_model_parallel_size = tp_size,
             pipeline_model_parallel_size = 1,

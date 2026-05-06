@@ -33,11 +33,11 @@ WAN_MODEL_FWD_FAIL = "Parallel Wan model forward test fail"
 WAN_MODEL_BWD_SUCCESS = "Parallel Wan model backward test success"
 WAN_MODEL_BWD_FAIL = "Parallel Wan model backward test fail"
 
-@patch("teletron.models.wan.parallel_wan_model.set_config")
-@patch("teletron.utils.get_args")
-def parallel_wan_model_testing(rank, world_size, q, mock_teletron, mock_set_config):
-    from teletron.models.wan import ParallelWanModel, WanModel
-    from teletron.core.parallel_state import initialize_model_parallel_base
+@patch("teleboost.models.wan.parallel_wan_model.set_config")
+@patch("teleboost.utils.get_args")
+def parallel_wan_model_testing(rank, world_size, q, mock_teleboost, mock_set_config):
+    from teleboost.models.wan import ParallelWanModel, WanModel
+    from teleboost.core.parallel_state import initialize_model_parallel_base
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
@@ -46,7 +46,7 @@ def parallel_wan_model_testing(rank, world_size, q, mock_teletron, mock_set_conf
     args.num_layers = 1
     args.num_attention_heads = 40
     args.distributed_vae = False
-    mock_teletron.return_value = args
+    mock_teleboost.return_value = args
     args.consumer_models_num = 1
 
     wanConfig = WanParams()

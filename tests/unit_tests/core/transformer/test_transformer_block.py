@@ -1,16 +1,16 @@
 import torch
 import torch.nn as nn
 from unittest.mock import patch, Mock
-import teletron
+import teleboost
 
-@patch("teletron.utils.get_args")
-def get_model(mock_teletron):
-    from teletron.core.transformer import TransformerGeneralMixin
+@patch("teleboost.utils.get_args")
+def get_model(mock_teleboost):
+    from teleboost.core.transformer import TransformerGeneralMixin
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
     args.recompute_num_layers = 2
-    mock_teletron.return_value = args
+    mock_teleboost.return_value = args
 
     class TestConfig:
         hidden_size = 1024

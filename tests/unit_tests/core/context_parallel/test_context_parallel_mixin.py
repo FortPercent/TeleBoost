@@ -83,12 +83,12 @@ def split_input(cp_model, cp_size, cp_rank, q):
         global SPLIT_FAIL
         q.put(f"{SPLIT_FAIL}{cp_rank}")
 
-@patch("teletron.utils.get_args")
-def setupContextParallelMixin(cp_rank, cp_size, q, mock_teletron):
+@patch("teleboost.utils.get_args")
+def setupContextParallelMixin(cp_rank, cp_size, q, mock_teleboost):
     torch.cuda.set_device(cp_rank)
     from megatron.core import mpu
-    from teletron.core.context_parallel import ContextParallelMixin
-    from teletron.core.parallel_state import initialize_model_parallel_base
+    from teleboost.core.context_parallel import ContextParallelMixin
+    from teleboost.core.parallel_state import initialize_model_parallel_base
     args = Mock()
     args.recompute_method = "block"
     args.recompute_granularity = "full"
@@ -98,7 +98,7 @@ def setupContextParallelMixin(cp_rank, cp_size, q, mock_teletron):
     args.num_attention_heads = 4
     args.distributed_vae = False
     args.consumer_models_num = 1
-    mock_teletron.return_value = args
+    mock_teleboost.return_value = args
     
     class ContextParallelModel(ContextParallelMixin):
         def __init__(self, split_dim=1, gather_dim=1):

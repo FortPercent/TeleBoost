@@ -4,8 +4,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-import teletron.utils as teletron_utils
-from teletron.datasets.dpo_dataset import WanDPODataset
+import teleboost.utils as teleboost_utils
+from teleboost.datasets.dpo_dataset import WanDPODataset
 
 
 def _write_image(path, color):
@@ -18,7 +18,7 @@ def test_wan_dpo_data_pipeline(tmp_path, monkeypatch):
     width = 32
 
     monkeypatch.setattr(
-        teletron_utils,
+        teleboost_utils,
         "set_config",
         lambda: {"dataset": {"width": width, "height": height}},
     )

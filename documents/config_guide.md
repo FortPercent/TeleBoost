@@ -1,6 +1,6 @@
-# Teletron 配置文件详细说明
+# TeleBoost 配置文件详细说明
 
-本文档详细说明了Teletron训练框架中配置文件的结构和各参数含义，以`examples/teleai/config/teleai_i2v.py`为例进行说明。
+本文档详细说明了TeleBoost训练框架中配置文件的结构和各参数含义，以`examples/teleai/config/teleai_i2v.py`为例进行说明。
 
 ## 配置文件整体结构
 
@@ -61,7 +61,7 @@ data_path_list=[
 ### 2.3 数据过滤配置 (filter_cfg)
 
 训练启动时会根据数据元信息和filter_cfg的要求过滤去除不符合要求的数据，
-具体的filter实现在teletron/datasets/clip_dataset.py filter_data方法。。
+具体的filter实现在teleboost/datasets/clip_dataset.py filter_data方法。。
 ```python
 filter_cfg=dict(
     dst_size=dst_size,                    # 目标分辨率
@@ -93,7 +93,7 @@ filter_cfg=dict(
 
 ### 2.4 数据变换配置 (transforms)
 选中一条视频数据会对数据做指定一系列变换再给到模型训练，这些变换用下面的transforms来指定。
-具体的transforms实现在teletron/datasets/transform
+具体的transforms实现在teleboost/datasets/transform
 
 ```python
 transforms=[

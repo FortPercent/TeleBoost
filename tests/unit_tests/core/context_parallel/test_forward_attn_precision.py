@@ -20,11 +20,11 @@ from megatron.core import mpu
 mpu.get_context_parallel_world_size = lambda: world
 mpu.get_context_parallel_group = lambda: dist.group.WORLD
 mpu.get_tensor_model_parallel_world_size = lambda: 1
-import teletron.utils as tu
+import teleboost.utils as tu
 class _A: num_attention_heads = NUM_HEADS
 tu.get_args = lambda: _A()
 
-from teletron.core.context_parallel.context_parallel_mixin import ContextParallelMixin
+from teleboost.core.context_parallel.context_parallel_mixin import ContextParallelMixin
 
 
 class RefBlock(nn.Module):

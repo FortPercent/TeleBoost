@@ -29,12 +29,12 @@ mpu.get_context_parallel_world_size = lambda: world
 mpu.get_context_parallel_group = lambda: dist.group.WORLD
 mpu.get_tensor_model_parallel_world_size = lambda: 1
 
-import teletron.utils as tu
+import teleboost.utils as tu
 class _FakeArgs:
     num_attention_heads = 8
 tu.get_args = lambda: _FakeArgs()
 
-from teletron.core.context_parallel.context_parallel_mixin import ContextParallelMixin
+from teleboost.core.context_parallel.context_parallel_mixin import ContextParallelMixin
 
 
 class _M(ContextParallelMixin): pass

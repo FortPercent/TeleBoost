@@ -53,7 +53,7 @@ What's inside (verified ABI-aligned):
 > **Why deepspeed 0.17.5 specifically?** Versions 0.17.6+ replaced the
 > simple multi-call epilogue with an `all_grad_tensors` state machine
 > that requires `DeepSpeedEngine` to drive `is_gradient_accumulation_boundary`.
-> teletron uses `DeepSpeedZeroOptimizer` directly (no Engine wrapper)
+> teleboost uses `DeepSpeedZeroOptimizer` directly (no Engine wrapper)
 > and relies on multi-call epilogue for Gradient Decoupled DPO. 0.17.5
 > is the last release with the simple epilogue compatible with this
 > usage. Do not bump it.
@@ -172,12 +172,12 @@ NNODES=4 NODE_RANK=0 MASTER_ADDR=10.0.0.1 \
 
 ## 5. Write your own dataset (no `teleai_data_tool` needed)
 
-`teletron.datasets.DPODatasetBase` documents the schema your
+`teleboost.datasets.DPODatasetBase` documents the schema your
 `__getitem__` must return:
 
 ```python
 import torch
-from teletron.datasets import DPODatasetBase, DATASETS
+from teleboost.datasets import DPODatasetBase, DATASETS
 
 
 class MyDPODataset(DPODatasetBase):
@@ -229,7 +229,7 @@ config = dict(
 
 **Schema notes**:
 
-* Tensors should be CPU + bf16 or fp32; teletron auto-casts to model
+* Tensors should be CPU + bf16 or fp32; teleboost auto-casts to model
   dtype.
 * Batch dim (B) is added by the DataLoader; do not prepend it.
 * `chosen` and `rejected` MAY have different `T/H/W` — each branch
@@ -253,13 +253,13 @@ inside the container.
 **`KeyError: torch.bfloat16` in `ipg_buckets`** — `lr_scheduler.py`
 must pass `communication_data_type=torch.bfloat16` when `args.bf16`. The
 shipped code does this; only triggers if you write a custom optimizer
-setup. See `teletron/train/lr_scheduler.py` for the canonical pattern.
+setup. See `teleboost/train/lr_scheduler.py` for the canonical pattern.
 
 **`ModuleNotFoundError: teleai_data_tool`** — expected for OSS users.
 Verify with:
 
 ```bash
-python3 -c "from teletron.datasets import FakeDataset; print(FakeDataset)"
+python3 -c "from teleboost.datasets import FakeDataset; print(FakeDataset)"
 ```
 
 This should succeed even without `teleai_data_tool` (a log line
