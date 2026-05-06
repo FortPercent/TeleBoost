@@ -1,57 +1,71 @@
-# TeleBoost — Memory-Efficient Video DPO Training
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="documents/figures/logo_teleboost.jpeg">
+    <img alt="TeleBoost" src="documents/figures/logo_teleboost.jpeg" width="55%">
+  </picture>
+</p>
+<h3 align="center">
+Memory-efficient DPO training for video diffusion models.
+</h3>
+
+📄 **Paper**: [*TeleBoost: A Systematic Alignment Framework for High-Fidelity, Controllable, and Robust Video Generation*](https://arxiv.org/abs/2602.07595) (arXiv:2602.07595)
 
 Training framework for video diffusion models, featuring **Gradient
 Decoupled DPO** — a per-branch backward + immediate reduce-scatter
-pattern that **cuts Wan 14B production DPO peak memory by ~46%** on
-32×H800 (49 f / 480p), turning a standard-DPO OOM into a 42.91 GB run,
-and extends to **≥8× the sequence length** the standard implementation
-can handle on the same hardware — with no ceiling reached yet.
+pattern that on Wan 14B 40-layer DPO at 32×H800:
 
-Standard DPO at this config crashes with OOM on the 80 GB H800;
-Decoupled DPO finishes with ~37 GB headroom and is mathematically
-equivalent to the single-backward formulation (verified element-wise
-on 14.78 B gradient elements at 32-GPU production shape).
+* **cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
+* **lets the production default (49 f / 480p) actually run** — standard DPO OOMs, Decoupled finishes at 42.90 GB
+* **extends supported context length by ~15×** — standard DPO max-fits at 25 f / 480p (~11k visual tokens), Decoupled max-fits at 77 f / 1080p (~163k visual tokens) on the same hardware
+
+It is mathematically equivalent to the single-backward formulation
+(verified element-wise on 14.78 B gradient elements at 32-GPU
+production shape).
 
 Built on [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
 long-context multi-modal training framework — together with
 [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
-and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family
-training; this is the OSS release.
+and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family training.
 
 <p align="center">
-  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B I2V DPO peak GPU memory at production depth (40 layers) — Standard DPO OOMs in both fixture-seq (8×H800) and full production-seq (32×H800, 49 f / 480p) settings; Gradient Decoupled DPO finishes at 65.17 GB and 42.91 GB respectively, a ~46% peak-memory cut at full production scale." width="820"/>
+  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B I2V DPO peak GPU memory across three configs at 32×H800 multi-node, n_iters=2 strict measurement. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="820"/>
 </p>
 
 <p align="center"><sub><i>
-Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3.
-At full production scale (32×H800, 49 f / 480p, ~20k visual tokens), Gradient Decoupled DPO drops peak memory from a standard-DPO OOM to 42.91 GB — a ~46% reduction.
+Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800, n_iters=2 strict.
+<b>Left</b>: same workload, ~40% memory cut. <b>Middle</b>: production default, standard OOMs and Decoupled fits. <b>Right</b>: Decoupled scales to ~15× longer context than standard.
 </i></sub></p>
 
 ---
 
-## Headline numbers — Wan 14B production DPO
+## Headline numbers — Wan 14B 40-layer DPO at 32×H800 (n_iters=2 strict)
 
-| Setting | Standard DPO | **Gradient Decoupled DPO** | Δ |
-|---|---|---|---|
-| 8×H800, fixture seq (≈504 tokens) | OOM (>80 GB) | **65.17 GB** | **qualitative** ✅ |
-| **32×H800, production seq (49 f / 480p, ~20k tokens)** | **OOM 79 GB** | **42.91 GB** | **−46% / qualitative** ✅ |
+| Setting | Visual tokens | Standard DPO | **Gradient Decoupled DPO** | Δ |
+|---|---|---|---|---|
+| 25 f / 480p — *standard's max-fit* | ~11 k | 69.27 GB ✓ | **41.39 GB ✓** | **−40.3%** |
+| **49 f / 480p — *production default*** | **~20 k** | **❌ OOM** | **42.90 GB ✓** | **qualitative** ✅ |
+| 77 f / 1080p — *decoupled's max-fit* | ~163 k | ❌ OOM | **69.32 GB ✓** | **qualitative · ~15× tokens** ✅ |
 
-At full production scale, peak memory drops by ~46% — turning a
-standard-DPO OOM into a 42.91 GB run with ~37 GB of headroom on the
-80 GB H800.
+Three concrete wins on the same 32-GPU H800 hardware:
+1. **−40% peak memory on identical workload** (25 f / 480p ~11 k tokens)
+2. **Production default actually runs** (49 f / 480p ~20 k tokens crashes standard DPO with OOM)
+3. **~15× longer supported context length** (~11 k → ~163 k visual tokens)
 
 ### Sequence-length scaling (32×H800, Wan 14B 40 layers, CP=8 DP=4)
 
 | Config | Visual tokens | Standard DPO | Gradient Decoupled DPO |
 |---|---|---|---|
-| 49 f / 480p (production) | ~20 k | ❌ OOM 79 GB | ✅ **42.91 GB** |
-| 81 f / 720p              | ~76 k | ❌ OOM       | ✅ **48.72 GB** |
-| 81 f / 1080p             | ~171 k | ❌ OOM      | ✅ **67.10 GB** |
+| 25 f / 480p (T=7) | ~11 k | ✅ 69.27 GB ← *standard's ceiling* | ✅ 41.39 GB |
+| 29 f / 480p (T=8) | ~12 k | ❌ OOM | (fits) |
+| 49 f / 480p (T=13, production) | ~20 k | ❌ OOM | ✅ 42.90 GB |
+| 65 f / 1080p (T=17) | ~139 k | ❌ OOM | ✅ 64.54 GB |
+| 121 f / 720p (T=31) | ~112 k | ❌ OOM | ✅ 67.73 GB |
+| 77 f / 1080p (T=20) | ~163 k | ❌ OOM | ✅ 69.32 GB ← *decoupled's ceiling* |
+| 81 f / 1080p (T=21) | ~171 k | ❌ OOM | ❌ OOM |
 
-→ Standard DPO cannot fit any of these production configs. Decoupled
-DPO extends to **≥8× the sequence length** the standard implementation
-can handle on the same hardware — 81 f / 1080p (~171 k visual tokens)
-still runs comfortably, and we have not yet measured its ceiling.
+→ Standard DPO ceiling at 32×H800: **~11 k visual tokens** (25 f / 480p ≈ 1.5 s of low-res video).
+Decoupled DPO ceiling: **~163 k visual tokens** (77 f / 1080p ≈ 4.8 s of full-res video).
+**Supported context length grows by ~15×** with the same 32-GPU H800 budget.
 
 ### Mathematical equivalence (verified element-wise)
 
@@ -243,11 +257,15 @@ TeleBoost/
 ## Citation
 
 ```bibtex
-@misc{teleboost2026,
-  title  = {TeleBoost: Gradient Decoupled DPO for memory-efficient
-            video diffusion model training},
-  author = {TeleAI},
-  year   = {2026},
-  url    = {https://github.com/Tele-AI/TeleBoost},
+@article{teleboost2026,
+  title   = {TeleBoost: A Systematic Alignment Framework for High-Fidelity,
+             Controllable, and Robust Video Generation},
+  author  = {Liang, Yuanzhi and Wu, Xuan'er and Liu, Yirui and Fang, Yijie
+             and Fan, Yizhen and Hao, Ke and Li, Rui and Liu, Ruiying
+             and Ni, Ziqi and Yu, Peng and Wang, Yanbo and Huang, Haibin
+             and Weng, Qizhen and Zhang, Chi and Li, Xuelong},
+  journal = {arXiv preprint arXiv:2602.07595},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2602.07595},
 }
 ```

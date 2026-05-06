@@ -104,14 +104,15 @@ def fig_memory_vs_sequence():
 
 def fig_memory_vs_layers():
     configs = [
-        "32×H800, 49 f / 480p\n(~20k visual tokens)",
-        "32×H800, 81 f / 1080p\n(~171k visual tokens)",
+        "25 f / 480p\n(~11k tokens)\nstandard's max-fit",
+        "49 f / 480p\n(~20k tokens)\nproduction default",
+        "77 f / 1080p\n(~163k tokens)\ndecoupled's max-fit",
     ]
-    standard = [79.0, 80.0]
-    decoupled = [42.91, 67.10]
-    standard_oom = [True, True]
-    standard_oom_label = ["OOM", "OOM"]
-    deltas = ["−46% / qualitative ✓", "qualitative ✓"]
+    standard = [69.27, 80.0, 80.0]
+    decoupled = [41.39, 42.90, 69.32]
+    standard_oom = [False, True, True]
+    standard_oom_label = ["", "OOM", "OOM"]
+    deltas = ["−40.3%", "qualitative ✓", "qualitative ✓ · ~15× tokens"]
 
     x = np.arange(len(configs))
     width = 0.36
@@ -153,16 +154,17 @@ def fig_memory_vs_layers():
     ax.set_ylabel("Peak GPU memory (GB)")
     ax.set_ylim(0, 100)
     ax.set_title("Wan 14B I2V DPO — peak GPU memory at production depth\n"
-                 "bf16 + ZeRO-2 + recompute=full + flash-attn 3 · 32×H800",
+                 "bf16 + ZeRO-2 + recompute=full + flash-attn 3",
                  loc="left")
-    ax.legend(loc="upper right", frameon=False)
+    ax.legend(loc="upper left", frameon=False)
     ax.grid(axis="y", ls=":", alpha=0.45, zorder=1)
 
     fig.text(0.5, -0.02,
-             "Dashed line = H800 80 GB capacity. "
-             "At full production scale (32×H800, 49 f / 480p, ~20k visual tokens), "
-             "Gradient Decoupled DPO cuts peak memory by ~46% — from a standard-DPO OOM down to 42.91 GB.",
-             ha="center", fontsize=12, color="#444")
+             "Dashed line = H800 80 GB capacity. n_iters=2 strict measurement. "
+             "Decoupled DPO cuts peak memory by ~40% on identical workload (left), "
+             "lets production training (49 f / 480p, ~20k tokens) actually run (middle), "
+             "and scales to ~15× the visual-token length the standard implementation can handle (right).",
+             ha="center", fontsize=11, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_layers.png"
