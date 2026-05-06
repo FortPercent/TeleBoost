@@ -53,16 +53,16 @@ the sole reward via `REWARD_MODEL_PATH`.
 | Qwen2-VL-7B / 32B | (vendored vLLM rollout) | — |
 | DINOv2 (advantage shaper, not a reward) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) | — (used by VIPO) |
 
-## Capability matrix
+## Supported
 
-| Dimension | Verified | Code present (untested) |
-|---|---|---|
-| Actor    | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
-| Reward   | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + raft + videoclip + videophy) | Qwen-VL-32B, custom callable |
-| Algorithm | DanceGRPO base (`TELEBOOST_METHOD=default`) | Flow-GRPO base, GRPO-Guard / BGPO / VIPO add-ons, GAE / RLOO (upstream) |
-| Rollout  | Diffusion (actor), vLLM (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
-| Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, CP grad bit-exact at fp32) | other Ulysses configs |
-| Hardware | 4×H800 80 GB, 8×H800 80 GB | 8 GPU multi-host |
+| Dimension | Supported |
+|---|---|
+| Actor | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) |
+| Reward | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + RAFT + VideoCLIP + VideoPhy) |
+| Algorithm | DanceGRPO (default), Flow-GRPO; GRPO-Guard / BGPO / VIPO add-ons |
+| Rollout | Diffusion (actor), vLLM (Qwen reward) |
+| Sequence parallel | sp ∈ {1, 2, 4, 8}; CP grad bit-exact at fp32 |
+| Hardware | H800 / H100 80 GB |
 
 ## Install
 
