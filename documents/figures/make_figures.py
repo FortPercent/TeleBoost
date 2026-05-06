@@ -112,7 +112,7 @@ def fig_memory_vs_layers():
     decoupled = [41.39, 42.90, 69.32]
     standard_oom = [False, True, True]
     standard_oom_label = ["", "OOM", "OOM"]
-    deltas = ["−40.3%", "qualitative ✓", "qualitative ✓ · ~15× tokens"]
+    deltas = ["−40.3%", "passes ✓", "~15× tokens"]
 
     x = np.arange(len(configs))
     width = 0.36
