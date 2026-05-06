@@ -1,0 +1,136 @@
+import os
+import math
+
+dst_size = (832, 480)
+dst_fps = 16
+dst_num_frames = 81
+
+config = dict(
+    dataset=dict(
+        type="WanDPODataset",
+
+        # === 原来 args 里的 ===
+        dataset_base_path="",
+        dataset_metadata_path="/path/to/dpo_data/prompt_video_pairs_matched_image.csv",
+        dataset_repeat=2,
+
+        # === DPO 语义 ===
+        chosen_video_key="chosen",
+        rejected_video_key="rejected",
+
+        # === 视频尺寸 & 时序 ===
+        height=480,
+        width=832,
+        num_frames=49,
+
+        # === 这些原脚本是写死的，现在 config 化 ===
+        time_division_factor=4,
+        time_division_remainder=1,
+        height_division_factor=16,
+        width_division_factor=16,
+
+        # 可选
+        max_pixels=400000,
+    ),
+    eval=dict(
+        data_path_list=[
+            "/path/to/istock_dataset/istock_0.json",
+        ],
+        eval_time_steps=[200,400,600,800,1000]
+    ),
+    sampler=dict(
+        type="DefaultSampler",
+        shuffle=False,
+        seed=42,
+        drop_last=True,
+        infinite=True,
+    ),
+
+
+    model_config=dict(
+        dit=dict(
+            type="WanTrainingModule", # ParallelTeleaiModel
+
+            # 这里需要修改 TODO
+            config=dict(
+                has_image_input=True, # t2v:False i2v:True i2v Wan2.2:False
+                patch_size=[1, 2, 2],
+                in_dim=36, # t2v:16 i2v:36
+                dim=1536, # 1.3B:1536 10B:5120 14B:5120
+                ffn_dim=8960, # 1.3B:8960 10B:13824 14B:13824
+                freq_dim=256,
+                text_dim=4096,
+                out_dim=16,
+                num_heads=12, # 1.3B:12 10B:40 14B:40
+                num_layers=30, # 1.3B:30 10B:30 14B:40
+                eps=1e-6,
+                has_image_pos_emb=False, 
+            ),
+
+            # === DiT 训练 & 行为（从 WanTrainingModule 下沉）===
+            train=dict(
+                trainable_models="dit",                 # 等价于 trainable_models="dit"
+                use_gradient_checkpointing=True,
+                use_gradient_checkpointing_offload=True,
+                enable_fp8_training=False,
+                # LoRA
+                lora=dict(
+                    enable=False,
+                    base_model=None,
+                    target_modules="q,k,v,o,ffn.0,ffn.2",
+                    rank=32,
+                    checkpoint=None,
+                ),
+
+                # DPO
+                dpo=dict(
+                    enable=True,
+                    beta=0.1,
+                ),
+
+                # forward contract
+                extra_inputs=["input_image"],
+            ),
+        ),
+        encoder=dict(
+            type="teleai_encoder", # teleai_encoder
+            encoder_schema=['context', 'img_clip_feature', 'img_emb_y', 'latents'],
+            vae=dict(
+                path="/path/to/Wan2.1-I2V-14B-480P/Wan2.1_VAE.pth",
+                tiler_kwargs=dict(
+                    tiled=False,
+                    tile_size=(34, 34),
+                    tile_stride=(18, 16),
+                ),
+                torch_compile=False
+            ),
+            text_encoder=dict(
+                path="/path/to/Wan2.1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
+                tokenizer_path="/path/to/Wan2.1-I2V-14B-480P/google/umt5-xxl",
+            ),
+            image_encoder=dict(
+                path="/path/to/Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
+                torch_compile=True
+            ),
+            depth_model=dict(
+                path="/path/to/ckpts/video_depth_anything_vitl.pth",
+            ),
+        ),
+
+
+        training=dict(
+            diffusion=dict(
+                max_timestep_boundary=0.358,
+                min_timestep_boundary=0.0,
+            ),
+
+            dpo_io=dict(
+                chosen_key="chosen",
+                rejected_key="rejected",
+            ),
+             scheduler=dict(
+                num_train_timesteps=1000,
+            )
+        ),
+    ),
+)

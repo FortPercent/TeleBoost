@@ -1,0 +1,68 @@
+TeleBoost / Teletron
+Copyright 2026 TeleAI
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file at the root of this
+repository or at http://www.apache.org/licenses/LICENSE-2.0.
+
+================================================================================
+This product includes, derives from, or interoperates with the following
+third-party open-source software. Each component is used in accordance with
+its respective license; copyright notices are retained in the corresponding
+source files within this repository.
+================================================================================
+
+NVIDIA Megatron-LM
+    https://github.com/NVIDIA/Megatron-LM (release tag: core_v0.16.1)
+    Primary license: BSD-3-Clause
+    (Multi-license repository; individual files may carry Apache-2.0 or MIT
+    notices. See the upstream LICENSE for details.)
+    Files in this repository derived from Megatron-LM retain the upstream
+    NVIDIA copyright header.
+
+DeepSpeed
+    https://github.com/deepspeedai/DeepSpeed
+    License: Apache-2.0
+    Used at runtime via `deepspeed==0.17.5` (DeepSpeedZeroOptimizer).
+    No source code from DeepSpeed is vendored into this repository.
+
+flash-attention
+    https://github.com/Dao-AILab/flash-attention
+    License: BSD-3-Clause
+    Used at runtime via `flash-attn` (v2 + v3) Python packages.
+    No source code from flash-attention is vendored into this repository.
+
+Wan2.1 / Wan2.2 (Alibaba Wan-Video)
+    https://github.com/Wan-Video/Wan2.1
+    https://github.com/Wan-Video/Wan2.2
+    License: Apache-2.0
+    Files derived from the Wan reference implementation retain the upstream
+    "Copyright 2024-2025 The Alibaba Wan Team Authors" header
+    (see teletron/models/causwan/ and teletron/models/wan/).
+
+Hugging Face Transformers / Diffusers
+    https://github.com/huggingface/transformers
+    https://github.com/huggingface/diffusers
+    License: Apache-2.0
+    Files derived from HuggingFace reference code retain the upstream
+    "The HuggingFace Team" copyright header.
+
+DiffSynth-Studio (modelscope)
+    https://github.com/modelscope/DiffSynth-Studio
+    License: Apache-2.0
+    Auxiliary diffusion utilities are adapted from DiffSynth-Studio; derived
+    files reference "diffsynth" in their filename or module path.
+
+PyTorch
+    https://github.com/pytorch/pytorch
+    License: BSD-3-Clause
+    Runtime dependency only.
+
+NVIDIA NGC PyTorch container (nvcr.io/nvidia/pytorch:25.09-py3)
+    Used as the recommended base image. Distribution of the container itself
+    is governed by NVIDIA's Deep Learning Container License; this repository
+    does not redistribute the container.
+
+================================================================================
+For questions about licensing or attribution gaps, please open an issue at
+https://github.com/Tele-AI/TeleBoost.
