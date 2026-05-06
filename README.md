@@ -12,9 +12,11 @@ DPO finishes with ~37 GB headroom and is mathematically equivalent to
 the single-backward formulation (verified element-wise on 14.78 B
 gradient elements at 32-GPU production shape).
 
-Built on [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
-+ DeepSpeed ZeRO-2 + bf16 + recompute + context-parallelism. Production
-in TeleAI internally for Wan-family training; this is the OSS release.
+Built on [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
+long-context multi-modal training framework — and
+[megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
++ DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family
+training; this is the OSS release.
 
 <p align="center">
   <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B I2V DPO peak GPU memory at production depth (40 layers) — Standard DPO OOMs in both fixture-seq (8×H800) and full production-seq (32×H800, 49 f / 480p) settings; Gradient Decoupled DPO finishes at 65.17 GB and 42.91 GB respectively, a ~46% peak-memory cut at full production scale." width="820"/>
@@ -27,7 +29,7 @@ At full production scale (32×H800, 49 f / 480p, ~20k visual tokens), Gradient D
 
 ---
 
-## Headline numbers — Wan 14B DPO at production depth (40 layers)
+## Headline numbers — Wan 14B production DPO
 
 | Setting | Standard DPO | **Gradient Decoupled DPO** | Δ |
 |---|---|---|---|
@@ -61,7 +63,23 @@ elements compared, max\|Δgrad\| = 2.44e-4** — well below the bf16 ULP
 threshold of 1e-3. The non-bit-identical fraction is float-rounding-order
 in the bucket reduce-scatter accumulator, irrelevant to training stability.
 
-How it works:
+## How it works
+
+<p align="center">
+  <img src="documents/figures/fig_dpo_mechanism.png" alt="Backward-pass timeline of Standard DPO vs Gradient Decoupled DPO. Standard DPO keeps both chosen and rejected branches' full-shape gradients alive simultaneously across the entire reverse pass, stacking layer-by-layer to a high peak. Gradient Decoupled DPO reduce-scatters each branch's gradient into the rank's 1/N partition immediately after that branch's backward finishes, freeing the full-shape tensor before the next branch starts — visibly cutting the peak." width="780"/>
+</p>
+
+<p align="center"><sub><i>
+Per-step GPU memory across the DPO forward + backward timeline.
+<b>Left</b>: Standard DPO holds both branches' full-shape gradients
+simultaneously during the reverse pass — peak stacks layer-by-layer.
+<b>Right</b>: Decoupled DPO reduce-scatters each branch's gradient as
+soon as its backward finishes, freeing the full-shape tensor before
+the next branch starts. The marked "peak memory reduction" is the
+difference both panels share their y-axis on.
+</i></sub></p>
+
+In code:
 
 ```python
 # Standard DPO: both branches' grads alive together at peak
