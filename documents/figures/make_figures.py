@@ -20,17 +20,17 @@ CAPACITY_GB = 80.0
 
 plt.rcParams.update({
     "font.family": "DejaVu Sans",
-    "font.size": 17,
+    "font.size": 22,
     "axes.spines.top": False,
     "axes.spines.right": False,
     "axes.titleweight": "bold",
-    "axes.titlesize": 19,
+    "axes.titlesize": 24,
 })
 
 
 def _annotate_bar(ax, x, height, text, color="black", weight="normal", dy=1.2):
     ax.text(x, height + dy, text, ha="center", va="bottom",
-            fontsize=16, color=color, fontweight=weight)
+            fontsize=21, color=color, fontweight=weight)
 
 
 def fig_memory_vs_sequence():
@@ -117,7 +117,7 @@ def fig_memory_vs_layers():
     x = np.arange(len(configs))
     width = 0.36
 
-    fig, ax = plt.subplots(figsize=(13.5, 8.5), dpi=160)
+    fig, ax = plt.subplots(figsize=(16, 9.5), dpi=160)
     bars_s = ax.bar(x - width / 2, standard, width,
                     color=C_STANDARD, label="Standard DPO", zorder=3,
                     edgecolor="none", alpha=1.0)
@@ -140,8 +140,8 @@ def fig_memory_vs_layers():
 
     for i, d in enumerate(deltas):
         top = max(standard[i], decoupled[i])
-        ax.annotate(d, xy=(x[i], top + 7),
-                    ha="center", va="center", fontsize=14,
+        ax.annotate(d, xy=(x[i], top + 10),
+                    ha="center", va="center", fontsize=18,
                     color="#2C5587",
                     fontweight="bold" if "−" in d else "normal",
                     bbox=dict(boxstyle="round,pad=0.3",
@@ -150,9 +150,9 @@ def fig_memory_vs_layers():
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(configs, fontsize=12.5)
+    ax.set_xticklabels(configs, fontsize=16)
     ax.set_ylabel("Peak GPU memory (GB)")
-    ax.set_ylim(0, 100)
+    ax.set_ylim(0, 110)
     ax.set_title("Wan 14B DPO  ·  Peak GPU memory at 32×H800",
                  loc="center", pad=18)
     ax.legend(loc="upper left", frameon=False)
@@ -162,7 +162,7 @@ def fig_memory_vs_layers():
              "Dashed line = H800 80 GB capacity.\n"
              "Decoupled DPO cuts peak memory by ~40% on identical workload (left), "
              "lets production training run (middle), and scales to ~15× the token length standard can handle (right).",
-             ha="center", fontsize=14, color="#444")
+             ha="center", fontsize=17, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_layers.png"

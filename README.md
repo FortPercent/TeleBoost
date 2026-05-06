@@ -15,7 +15,7 @@ Memory-efficient DPO post-training for video diffusion models.
 
 TeleBoost is a **post-training framework for video diffusion models**.
 Its core feature, **Gradient Decoupled DPO**, is a per-branch backward
-+ immediate reduce-scatter pattern that **applies to any diffusion
+with immediate reduce-scatter pattern that **applies to any diffusion
 model TeleTron supports** (Wan 2.1 / 2.2, T2V / I2V, …). Measured on
 Wan 14B 40-layer DPO at 32×H800:
 
@@ -48,7 +48,7 @@ Wan 14B DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800.
 | Setting | Visual tokens | Standard DPO | **Gradient Decoupled DPO** | Δ |
 |---|---|---|---|---|
 | 25 f / 480p — *standard's max-fit* | ~11 k | 69.27 GB ✓ | **41.39 GB ✓** | **−40.3%** |
-| **49 f / 480p — *production default*** | **~20 k** | **❌ OOM** | **42.90 GB ✓** | **passes ✓** |
+| 49 f / 480p — *production default* | ~20 k | ❌ OOM | **42.90 GB ✓** | passes ✓ |
 | 77 f / 1080p — *decoupled's max-fit* | ~163 k | ❌ OOM | **69.32 GB ✓** | **~15× tokens** |
 
 Three concrete wins on the same 32-GPU H800 hardware:
