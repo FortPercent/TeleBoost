@@ -42,7 +42,7 @@ Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H
 
 ---
 
-## Headline numbers — Wan 14B 40-layer DPO at 32×H800 (n_iters=2 strict)
+## Headline numbers — Wan 14B 40-layer DPO at 32×H800
 
 | Setting | Visual tokens | Standard DPO | **Gradient Decoupled DPO** | Δ |
 |---|---|---|---|---|
@@ -52,18 +52,14 @@ Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H
 
 Three concrete wins on the same 32-GPU H800 hardware:
 1. **−40% peak memory on identical workload** (25 f / 480p ~11 k tokens)
-2. **Production default actually runs** (49 f / 480p ~20 k tokens crashes standard DPO with OOM)
-3. **~15× longer supported context length** (~11 k → ~163 k visual tokens)
+2. **~15× longer supported context length** (~11 k → ~163 k visual tokens)
+3. **Production default actually runs** (49 f / 480p ~20 k tokens crashes standard DPO with OOM)
 
-### Mathematical equivalence (verified element-wise)
+### Mathematical equivalence
 
 The split pattern is mathematically identical to single-backward of the
 summed loss: `my_slice(g_chosen) + my_slice(g_rejected) = my_slice(∇(loss_chosen + loss_rejected))`
-by chain rule + reduce-scatter linearity. We verified this element-wise
-on Wan 14B 36-layer at 32-GPU production shape: **14.78 billion gradient
-elements compared, max\|Δgrad\| = 2.44e-4** — well below the bf16 ULP
-threshold of 1e-3. The non-bit-identical fraction is float-rounding-order
-in the bucket reduce-scatter accumulator, irrelevant to training stability.
+by chain rule + reduce-scatter linearity.
 
 ## How it works
 
