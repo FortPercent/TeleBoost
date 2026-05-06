@@ -24,26 +24,19 @@ Ulysses SP patches, checkpoint compatibility) lives under
 
 ## Algorithms
 
-Each module in `recipe/teleboost/algorithms/` is a paper-faithful
-translation; see the per-algorithm docstring for the equation pin.
-
 DanceGRPO is the default; the others are selectable through
 `TELEBOOST_METHOD` and the `ENABLE_*` flags (see [Train](#train)).
 
 | Algorithm | Paper | What it does |
 |---|---|---|
-| **DanceGRPO** (default) | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast (`sigma_form="dancegrpo"`) |
-| **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE (`sigma_form="flow_grpo"`) |
+| **DanceGRPO** (default) | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast |
+| **Flow-GRPO** | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE |
 | **GRPO-Guard** | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
 | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
 | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
 
 **BGPO** and **VIPO** are TeleAI papers; TeleBoost ships day-0
 implementations of both.
-
-`sigma_form` is selected automatically from `TELEBOOST_METHOD` /
-`ENABLE_FLOWGRPO`; you don't set it directly. The string is shown here so
-the per-algorithm docstrings are greppable.
 
 ### Reward models
 

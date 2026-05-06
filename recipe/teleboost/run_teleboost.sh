@@ -107,6 +107,16 @@ if [[ "${enable_flowgrpo}" == "True" && "${sampling_steps}" -le 1 ]]; then
   sampling_steps=4
 fi
 
+# Flow-GRPO is two changes vs DanceGRPO: the σ_t schedule (constant η ->
+# η·√(t/(1−t))) AND the sliding-window SDE solver.  Flip both together so
+# ENABLE_FLOWGRPO=True is paper-faithful; ENABLE_FLOWGRPO=False keeps the
+# DanceGRPO σ_t form.
+if [[ "${enable_flowgrpo}" == "True" ]]; then
+  sigma_form=flow_grpo
+else
+  sigma_form=dancegrpo
+fi
+
 if [[ "${method}" == "joint" ]]; then
   reward_type=joint
   : "${JOINT_AESTHETIC_CLIP_PATH:?Set JOINT_AESTHETIC_CLIP_PATH for joint reward runs}"
@@ -160,6 +170,7 @@ overrides=(
   "actor_rollout_ref.actor.grpo_guard.grad_reweight=${enable_grpoguard}"
   "actor_rollout_ref.flow_grpo.enable=${enable_flowgrpo}"
   "actor_rollout_ref.flow_grpo.sde_window_size=${FLOWGRPO_SDE_WINDOW_SIZE:-2}"
+  "actor_rollout_ref.actor.sigma_form=${sigma_form}"
   "actor_rollout_ref.actor.clip_range=1e-4"
   "actor_rollout_ref.actor.adv_clip_max=5.0"
   "actor_rollout_ref.actor.use_kl_loss=False"
