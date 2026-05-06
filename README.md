@@ -1,4 +1,4 @@
-# TeleBoost — DanceGRPO for Wan video diffusion
+# TeleBoost — GRPO for video diffusion
 
 A video-generation RL training stack built on top of upstream
 [`volcengine/verl`](https://github.com/volcengine/verl) v0.4.0. The actor is a
