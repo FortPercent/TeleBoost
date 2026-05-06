@@ -96,7 +96,7 @@ export REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt  # for non-joint runs
 bash recipe/teleboost/run_teleboost.sh
 ```
 
-Optional knobs (defaults shown): `TELEBOOST_METHOD=baseline`, `WAN_VERSION=wan21`,
+Optional knobs (defaults shown): `TELEBOOST_METHOD=default`, `WAN_VERSION=wan21`,
 `N_GPUS_PER_NODE=4`, `TRAIN_PROMPT_BSZ=2`, `PPO_MINI_BATCH_SIZE=2`,
 `TOTAL_TRAINING_STEPS=2`.  See script header for full list.
 

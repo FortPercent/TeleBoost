@@ -10,7 +10,7 @@ set -euo pipefail
 #   REWARD_MODEL_PATH=/path/to/HPS_v2.1_compressed.pt
 #
 # Optional:
-#   TELEBOOST_METHOD=baseline|bgpo|vipo|bgpo_vipo|joint
+#   TELEBOOST_METHOD=default|bgpo|vipo|joint
 #   WAN_VERSION=wan21|wan22
 #   WAN_VAE_PATH=/path/to/Wan2.1_VAE.pth
 #
@@ -30,11 +30,11 @@ set -euo pipefail
 : "${TEST_FILE:?Set TEST_FILE=/path/to/processed_wan_prompt.json}"
 : "${WAN_MODEL_PATH:?Set WAN_MODEL_PATH=/path/to/Wan2.1-T2V-1.3B}"
 
-method="${TELEBOOST_METHOD:-baseline}"
+method="${TELEBOOST_METHOD:-default}"
 case "${method}" in
-  baseline|bgpo|vipo|bgpo_vipo|joint) ;;
+  default|bgpo|vipo|joint) ;;
   *)
-    echo "Unsupported TELEBOOST_METHOD='${method}'. Use baseline, bgpo, vipo, bgpo_vipo, or joint." >&2
+    echo "Unsupported TELEBOOST_METHOD='${method}'. Use default, bgpo, vipo, or joint." >&2
     exit 2
     ;;
 esac
@@ -77,12 +77,12 @@ use_rerange=False
 pixel_weight_enable=False
 reward_type=single
 
-if [[ "${method}" == "bgpo" || "${method}" == "bgpo_vipo" ]]; then
+if [[ "${method}" == "bgpo" ]]; then
   enable_bgpo=True
   use_rerange=True
 fi
 
-if [[ "${method}" == "vipo" || "${method}" == "bgpo_vipo" ]]; then
+if [[ "${method}" == "vipo" ]]; then
   pixel_weight_enable=True
 fi
 

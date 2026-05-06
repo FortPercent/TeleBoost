@@ -2,7 +2,7 @@
 
 | name        | file                                  | enable flag                                       | role                                                                |
 |-------------|---------------------------------------|---------------------------------------------------|---------------------------------------------------------------------|
-| baseline    | (no module — vanilla GRPO loop)       | `algorithm.adv_estimator=grpo`                    | reference policy-gradient baseline                                  |
+| default     | (no module — DanceGRPO base loop)     | `algorithm.adv_estimator=grpo`                    | reference base; all add-ons disabled                                |
 | BGPO        | [`bgpo.py`](bgpo.py)                  | `algorithm.bgpo.enable=true`                      | Bayesian-prior group optimization (CRT reward rerange + RAS adv scale) — paper arxiv 2511.18919 |
 | VIPO        | [`vipo.py`](vipo.py)                  | `actor_rollout_ref.pixel_weight.enable=true`      | DINOv2 per-pixel advantage broadcast — paper arxiv 2511.18719       |
 | joint reward| [`joint.py`](joint.py)                | `reward_model.type=joint`                         | multi-head joint reward orchestration                               |
@@ -21,7 +21,7 @@ Each algorithm module exposes:
 2. **A `*Mixin` class** that `RayDanceGRPOTrainer` inherits from. Mixins read
    `self.config`, `self.global_steps`, etc. from the trainer.
 3. **A no-op fallback** when the enable flag is False — every algorithm must
-   degrade cleanly to baseline GRPO so runs are comparable.
+   degrade cleanly to DanceGRPO (the default base) so runs are comparable.
 
 ## Adding a new algorithm
 

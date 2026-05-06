@@ -169,29 +169,6 @@ class BGPOMixin:
                     "configuration)."
                 )
 
-            # Soft warning: BGPO + VIPO is structurally compatible (BGPO's
-            # per-group scalar weight broadcasts cleanly across VIPO's dense
-            # ``[B, T, H, W]`` advantage), but neither paper studies the
-            # combination.  BGPO (arxiv 2511.18919) operates on scalar
-            # advantages; VIPO (arxiv 2511.18719) reshapes advantages to
-            # per-pixel.  Stacking them turns BGPO's per-group weight into a
-            # uniform multiplier across VIPO's pixel pattern — mathematically
-            # benign, research-wise unvalidated.
-            pixel_enable = bool(
-                self.config.get("actor_rollout_ref", {})
-                .get("pixel_weight", {})
-                .get("enable", False)
-            )
-            if pixel_enable:
-                logger.warning(
-                    "BGPO + VIPO are both enabled.  This combination is "
-                    "structurally compatible (briefly tested) but not validated "
-                    "by either paper: BGPO (arxiv 2511.18919) and VIPO "
-                    "(arxiv 2511.18719) were developed independently.  BGPO's "
-                    "per-group scalar weight becomes a uniform multiplier "
-                    "across VIPO's pixel pattern, which preserves VIPO's "
-                    "shaping but is not a paper-supported configuration."
-                )
         return enabled
 
     def _get_prior_array(self, source_batch: DataProto) -> Optional[np.ndarray]:

@@ -43,7 +43,7 @@ Outputs (under `--output_dir`):
 
 ## Validation after regen
 
-Re-run a baseline against the new dataset; `train/rewards` should
+Re-run a default training against the new dataset; `train/rewards` should
 land in HPS-v2's typical ~0.15–0.30 range for random Wan2.2 outputs.
 
 ```bash

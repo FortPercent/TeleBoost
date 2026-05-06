@@ -50,7 +50,7 @@ a decreasing loss curve; not a claim of paper-SOTA reproduction.
 |---|---|---|
 | Actor    | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) | Wan2.2-I2V-A14B, Hunyuan, Mochi |
 | Reward   | HPSv2, Qwen-VL-7B, 4-reward joint (aesthetic + raft + videoclip + videophy) | Qwen-VL-32B, custom callable |
-| Algorithm | DanceGRPO (`TELEBOOST_METHOD=baseline`) | Flow-GRPO base, GRPO-Guard / BGPO / VIPO add-ons, GAE / RLOO (upstream) |
+| Algorithm | DanceGRPO (`TELEBOOST_METHOD=default`) | Flow-GRPO base, GRPO-Guard / BGPO / VIPO add-ons, GAE / RLOO (upstream) |
 | Rollout  | Diffusion (actor), vLLM (Qwen reward) | sglang, hf, flowgrpo, mixgrpo |
 | Sequence parallel | sp=1 / sp=2 / sp=8 (Wan22, CP grad bit-exact at fp32) | other Ulysses configs |
 | Hardware | 4×H800 80 GB, 8×H800 80 GB | 8 GPU multi-host |
@@ -126,7 +126,7 @@ via env vars. Example for an 8-GPU 480×832 1000-step Wan2.2 run with
 HPSv2 reward:
 
 ```bash
-TELEBOOST_METHOD=baseline \
+TELEBOOST_METHOD=default \
 N_GPUS_PER_NODE=8 \
 TOTAL_TRAINING_STEPS=1000 \
 SAMPLING_STEPS=10 \
@@ -145,10 +145,9 @@ bash recipe/teleboost/run_teleboost.sh
 
 | `TELEBOOST_METHOD` | Behavior | Required env vars (in addition to the core ones) |
 |---|---|---|
-| `baseline` (default) | plain GRPO | — |
-| `bgpo` | GRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field |
-| `vipo` | GRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
-| `bgpo_vipo` | both | both |
+| `default` | DanceGRPO (GRPO advantage + σ_t = η SDE) | — |
+| `bgpo` | DanceGRPO + Bayesian-Prior reranging + RAS adaptive scaling | training rows must carry a `prior` field |
+| `vipo` | DanceGRPO + DINOv2 dense pixel-weight broadcast | `PIXEL_WEIGHT_MODEL_PATH=...` (default `facebook/dinov2-large`) |
 | `joint` | 4-reward joint (aesthetic + raft + videoclip + videophy) | `JOINT_AESTHETIC_CLIP_PATH`, `JOINT_AESTHETIC_MODEL_PATH`, `JOINT_RAFT_MODEL_PATH`, `JOINT_VIDEOCLIP_MODEL_PATH`, `JOINT_VIDEOPHY_MODEL_PATH` |
 
 ### Common knobs
@@ -177,10 +176,10 @@ These layer on top of `TELEBOOST_METHOD` and combine freely:
 | `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
 | `VAL_BEFORE_TRAIN=True` | run validation before step 0 |
 
-Example — 8-GPU sp=8 BGPO+VIPO:
+Example — 8-GPU sp=8 BGPO:
 
 ```bash
-TELEBOOST_METHOD=bgpo_vipo N_GPUS_PER_NODE=8 SP_SIZE=8 \
+TELEBOOST_METHOD=bgpo N_GPUS_PER_NODE=8 SP_SIZE=8 \
 SAMPLING_STEPS=10 INIT_SAME_NOISE=False \
 TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh

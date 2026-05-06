@@ -46,7 +46,7 @@ TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
   bash recipe/teleboost/run_teleboost.sh
 ```
 
-`TELEBOOST_METHOD=baseline|bgpo|vipo|bgpo_vipo|joint` for the matrix.
+`TELEBOOST_METHOD=default|bgpo|vipo|joint` for the matrix.
 Set `actor_rollout_ref.actor.sigma_form=flow_grpo` etc. via `"$@"`
 (the launcher forwards trailing args to Hydra).
 
