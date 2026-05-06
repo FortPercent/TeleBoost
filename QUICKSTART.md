@@ -64,12 +64,12 @@ What's inside (verified ABI-aligned):
 
 ```bash
 docker run -it --rm --gpus all --shm-size 512G --network host \
-  -v $(pwd):/workspace/Teletron \
+  -v $(pwd):/workspace/TeleBoost \
   -v /your/data/dir:/data \
   teleboost:mc0.16.1 zsh
 
 # inside the container:
-cd /workspace/Teletron
+cd /workspace/TeleBoost
 nvidia-smi  # confirm 8 GPUs visible
 ```
 
@@ -85,7 +85,7 @@ The fastest way to confirm the full stack works on this hardware:
 
 ```bash
 # Inside the container
-cd /workspace/Teletron
+cd /workspace/TeleBoost
 
 # Build the bench fixture (one-time; saves ~5 MB to /tmp/wan_inputs.pt)
 python3 -c "

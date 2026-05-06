@@ -13,10 +13,11 @@ Memory-efficient DPO post-training for video diffusion models.
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=555555"></a>
 </p>
 
-TeleBoost is a **post-training framework for video diffusion models**,
-featuring **Gradient Decoupled DPO** — a per-branch backward +
-immediate reduce-scatter pattern that on Wan 14B 40-layer DPO at
-32×H800:
+TeleBoost is a **post-training framework for video diffusion models**.
+Its core feature, **Gradient Decoupled DPO**, is a per-branch backward
++ immediate reduce-scatter pattern that **applies to any diffusion
+model TeleTron supports** (Wan 2.1 / 2.2, T2V / I2V, …). Measured on
+Wan 14B 40-layer DPO at 32×H800:
 
 * **Cuts peak GPU memory by ~40%** on identical workload (69.27 GB → 41.39 GB at 25 f / 480p)
 * **Extends supported context length by ~15×** — Standard DPO max-fits at 25 f / 480p (~11k visual tokens), Decoupled max-fits at 77 f / 1080p (~163k visual tokens) on the same hardware
@@ -32,11 +33,11 @@ long-context multi-modal training framework — together with
 and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family training.
 
 <p align="center">
-  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B I2V DPO peak GPU memory across three configs at 32×H800 multi-node, n_iters=2 strict measurement. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="820"/>
+  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B DPO peak GPU memory across three configs at 32×H800 multi-node. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="820"/>
 </p>
 
 <p align="center"><sub><i>
-Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800, n_iters=2 strict.
+Wan 14B DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H800.
 <b>Left</b>: same workload, ~40% memory cut. <b>Middle</b>: production default, standard OOMs and Decoupled fits. <b>Right</b>: Decoupled scales to ~15× longer context than standard.
 </i></sub></p>
 
@@ -47,8 +48,8 @@ Wan 14B I2V DPO, 40 layers, bf16 + ZeRO-2 + recompute=full + flash-attn 3, 32×H
 | Setting | Visual tokens | Standard DPO | **Gradient Decoupled DPO** | Δ |
 |---|---|---|---|---|
 | 25 f / 480p — *standard's max-fit* | ~11 k | 69.27 GB ✓ | **41.39 GB ✓** | **−40.3%** |
-| **49 f / 480p — *production default*** | **~20 k** | **❌ OOM** | **42.90 GB ✓** | **qualitative** ✅ |
-| 77 f / 1080p — *decoupled's max-fit* | ~163 k | ❌ OOM | **69.32 GB ✓** | **qualitative · ~15× tokens** ✅ |
+| **49 f / 480p — *production default*** | **~20 k** | **❌ OOM** | **42.90 GB ✓** | **passes ✓** |
+| 77 f / 1080p — *decoupled's max-fit* | ~163 k | ❌ OOM | **69.32 GB ✓** | **~15× tokens** |
 
 Three concrete wins on the same 32-GPU H800 hardware:
 1. **−40% peak memory on identical workload** (25 f / 480p ~11 k tokens)
@@ -105,12 +106,12 @@ docker build -t teleboost:mc0.16.1 .
 
 # 2. Run on 8 H100 / H200 / H800
 docker run -it --gpus all --shm-size 512G \
-    -v $(pwd):/workspace/Teletron \
+    -v $(pwd):/workspace/TeleBoost \
     -v /path/to/your/data:/data \
     teleboost:mc0.16.1
 
 # 3. Smoke test inside the container
-cd /workspace/Teletron
+cd /workspace/TeleBoost
 torchrun --nproc_per_node=8 examples/wan/pretrain_wan2_2.py \
     --dataset-type FakeDataset --bf16 --use-zero2 ...
 # (full args in QUICKSTART.md)
@@ -161,18 +162,6 @@ own dataset — see QUICKSTART for the 30-line template.
 
 Constraint: `(TP × CP)` must divide `num_attention_heads`. For Wan 14B
 (40 heads), valid CP×TP combos are 1, 2, 4, 5, 8, 10, 20, 40.
-
----
-
-## Supported models
-
-| Model | Params | dim | heads | layers |
-|---|---|---|---|---|
-| Wan2.1 / Wan2.2 (T2V/I2V) | 14B | 5120 | 40 | 40 |
-| Wan2.1 1.3B | 1.3B | 1536 | 12 | 30 |
-
-Production focus is **Wan 14B I2V DPO** (`examples/teleai/`); other
-variants live under `examples/wan/`.
 
 ---
 
