@@ -150,7 +150,7 @@ def fig_memory_vs_layers():
     ax.axhline(CAPACITY_GB, ls="--", color=C_CAP, lw=1.2, zorder=2)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(configs, fontsize=16)
+    ax.set_xticklabels(configs, fontsize=19)
     ax.set_ylabel("Peak GPU memory (GB)")
     ax.set_ylim(0, 110)
     ax.set_title("Wan 14B DPO  ·  Peak GPU memory at 32×H800",
@@ -162,7 +162,7 @@ def fig_memory_vs_layers():
              "Dashed line = H800 80 GB capacity.\n"
              "Decoupled DPO cuts peak memory by ~40% on identical workload (left), "
              "lets production training run (middle), and scales to ~15× the token length standard can handle (right).",
-             ha="center", fontsize=17, color="#444")
+             ha="center", fontsize=20, color="#444")
 
     fig.tight_layout()
     out = OUT_DIR / "fig_memory_vs_layers.png"
