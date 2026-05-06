@@ -61,7 +61,6 @@ sole reward via `REWARD_MODEL_PATH`.
 | Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
 | Sequence parallel | sp ∈ {1, 2, 4, 8}; CP grad bit-exact at fp32 |
-| Multi-node | Ray-based rendezvous via `NNODES` / `NODE_RANK` / `MASTER_ADDR` |
 | Hardware | H800 / H100 80 GB |
 
 ## Install
