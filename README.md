@@ -126,27 +126,6 @@ own dataset — see QUICKSTART for the 30-line template.
 
 ---
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  examples/teleai/train_dpo.sh                               │
-│  └─→ examples/teleai/pretrain_dpo_i2v.py                    │
-│      └─→ teleboost.train.Trainer                             │
-│           ├─ ParallelWanModel                               │
-│           ├─ DistributedVAE (text + image + video encoder)  │
-│           └─ DeepSpeedZeroOptimizer (ZeRO-2 partition_grads)│
-│                └─ deepspeed_backward_step (split DPO path)  │
-└─────────────────────────────────────────────────────────────┘
-       │
-       ├─ CP     : context parallelism via Ulysses (head-dim sharding)
-       ├─ ZeRO-2: optimizer state partitioned across DP_with_CP group
-       ├─ recompute=full+block : every block input checkpointed
-       └─ bf16 : mixed precision with fp32 master weights
-```
-
----
-
 ## Parallelism configuration
 
 | Flag | Description |
