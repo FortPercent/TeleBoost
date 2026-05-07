@@ -10,14 +10,9 @@ config = dict(
     dataset=dict(
         type="WanDPODataset",
 
-        # === 原来 args 里的 ===
         dataset_base_path="",
-        # no use
-        # dataset_metadata_path="/path/to/dpo_csv/prompt_video_pairs_matched_image_re.csv",
-        # dataset_metadata_path="/path/to/dpo_data/prompt_video_pairs_matched_image.csv",
         dataset_metadata_path="/path/to/dpo_csv/prompt_video_pairs_enhanced.csv",
         data_path_list=[
-            # "/path/to/dpo_data/prompt_video_pairs_matched_image.csv"
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part0.csv",
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part1.csv",
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part2.csv",
@@ -26,62 +21,29 @@ config = dict(
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part5.csv",
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part6.csv",
             "/path/to/dpo_csv/prompt_video_pairs_enhanced_part7.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part1.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part2.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part3.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part4.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part5.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part6.csv",
-            # "/path/to/dpo_data/out_parts/prompt_video_pairs_matched_image.part7.csv"
-            
-            # "/path/to/dpo_csv/prompt_video_pairs_matched_image_re_part0.csv",
-            # "/path/to/dpo_csv/prompt_video_pairs_matched_image_re_part1.csv",
-            # "/path/to/dpo_csv/prompt_video_pairs_matched_image_re_part2.csv",
         ],
         dataset_repeat=2,
 
-        # === DPO 语义 ===
         chosen_video_key="chosen",
-        # chosen_video_key = "positive_video_path", 
         rejected_video_key="rejected",
-        # rejected_video_key = "negative_video_path",
-        # === 视频尺寸 & 时序 ===
-        # height=720,
+
         height=480,
         width=832,
-        # width=1280,
         num_frames=49,
 
-        # === 这些原脚本是写死的，现在 config 化 ===
         time_division_factor=4,
         time_division_remainder=1,
         height_division_factor=16,
         width_division_factor=16,
 
-        # 可选
         max_pixels=1920 * 1080,
-        
 
         transforms=[
-            # dict(
-            #     type="SampleImages",
-            #     num_frames=dst_num_frames,
-            # ),
             dict(
                 type="InjectRawFirstImageFromVideo",
                 video_key="video",
-                output_key="raw_first_image",  # 这个是PIL list的首帧
+                output_key="raw_first_image",
             ),
-            # Compare DiffSynth image-embed preprocess dumps against TeleBoost output.
-            # dict(
-            #     type="CompareImageEmbedFromVideo",
-            #     video_key="video",
-            #     compare_input=True,
-            #     compare_end=False,
-            #     torch_dtype="bfloat16",
-            #     min_value=-1,
-            #     max_value=1,
-            # ),
             dict(
                 type="PreprocessVideoToTensor",
                 input_key="video",
@@ -92,7 +54,6 @@ config = dict(
                 max_value=1,
                 skip_if_tensor=True,
             ),
-
             dict(
                 type="InjectImagesFromVideoTensor",
                 video_key="video",
@@ -100,37 +61,21 @@ config = dict(
             ),
             dict(
                 type="InjectPromptToTopLevel",
-                prompt_key="prompt"
+                prompt_key="prompt",
             ),
-            # dict(
-            #     type="GenerateRawFirstRefImage", # 这个是tensor的首帧
-                
-            # ),
             dict(
                 type="PackInputsNoResize",
                 normalize=False,
-                # deterministic=True,
-                image_keys=[
-                    "images",
-                ],
-                embedding_keys=[
-                    "raw_first_image", 
-                    "input_image"  # 保留data_dict --> input_dict新建的这个
-                ],  
+                image_keys=["images"],
+                embedding_keys=["raw_first_image", "input_image"],
             ),
-            # dict(
-            #     type="LoadInputImageAsFirstFrame", # 加载raw data中的input_image字段作为第一帧
-            #     key="input_image",
-            #     output_key="raw_first_image",
-            # )
         ],
     ),
     eval=dict(
         data_path_list=[
-            # "/path/to/istock_dataset/istock_0.json",
             "/path/to/dpo_data/prompt_video_pairs_matched_image.csv",
         ],
-        eval_time_steps=[200,400,600,800,1000]
+        eval_time_steps=[200, 400, 600, 800, 1000],
     ),
     sampler=dict(
         type="DefaultSampler",
@@ -140,34 +85,35 @@ config = dict(
         infinite=True,
     ),
 
-
     model_config=dict(
         dit=dict(
-            type="ParallelTeleaiModel", # ParallelTeleaiModel
+            type="ParallelTeleaiModel",
 
-            # 这里需要修改 TODO
+            # Architecture sizes — uncomment the row matching your target model.
+            #   1.3B: dim=1536, ffn_dim=8960,  num_heads=12, num_layers=30
+            #   10B:  dim=5120, ffn_dim=13824, num_heads=40, num_layers=30
+            #   14B:  dim=5120, ffn_dim=13824, num_heads=40, num_layers=40
+            # in_dim: t2v=16, i2v=36 (Wan2.1) | i2v Wan2.2=36 also
             config=dict(
-                has_image_input=False, # t2v:False i2v:True i2v Wan2.2:False
+                has_image_input=False,
                 patch_size=[1, 2, 2],
-                in_dim=36, # t2v:16 i2v:36
-                dim=5120, # 1.3B:1536 10B:5120 14B:5120
-                ffn_dim=13824, # 1.3B:8960 10B:13824 14B:13824
+                in_dim=36,
+                dim=5120,
+                ffn_dim=13824,
                 freq_dim=256,
                 text_dim=4096,
                 out_dim=16,
-                num_heads=40, # 1.3B:12 10B:40 14B:40
-                num_layers=40, # 1.3B:30 10B:30 14B:40
+                num_heads=40,
+                num_layers=40,
                 eps=1e-6,
-                has_image_pos_emb=False, 
+                has_image_pos_emb=False,
             ),
 
-            # === DiT 训练 & 行为（从 WanTrainingModule 下沉）===
             train=dict(
-                trainable_models="dit",                 # 等价于 trainable_models="dit"
+                trainable_models="dit",
                 use_gradient_checkpointing=True,
                 use_gradient_checkpointing_offload=True,
                 enable_fp8_training=False,
-                # LoRA
                 lora=dict(
                     enable=False,
                     base_model=None,
@@ -175,22 +121,17 @@ config = dict(
                     rank=32,
                     checkpoint=None,
                 ),
-
-                # DPO
                 dpo=dict(
                     enable=True,
                     beta=0.1,
                 ),
-
-                # forward contract
                 extra_inputs=["input_image"],
             ),
         ),
         encoder=dict(
-            type="teleai_encoder", # teleai_encoder
+            type="teleai_encoder",
             encoder_schema=['context', 'img_emb_y', 'latents'],
             vae=dict(
-                # path="/path/to/Wan2.1-I2V-14B-480P/Wan2.1_VAE.pth",
                 type="DiffSynthWanVideoVAE",
                 path="/path/to/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
                 tiler_kwargs=dict(
@@ -198,37 +139,30 @@ config = dict(
                     tile_size=(34, 34),
                     tile_stride=(18, 16),
                 ),
-                torch_compile=False
+                torch_compile=False,
             ),
             text_encoder=dict(
-                # path="/path/to/Wan2.1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth",
                 path="/path/to/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth",
                 tokenizer_path="/path/to/Wan2.1-I2V-14B-480P/google/umt5-xxl",
             ),
             image_encoder=dict(
                 path="/path/to/Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth",
-                torch_compile=False
+                torch_compile=False,
             ),
-            # depth_model=dict(
-            #     path="/path/to/ckpts/video_depth_anything_vitl.pth",
-            # ),
         ),
-
 
         training=dict(
             diffusion=dict(
                 max_timestep_boundary=0.358,
-                # max_timestep_boundary=1.0,
                 min_timestep_boundary=0.0,
             ),
-
             dpo_io=dict(
                 chosen_key="chosen",
                 rejected_key="rejected",
             ),
-             scheduler=dict(
+            scheduler=dict(
                 num_train_timesteps=1000,
-            )
+            ),
         ),
     ),
 )
