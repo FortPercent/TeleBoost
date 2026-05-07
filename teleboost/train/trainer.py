@@ -86,15 +86,24 @@ class Trainer(CheckPointMixin, SchedulerMixin, DataloaderMixin, TeleLoggerMixin)
             rank = int(os.environ.get("RANK"))
             producer_logger = logging.getLogger(f"ProducerRank{rank}")
             producer_logger.setLevel(args.producer_log_level*10)
+            # When use_zero2 is on, consumer ranks call deepspeed.init_distributed()
+            # which registers a NCCL communicator on the default world group. If
+            # producer ranks skip it, any subsequent deepspeed-driven collective
+            # on the world group hangs. Mirror the call here so producer ranks
+            # join the same NCCL setup. init_distributed is idempotent and a no-op
+            # when torch.distributed is already up — so safe to always call.
+            if args.use_zero2:
+                import deepspeed
+                deepspeed.init_distributed()
             producer = DistDataProducer(
-                rank= rank, 
+                rank= rank,
                 encoder_name=set_config().get('model_config', None).get('encoder', None).type,
                 device=torch.cuda.current_device(),
-                build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators, 
+                build_train_valid_test_data_iterators=self.build_train_valid_test_data_iterators,
                 train_ds=None,
             )
             producer.run()
-            exit()        
+            exit()
         # from teleboost.core.parallel_state import get_transformer_model_group
         # consumer_group = get_transformer_model_group()
         # print(f"consumer world size = {torch.distributed.get_world_size(consumer_group)}")

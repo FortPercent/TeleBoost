@@ -651,13 +651,18 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
                     ps._DATA_MODULO_EXPERT_PARALLEL_GROUP = group
                     ps._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = group_gloo
 
-    # megatron-core 0.16+ added _EXPERT_TENSOR_PARALLEL_GROUP (queried by
-    # model_parallel_cuda_manual_seed via get_expert_tensor_parallel_rank).
-    # Without it, the rank getter falls through to _MPU_TENSOR_MODEL_PARALLEL_RANK
-    # which teleboost's wrapper never caches, returning None and crashing seed
-    # init. EP>1 + CP>1 is asserted unsupported above (line 361), so EP=1 is the
-    # only path here and the expert TP group equals the regular TP group.
+    # megatron-core 0.16+ split the EP-related groups out from the legacy
+    # data-modulo-expert / tensor-and-expert names that teleboost's wrapper
+    # builds. The new accessors (get_expert_tensor_parallel_rank,
+    # get_expert_data_parallel_group) read from globals teleboost never sets
+    # and crash with None / AssertionError. EP=1 is the only path here
+    # (EP>1 + CP>1 is asserted unsupported at line 361), so alias the new
+    # globals to the existing equivalent groups:
+    #   * EP=1 expert TP group ≡ regular TP group
+    #   * EP=1 expert DP group ≡ DP-modulo-expert group (already built above)
     ps._EXPERT_TENSOR_PARALLEL_GROUP = ps._TENSOR_MODEL_PARALLEL_GROUP
+    ps._EXPERT_DATA_PARALLEL_GROUP = ps._DATA_MODULO_EXPERT_PARALLEL_GROUP
+    ps._EXPERT_DATA_PARALLEL_GROUP_GLOO = ps._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO
 
     # Initialize global memory buffer
     # This isn't really "parallel state" but there isn't another good place to
