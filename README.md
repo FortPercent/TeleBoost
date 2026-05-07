@@ -1,7 +1,11 @@
-<h1 align="center">TeleBoost — GRPO</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/FortPercent/TeleBoost/release-staging/documents/figures/logo_teleboost.jpeg">
+    <img alt="TeleBoost" src="https://raw.githubusercontent.com/FortPercent/TeleBoost/release-staging/documents/figures/logo_teleboost.jpeg" width="55%">
+  </picture>
+</p>
 <h3 align="center">
-RL post-training for Wan2.1 / Wan2.2 video diffusion — five paper-pinned
-algorithms, one launcher, on top of <code>volcengine/verl</code>.
+GRPO post-training for video diffusion models.
 </h3>
 
 <p align="center">
