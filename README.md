@@ -13,6 +13,8 @@ Memory-efficient DPO post-training for video diffusion models.
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=555555"></a>
 </p>
 
+English | [中文](README_ZN.md)
+
 TeleBoost is a **post-training framework for video diffusion models**.
 Its core feature, **Gradient Decoupled DPO**, is a per-branch backward
 with immediate reduce-scatter pattern that **applies to any diffusion
@@ -27,9 +29,10 @@ It is mathematically equivalent to the single-backward formulation
 production shape).
 
 Built on [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
-long-context multi-modal training framework — together with
+long-context multi-modal training framework — upgraded to
 [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
-and DeepSpeed ZeRO-2. Production in TeleAI internally for Wan-family training.
+with Gradient Decoupled DPO added on top. Production in TeleAI
+internally for diffusion model training.
 
 <p align="center">
   <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B DPO peak GPU memory across three configs at 32×H800 multi-node. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="820"/>
