@@ -650,8 +650,14 @@ def initialize_model_parallel_base(tensor_model_parallel_size: int = 1,
                 if rank in ranks:
                     ps._DATA_MODULO_EXPERT_PARALLEL_GROUP = group
                     ps._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = group_gloo
-        
-    
+
+    # megatron-core 0.16+ added _EXPERT_TENSOR_PARALLEL_GROUP (queried by
+    # model_parallel_cuda_manual_seed via get_expert_tensor_parallel_rank).
+    # Without it, the rank getter falls through to _MPU_TENSOR_MODEL_PARALLEL_RANK
+    # which teleboost's wrapper never caches, returning None and crashing seed
+    # init. EP>1 + CP>1 is asserted unsupported above (line 361), so EP=1 is the
+    # only path here and the expert TP group equals the regular TP group.
+    ps._EXPERT_TENSOR_PARALLEL_GROUP = ps._TENSOR_MODEL_PARALLEL_GROUP
 
     # Initialize global memory buffer
     # This isn't really "parallel state" but there isn't another good place to
