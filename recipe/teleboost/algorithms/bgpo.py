@@ -127,7 +127,7 @@ def paper_ras_centered_weight(
 
 
 class BGPOMixin:
-    """Trainer mixin for BGPO. Mix into ``RayDanceGRPOTrainer``.
+    """Trainer mixin for BGPO. Mix into ``RayTeleBoostTrainer``.
 
     Attributes referenced from the trainer:
         - ``self.config`` (Hydra DictConfig)

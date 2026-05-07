@@ -119,7 +119,7 @@ def compute_advantage(
 
 
 
-class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer):
+class RayTeleBoostTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer):
     """Driver-side Dance-GRPO trainer.
 
     Algorithm hooks come from mixins in :mod:`recipe.teleboost.algorithms`:

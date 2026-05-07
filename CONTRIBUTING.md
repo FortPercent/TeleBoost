@@ -33,7 +33,7 @@ Key suites:
 
 * `tests/test_sigma_schedule.py` — σ_t SDE-step formulas (DanceGRPO /
   Flow-GRPO) + σ=1 edge case
-* `tests/test_dancegrpo_algorithms.py` — BGPO Eq. 4 (CRT) + Eq. 2 (RAS)
+* `tests/test_teleboost_algorithms.py` — BGPO Eq. 4 (CRT) + Eq. 2 (RAS)
   + joint reward task weights
 * `tests/test_grpo_advantage.py` — per-prompt z-score advantage
 * `tests/test_grpo_guard.py` — RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12)

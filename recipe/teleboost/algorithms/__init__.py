@@ -12,7 +12,7 @@ directory listing.
 Each module exposes:
 
 * A pure-function compute / helper API at module level.
-* A ``*Mixin`` class that the trainer (``RayDanceGRPOTrainer``) inherits
+* A ``*Mixin`` class that the trainer (``RayTeleBoostTrainer``) inherits
   from to gain the algorithm's hooks.
 
 When the algorithm's enable flag is False the mixin is a no-op and

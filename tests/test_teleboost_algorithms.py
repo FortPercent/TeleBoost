@@ -6,7 +6,7 @@ not a GPU.
 
 Run from the repo root:
 
-    pytest tests/test_dancegrpo_algorithms.py -v
+    pytest tests/test_teleboost_algorithms.py -v
 """
 from __future__ import annotations
 
@@ -252,9 +252,9 @@ def test_algorithms_namespace_exports_mixins():
 def test_trainer_inherits_all_three_mixins():
     """The driver trainer must mix in BGPO, VIPO, and JointReward."""
     from recipe.teleboost.algorithms import BGPOMixin, JointRewardMixin, VIPOMixin
-    from recipe.teleboost.teleboost_ray_trainer import RayDanceGRPOTrainer
+    from recipe.teleboost.teleboost_ray_trainer import RayTeleBoostTrainer
 
-    mro = RayDanceGRPOTrainer.__mro__
+    mro = RayTeleBoostTrainer.__mro__
     assert BGPOMixin in mro
     assert VIPOMixin in mro
     assert JointRewardMixin in mro

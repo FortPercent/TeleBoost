@@ -18,7 +18,7 @@ Each algorithm module exposes:
 1. **Pure-function compute / helpers at module level.** These are unit-testable
    without spinning up a trainer (see `compute_joint_task_weights`,
    `rerange_group_rewards`, `compute_batch_pixel_weight_maps`).
-2. **A `*Mixin` class** that `RayDanceGRPOTrainer` inherits from. Mixins read
+2. **A `*Mixin` class** that `RayTeleBoostTrainer` inherits from. Mixins read
    `self.config`, `self.global_steps`, etc. from the trainer.
 3. **A no-op fallback** when the enable flag is False — every algorithm must
    degrade cleanly to DanceGRPO (the default base) so runs are comparable.

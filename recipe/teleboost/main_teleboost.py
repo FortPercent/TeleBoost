@@ -24,7 +24,7 @@ from pprint import pprint
 from verl.trainer.ppo.reward import get_custom_reward_fn
 from verl.utils.fs import copy_to_local
 
-from .teleboost_ray_trainer import RayDanceGRPOTrainer
+from .teleboost_ray_trainer import RayTeleBoostTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +345,7 @@ class TaskRunner:
         from verl.utils.dataset.rl_dataset import wan_preprocessed_collate_function
 
         # Create and run trainer
-        trainer = RayDanceGRPOTrainer(
+        trainer = RayTeleBoostTrainer(
             config=config,
             tokenizer=tokenizer,
             processor=processor,
