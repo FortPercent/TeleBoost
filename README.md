@@ -21,8 +21,8 @@ Wan2.2 text-to-video diffusion**, built as a recipe layer on top of
 
 * 🎛️ **Five algorithms, one env var** — DanceGRPO (default), Flow-GRPO,
   GRPO-Guard, BGPO, VIPO; switch via `TELEBOOST_METHOD` + `ENABLE_*` flags
-* 🎯 **CP grad bit-exact at sp ∈ {1, 2, 4, 8}** — fp32 distributed
-  regression test under [`tests/special_distributed/`](tests/special_distributed/)
+* 🎬 **CP for long sequences** — Wan Ulysses sequence parallel at
+  sp ∈ {1, 2, 4, 8} unlocks higher frame count / resolution training
 * 🧩 **MPS-parallel 4-model joint reward** — aesthetic + RAFT + VideoCLIP +
   VideoPhy compute *concurrently* on one GPU; wall-time ≈ max(model), not sum
 * 🆕 **Day-0 BGPO + VIPO** — both are TeleAI papers, implemented here on release
