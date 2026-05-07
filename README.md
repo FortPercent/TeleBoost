@@ -29,14 +29,15 @@ given a dedicated home to evolve around video-diffusion-specific constraints.
 Used internally at TeleAI for Wan-family alignment.
 
 <p align="center">
-  <img src="docs/figures/colocate_mps.png" alt="Co-located reward + MPS-parallel multi-reward. Left: disaggregated layout — actor and reward models live on separate GPU groups, with rollout-idle and reward-idle stalls. Right: co-located + MPS — actor and four reward models share GPUs; reward forwards run concurrently via CUDA MPS, wall-time bounded by the slowest model rather than the sum." width="820"/>
+  <img src="docs/figures/colocate_mps.png" alt="Two independent throughput optimizations. Left: co-located reward — reward workers share the actor GPUs, eliminating the dedicated reward-rank's rollout-idle and training-idle gaps. Right: MPS-parallel multi-reward — N reward models compute concurrently on the same GPU via CUDA MPS, with wall-time bounded by the slowest model rather than the sum." width="820"/>
 </p>
 
 <p align="center"><sub><i>
-4-reward joint mode. <b>Left</b>: disaggregated reward (separate ranks)
-stalls on rollout-idle and reward-idle gaps. <b>Right</b>: co-located
-reward + CUDA MPS — four reward models compute concurrently on the actor
-GPUs; the joint forward finishes in roughly the time of the slowest model.
+Two independent throughput optimizations. <b>Left</b>: co-located reward
+shares the actor GPUs, eliminating the dedicated reward-rank's
+rollout-idle and training-idle gaps. <b>Right</b>: CUDA MPS — N reward
+models compute concurrently on the same GPU, wall-time ≈ max(model)
+instead of sum.
 </i></sub></p>
 
 ---
@@ -73,6 +74,51 @@ GPUs; the joint forward finishes in roughly the time of the slowest model.
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
 | Sequence parallel | Supported |
 | Hardware | H800 / H100 80 GB |
+
+---
+
+## What's new from TeleAI
+
+Three TeleAI contributions ship in this repo: two day-0 algorithm
+papers (VIPO, BGPO) and a systems-level throughput optimization
+(co-located reward + MPS). Motivation in one paragraph each; headline
+numbers and recipes are in [Headline matrix](#headline-matrix).
+
+### VIPO — Visual In-Pixel Policy Optimization ([arXiv 2511.18719](https://arxiv.org/abs/2511.18719))
+
+GRPO for visual generation traditionally drives the policy with a single
+scalar reward, which makes credit assignment hard at the pixel / region
+level and tends to optimize global signals at the expense of local
+fidelity. VIPO introduces a **Pixel Score Map (PSM)** module that
+converts the scalar advantage into a pixel- or region-level advantage
+map, giving the policy structured spatial feedback. On both image- and
+video-generation benchmarks VIPO delivers significant gains over
+scalar-advantage GRPO, pointing to structured spatial feedback as a new
+direction for visual-generation post-training.
+
+### BGPO — Bayesian-Prior Group Optimization ([arXiv 2511.18919](https://arxiv.org/abs/2511.18919))
+
+Reward models for image- and video-generation RL post-training are noisy
+and prone to alignment bias, which can mislead GRPO updates. BGPO models
+that reward uncertainty as a **Bayesian prior**, assigns per-sample
+trust weights (RAS, Eq. 2), and recalibrates the reward signal (CRT
+rerange, Eq. 4). The result is more stable training, tighter alignment
+to intended preferences, and faster convergence of the generative
+policy.
+
+### Co-located reward + MPS-parallel multi-reward (systems)
+
+Multi-reward GRPO post-training has two practical bottlenecks: a
+dedicated reward-rank GPU group sits idle during rollout / training
+swaps, and N sequential reward forwards make joint wall-time scale with
+the **sum** rather than the **max** of model latencies. TeleBoost ships
+two independent fixes — **co-located reward** (reward workers share the
+actor GPUs, eliminating the idle reward rank) and **MPS-parallel
+multi-reward** (N reward models execute concurrently on the same GPU
+via CUDA MPS, wall-time ≈ max(model) instead of sum). Both are on by
+default in joint mode; see [Multi-reward joint](#multi-reward-joint-teleboost_methodjoint)
+for the recipe and the figure at the top of this README for the
+illustration.
 
 ---
 
