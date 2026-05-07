@@ -32,11 +32,43 @@ def _build_param_groups(model, config, no_weight_decay_cond, scale_lr_cond, lr_m
             "(Dict[ParamKey, ParamGroupOverride]); legacy no_weight_decay_cond / "
             "scale_lr_cond / lr_mult kwargs no longer wired through."
         )
-    return _get_param_groups(
-        model_chunks=model,
-        config=config,
-        config_overrides=None,
-    )
+
+    # mc 0.16's _get_param_groups does an unguarded
+    #   torch.distributed.all_gather_object(
+    #       gathered, params_key,
+    #   )  # default group=None -> world group
+    # to align param keys across DP ranks for distributed-checkpoint compatibility.
+    # When teleboost runs with --distributed-vae, producer ranks never hit this code
+    # path (they exit via DistDataProducer.run()), so the world-group all_gather
+    # deadlocks. Until megatron exposes a group argument, scope the call to
+    # consumer-only DP group by patching torch.distributed.{all_gather_object,
+    # get_world_size} for the duration of _get_param_groups.
+    import torch.distributed as _dist
+    _consumer_group = mpu.get_data_parallel_group(with_context_parallel=True)
+    _orig_get_world_size = _dist.get_world_size
+    _orig_all_gather_object = _dist.all_gather_object
+
+    def _patched_get_world_size(group=None):
+        if group is None:
+            group = _consumer_group
+        return _orig_get_world_size(group=group)
+
+    def _patched_all_gather_object(object_list, obj, group=None, **kwargs):
+        if group is None:
+            group = _consumer_group
+        return _orig_all_gather_object(object_list, obj, group=group, **kwargs)
+
+    _dist.get_world_size = _patched_get_world_size
+    _dist.all_gather_object = _patched_all_gather_object
+    try:
+        return _get_param_groups(
+            model_chunks=model,
+            config=config,
+            config_overrides=None,
+        )
+    finally:
+        _dist.get_world_size = _orig_get_world_size
+        _dist.all_gather_object = _orig_all_gather_object
 from megatron.core.transformer.module import MegatronModule
 from apex.optimizers import FusedAdam as Adam
 from apex.optimizers import FusedSGD as SGD
