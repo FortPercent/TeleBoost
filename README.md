@@ -19,7 +19,7 @@ TeleBoost (GRPO branch) is a **production RL training stack for Wan2.1 /
 Wan2.2 text-to-video diffusion**, built as a recipe layer on top of
 [`volcengine/verl`](https://github.com/volcengine/verl).
 
-* 🎛️ **Five algorithms, one env var** — DanceGRPO (default), Flow-GRPO,
+* 🎛️ **Five algorithms** — DanceGRPO (default), Flow-GRPO,
   GRPO-Guard, BGPO, VIPO; switch via `TELEBOOST_METHOD` + `ENABLE_*` flags
 * 🎬 **CP for long sequences** — Wan Ulysses sequence parallel at
   sp ∈ {1, 2, 4, 8} unlocks higher frame count / resolution training
