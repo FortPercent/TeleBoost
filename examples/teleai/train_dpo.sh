@@ -97,7 +97,9 @@ torchrun \
     --tensorboard-queue-size 10 \
     --log-interval 1 \
     --save-interval 500 \
-    --eval-interval 500 \
-    --eval-iters 20 \
+    --eval-iters 0 \
+    `# DPO eval is unsupported (forward_step returns a 5-element list that` \
+    `# megatron's eval reducer can't divide). pretrain_dpo_i2v.py asserts` \
+    `# this at startup; setting eval-iters=0 keeps the launcher quiet.` \
     --producer-log-level 1 \
     "$@"
