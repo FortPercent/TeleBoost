@@ -29,7 +29,7 @@ It is mathematically equivalent to the single-backward formulation
 (verified element-wise on 14.78 B gradient elements at 32-GPU
 production shape).
 
-Built on [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
+Built on [TeleTron](https://github.com/Tele-AI/TeleTron) — TeleAI's
 long-context multi-modal training framework — upgraded to
 [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)
 with Gradient Decoupled DPO added on top. Production in TeleAI
