@@ -32,6 +32,11 @@ config["dataset"]["height"] = 480
 config["dataset"]["width"] = 832
 config["dataset"]["num_frames"] = 49
 
+# Eval inherits the placeholder /path/to/... CSV from the canonical config and
+# would crash build_train_valid_test_datasets — point it at the same 10-pair
+# CSV so eval runs cheaply (we set --eval-interval=100000 so it never fires).
+config["eval"]["data_path_list"] = [_PAIRS_CSV]
+
 # === Shrink DiT 14B -> 1.3B T2V ===
 config["model_config"]["dit"]["config"].update(
     dict(
