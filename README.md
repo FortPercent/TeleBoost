@@ -402,6 +402,17 @@ applied automatically.
 
 ---
 
+## Roadmap
+
+* **More GRPO variants** — DAPO, GSPO, MixGRPO, … as paper-pinned modules
+  under [`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/)
+* **BAGEL** — unified multimodal understanding + generation as an actor
+* **World models** — extend the actor side beyond pure T2V video diffusion
+
+Issues / PRs welcome.
+
+---
+
 ## Citation
 
 If TeleBoost is useful for your work, please cite the framework paper:
