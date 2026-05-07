@@ -404,9 +404,13 @@ applied automatically.
 
 ## Roadmap
 
-* **More GRPO variants** — DAPO, GSPO, MixGRPO, … as paper-pinned modules
-  under [`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/)
-* **BAGEL** — unified multimodal understanding + generation as an actor
+* **Multi-modal adaptation of LLM-side GRPO variants** — DAPO, GSPO,
+  MixGRPO, … originally proposed for text-only LLM RL; we port them to
+  video / multi-modal generation as paper-pinned modules under
+  [`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/)
+* **Day-0 support for new TeleAI algorithms** — keep the BGPO / VIPO
+  cadence: new TeleAI alignment papers land in this codebase on release
+* **BAGEL** — unified multi-modal understanding + generation as an actor
 * **World models** — extend the actor side beyond pure T2V video diffusion
 
 Issues / PRs welcome.
