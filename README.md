@@ -20,7 +20,7 @@ Wan2.2 text-to-video diffusion**, built as a recipe layer on top of
 [`volcengine/verl`](https://github.com/volcengine/verl).
 
 * 🎛️ **Five algorithms** — DanceGRPO, Flow-GRPO, GRPO-Guard, BGPO, VIPO
-* 🎬 **CP for long sequences** — Wan Ulysses sequence parallel, sp ∈ {1, 2, 4, 8}
+* 🎬 **Drop-in sequence parallel** — Wan Ulysses CP for long-video training
 * 🧩 **MPS-parallel multi-reward** — N rewards concurrent on one GPU; wall-time ≈ max(model), not sum
 * 🆕 **Day-0 BGPO + VIPO** — TeleAI papers, implemented on release
 
