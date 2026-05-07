@@ -9,6 +9,7 @@ GRPO post-training for video diffusion models.
 </h3>
 
 <p align="center">
+  <a href="https://tele-ai.github.io/TeleBoost/"><img alt="Project page" src="https://img.shields.io/badge/Project_page-tele--ai.github.io-4C1?labelColor=555555"></a>
   <a href="https://arxiv.org/abs/2602.07595"><img alt="TeleBoost arXiv" src="https://img.shields.io/badge/TeleBoost-arXiv%202602.07595-B31B1B?labelColor=555555"></a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=555555"></a>
   <a href="https://arxiv.org/abs/2511.18919"><img alt="BGPO arXiv" src="https://img.shields.io/badge/BGPO-arXiv%202511.18919-B31B1B?labelColor=555555"></a>
@@ -39,41 +40,6 @@ rollout-idle and training-idle gaps. <b>Right</b>: CUDA MPS — N reward
 models compute concurrently on the same GPU, wall-time ≈ max(model)
 instead of sum.
 </i></sub></p>
-
----
-
-## Headline matrix
-
-| | Variant | Paper | What it does |
-|---|---|---|---|
-| 🟢 default | **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast |
-| | Flow-GRPO | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE |
-| | GRPO-Guard | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
-| 🔵 TeleAI | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
-| 🔵 TeleAI | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
-
-### Reward models
-
-| Reward model | Paper / repo |
-|---|---|
-| HPSv2 | [arXiv 2306.09341](https://arxiv.org/abs/2306.09341) |
-| LAION Aesthetic predictor | [repo](https://github.com/LAION-AI/aesthetic-predictor) |
-| RAFT (optical flow) | [arXiv 2003.12039](https://arxiv.org/abs/2003.12039) |
-| VideoCLIP-XL | [arXiv 2410.00741](https://arxiv.org/abs/2410.00741) |
-| VideoPhy | [arXiv 2406.03520](https://arxiv.org/abs/2406.03520) |
-| Qwen2.5-VL-7B / 32B | (vendored vLLM rollout) |
-| DINOv2 (advantage shaper for VIPO) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) |
-
-### Supported configurations
-
-| Dimension | Supported |
-|---|---|
-| Actor | Wan2.2-T2V-A14B, Wan2.1-T2V-1.3B |
-| Reward | HPSv2, Qwen2.5-VL-7B, joint reward (4 default models) |
-| Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
-| Rollout | Diffusion (actor), vLLM (Qwen reward) |
-| Sequence parallel | Supported |
-| Hardware | H800 / H100 80 GB |
 
 ---
 
@@ -119,6 +85,41 @@ via CUDA MPS, wall-time ≈ max(model) instead of sum). Both are on by
 default in joint mode; see [Multi-reward joint](#multi-reward-joint-teleboost_methodjoint)
 for the recipe and the figure at the top of this README for the
 illustration.
+
+---
+
+## Headline matrix
+
+| | Variant | Paper | What it does |
+|---|---|---|---|
+| 🟢 default | **DanceGRPO** | [arXiv 2505.07818](https://arxiv.org/abs/2505.07818) | GRPO for visual generation: per-prompt z-score advantage + σ_t = η constant SDE recast |
+| | Flow-GRPO | [arXiv 2505.05470](https://arxiv.org/abs/2505.05470) | σ_t = η·√(t/(1−t)) form + sliding-window SDE |
+| | GRPO-Guard | [arXiv 2510.22319](https://arxiv.org/abs/2510.22319) | RatioNorm (Eq. 8) + grad-reweight δ (Eq. 12) |
+| 🔵 TeleAI | **BGPO** | [arXiv 2511.18919](https://arxiv.org/abs/2511.18919) | CRT reward rerange (Eq. 4) + RAS adaptive scaling (Eq. 2) |
+| 🔵 TeleAI | **VIPO** | [arXiv 2511.18719](https://arxiv.org/abs/2511.18719) | DINOv2 PCA → per-pixel allocation map → dense advantage |
+
+### Reward models
+
+| Reward model | Paper / repo |
+|---|---|
+| HPSv2 | [arXiv 2306.09341](https://arxiv.org/abs/2306.09341) |
+| LAION Aesthetic predictor | [repo](https://github.com/LAION-AI/aesthetic-predictor) |
+| RAFT (optical flow) | [arXiv 2003.12039](https://arxiv.org/abs/2003.12039) |
+| VideoCLIP-XL | [arXiv 2410.00741](https://arxiv.org/abs/2410.00741) |
+| VideoPhy | [arXiv 2406.03520](https://arxiv.org/abs/2406.03520) |
+| Qwen2.5-VL-7B / 32B | (vendored vLLM rollout) |
+| DINOv2 (advantage shaper for VIPO) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) |
+
+### Supported configurations
+
+| Dimension | Supported |
+|---|---|
+| Actor | Wan2.2-T2V-A14B, Wan2.1-T2V-1.3B |
+| Reward | HPSv2, Qwen2.5-VL-7B, joint reward (4 default models) |
+| Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
+| Rollout | Diffusion (actor), vLLM (Qwen reward) |
+| Sequence parallel | Supported |
+| Hardware | H800 / H100 80 GB |
 
 ---
 
