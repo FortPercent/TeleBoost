@@ -53,18 +53,15 @@ GPUs; the joint forward finishes in roughly the time of the slowest model.
 
 ### Reward models
 
-The four marked ✓ are combined when `TELEBOOST_METHOD=joint`; the rest
-are usable as the sole reward via `REWARD_MODEL_PATH`.
-
-| Reward model | Paper / repo | In `joint`? |
-|---|---|---|
-| HPSv2 | [arXiv 2306.09341](https://arxiv.org/abs/2306.09341) | — |
-| LAION Aesthetic predictor | [repo](https://github.com/LAION-AI/aesthetic-predictor) | ✓ |
-| RAFT (optical flow) | [arXiv 2003.12039](https://arxiv.org/abs/2003.12039) | ✓ |
-| VideoCLIP-XL | [arXiv 2410.00741](https://arxiv.org/abs/2410.00741) | ✓ |
-| VideoPhy | [arXiv 2406.03520](https://arxiv.org/abs/2406.03520) | ✓ |
-| Qwen2.5-VL-7B / 32B | (vendored vLLM rollout) | — |
-| DINOv2 (advantage shaper, not a reward) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) | — (used by VIPO) |
+| Reward model | Paper / repo |
+|---|---|
+| HPSv2 | [arXiv 2306.09341](https://arxiv.org/abs/2306.09341) |
+| LAION Aesthetic predictor | [repo](https://github.com/LAION-AI/aesthetic-predictor) |
+| RAFT (optical flow) | [arXiv 2003.12039](https://arxiv.org/abs/2003.12039) |
+| VideoCLIP-XL | [arXiv 2410.00741](https://arxiv.org/abs/2410.00741) |
+| VideoPhy | [arXiv 2406.03520](https://arxiv.org/abs/2406.03520) |
+| Qwen2.5-VL-7B / 32B | (vendored vLLM rollout) |
+| DINOv2 (advantage shaper for VIPO) | [arXiv 2304.07193](https://arxiv.org/abs/2304.07193) |
 
 ### Supported configurations
 
@@ -74,7 +71,7 @@ are usable as the sole reward via `REWARD_MODEL_PATH`.
 | Reward | HPSv2, Qwen2.5-VL-7B, joint reward (4 default models) |
 | Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
-| Sequence parallel | sp ∈ {1, 2, 4, 8}; CP grad bit-exact at fp32 |
+| Sequence parallel | Supported |
 | Hardware | H800 / H100 80 GB |
 
 ---
@@ -132,12 +129,12 @@ it CFG collapses to `(1+scale)·cond` and reward variance vanishes
 
 The prep script (`data_preprocess/prepare_wan_data.py`):
 
-* accepts `.txt` (one prompt per line) **or** `.json` (`[{"caption": ...}, ...]`);
-* loads the umT5 encoder lazily — only if something actually needs encoding;
-* per row, skips T5 if `context_path` already points at an existing `.npy`;
-* writes `processed_wan_prompt.json` + per-row `context_<i>.npy` +
+* Accepts `.txt` (one prompt per line) **or** `.json` (`[{"caption": ...}, ...]`);
+* Loads the umT5 encoder lazily — only if something actually needs encoding;
+* Per row, skips T5 if `context_path` already points at an existing `.npy`;
+* Writes `processed_wan_prompt.json` + per-row `context_<i>.npy` +
   one shared `context_null.npy`;
-* uses Wan's official Chinese negative-prompt template by default; override
+* Uses Wan's official Chinese negative-prompt template by default; override
   with `--negative_prompt "..."`.
 
 ---
@@ -198,25 +195,6 @@ base-model rollouts on that prompt and clip to `[0.05, 0.95]`.
 | `WAN_VERSION` | `wan22` | `wan21` for Wan2.1-1.3B |
 | `VAL_BEFORE_TRAIN` | `False` | run validation before step 0 |
 | `TELEBOOST_OUTPUT_DIR` | `./outputs` | parent for `checkpoints/` and `tensorboard/` |
-
-### Orthogonal flags
-
-These layer on top of `TELEBOOST_METHOD` and combine freely:
-
-| Env var | Effect |
-|---|---|
-| `SP_SIZE=2` (or 4, 8) | Wan Ulysses sequence parallel; `world_size` must be divisible by `SP_SIZE` |
-| `INIT_SAME_NOISE=False` | per-prompt responses get different starting noise — required for non-zero reward variance |
-| `ENABLE_GRPOGUARD=True` | GRPO-Guard `ratio_norm` + `grad_reweight` |
-| `ENABLE_FLOWGRPO=True` | Flow-GRPO SDE solver path; auto-bumps `SAMPLING_STEPS` to 4 if it was 1 |
-| `ADV_ESTIMATOR=remax` | switch advantage estimator from default `grpo` to upstream verl's `remax` |
-
-```bash
-# sp=8 BGPO
-TELEBOOST_METHOD=bgpo SP_SIZE=8 \
-TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
-bash recipe/teleboost/run_teleboost.sh
-```
 
 ---
 
@@ -372,60 +350,76 @@ The two TeleAI algorithms shipped day-0 in this codebase:
 
 ## License & Acknowledgments
 
-Apache 2.0 (see [`LICENSE`](LICENSE) and [`Notice.txt`](Notice.txt)).
+This project is licensed under the Apache License 2.0 — see
+[`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
-This codebase stands on the shoulders of several open-source projects.
-We thank the authors of all of the following.
+This codebase builds on the following open-source projects. We thank
+their authors.
 
-**Framework**
+### Framework
 
 * [**volcengine/verl**](https://github.com/volcengine/verl) (Apache 2.0,
-  Bytedance Seed) — the PPO / GRPO training engine. We pin
-  `verl@v0.4.0` and consume it as a pip dependency rather than vendoring;
-  recipe-level extensions live under
-  [`recipe/teleboost/`](recipe/teleboost/) and
+  Bytedance Seed) — PPO / GRPO training engine. Pinned at `v0.4.0` and
+  consumed as a pip dependency (not vendored); recipe-level extensions
+  live under [`recipe/teleboost/`](recipe/teleboost/) and
   [`teleboost/`](teleboost/).
 
-**Algorithms**
+### Algorithms
 
-The algorithm modules under
-[`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/) are
-paper-faithful translations of:
+Our reimplementations under
+[`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/):
 
-* DanceGRPO ([arXiv 2505.07818](https://arxiv.org/abs/2505.07818))
-* Flow-GRPO ([arXiv 2505.05470](https://arxiv.org/abs/2505.05470))
-* GRPO-Guard ([arXiv 2510.22319](https://arxiv.org/abs/2510.22319))
-* BGPO ([arXiv 2511.18919](https://arxiv.org/abs/2511.18919))
-* VIPO ([arXiv 2511.18719](https://arxiv.org/abs/2511.18719))
+* **DanceGRPO** — Xue et al., *"DanceGRPO: Unleashing GRPO on Visual
+  Generation"*, [arXiv:2505.07818](https://arxiv.org/abs/2505.07818)
+* **Flow-GRPO** — Liu et al., *"Flow-GRPO: Training Flow Matching Models
+  via Online RL"*, [arXiv:2505.05470](https://arxiv.org/abs/2505.05470)
+* **GRPO-Guard** — Sun, Wang, et al., *"GRPO-Guard: Stable
+  Diffusion-Style RL by Bias and Step-size Correction"*,
+  [arXiv:2510.22319](https://arxiv.org/abs/2510.22319)
+* **BGPO** — Liu, Liang, et al., *"Learning What to Trust: Bayesian
+  Prior-Guided Optimization for Visual Generation"*,
+  [arXiv:2511.18919](https://arxiv.org/abs/2511.18919)
+* **VIPO** — Ni, Liang, et al., *"Seeing What Matters: Visual Preference
+  Policy Optimization for Visual Generation"*,
+  [arXiv:2511.18719](https://arxiv.org/abs/2511.18719)
 
-**Models — actor backbones**
+### Actor models
 
 * [**Wan-Video/Wan2.1**](https://github.com/Wan-Video/Wan2.1) and
-  [**Wan-Video/Wan2.2**](https://github.com/Wan-Video/Wan2.2) —
-  text-to-video diffusion actor. The `wan/` directory bundles their
-  model code; the FSDP / Ulysses-SP wrap in
+  [**Wan-Video/Wan2.2**](https://github.com/Wan-Video/Wan2.2)
+  (Apache 2.0; weights under additional Wan-Video community terms —
+  check the upstream model cards before commercial use). Vendored under
+  [`wan/`](wan/) with the original [`wan/LICENSE`](wan/LICENSE)
+  preserved per Apache 2.0 §4(a). The FSDP / Ulysses-SP wrap in
   [`teleboost/patches/`](teleboost/patches/) is our addition.
 
-**Reward models**
+### Reward models
 
-* [**tgxs002/HPSv2**](https://github.com/tgxs002/HPSv2)
-  ([arXiv 2306.09341](https://arxiv.org/abs/2306.09341))
-* [**alibaba-pai/VideoCLIP-XL**](https://huggingface.co/alibaba-pai/VideoCLIP-XL)
-  ([arXiv 2410.00741](https://arxiv.org/abs/2410.00741))
+* [**tgxs002/HPSv2**](https://github.com/tgxs002/HPSv2) (Apache 2.0) —
+  Wu et al., [arXiv:2306.09341](https://arxiv.org/abs/2306.09341).
 * [**LAION-AI/aesthetic-predictor**](https://github.com/LAION-AI/aesthetic-predictor)
+  (MIT).
 * [**princeton-vl/RAFT**](https://github.com/princeton-vl/RAFT)
-  ([arXiv 2003.12039](https://arxiv.org/abs/2003.12039))
+  (BSD-3-Clause) — Teed & Deng,
+  [arXiv:2003.12039](https://arxiv.org/abs/2003.12039).
+* [**alibaba-pai/VideoCLIP-XL**](https://huggingface.co/alibaba-pai/VideoCLIP-XL)
+  (license: see HF model card; verify before redistribution) —
+  [arXiv:2410.00741](https://arxiv.org/abs/2410.00741).
 * [**videophysics/videocon_physics**](https://huggingface.co/videophysics/videocon_physics)
-  ([arXiv 2406.03520](https://arxiv.org/abs/2406.03520))
+  (license: see HF model card — **commonly CC-BY-NC; verify before
+  commercial use**) —
+  [arXiv:2406.03520](https://arxiv.org/abs/2406.03520).
 * [**facebook/dinov2**](https://github.com/facebookresearch/dinov2)
-  ([arXiv 2304.07193](https://arxiv.org/abs/2304.07193)) — used by VIPO
+  (Apache 2.0 for code; weights have separate terms — check upstream)
+  — Oquab et al.,
+  [arXiv:2304.07193](https://arxiv.org/abs/2304.07193). Used by VIPO
   for per-pixel allocation maps.
 
-**Compute & systems**
+### Systems
 
-* [**vllm-project/vllm**](https://github.com/vllm-project/vllm) — Qwen
-  reward worker rollout.
+* [**vllm-project/vllm**](https://github.com/vllm-project/vllm)
+  (Apache 2.0) — Qwen reward worker rollout.
 * [**Dao-AILab/flash-attention**](https://github.com/Dao-AILab/flash-attention)
-  — flash-attn 2.7.4.post1 used in actor + reward rollouts.
+  (BSD-3-Clause) — flash-attn 2.7.4.post1 used in actor + reward rollouts.
 * [**flashinfer-ai/flashinfer**](https://github.com/flashinfer-ai/flashinfer)
-  — vLLM kernel backend.
+  (Apache 2.0) — vLLM kernel backend.
