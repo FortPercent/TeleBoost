@@ -27,8 +27,8 @@ reduce-scatter」的范式，**适用于 TeleTron 支持的任意扩散模型**
 该方案与单次反向的实现**数学等价**（在 32 卡生产形状下、对
 14.78 B 个梯度元素逐元素验证一致）。
 
-在 [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) ——
-TeleAI 的长上下文多模态训练框架 —— 基础上升级至
+基于 [Tele-AI/TeleTron](https://github.com/Tele-AI/TeleTron) ——
+TeleAI 的长上下文多模态训练框架 —— 升级至
 [megatron-core 0.16.1](https://github.com/NVIDIA/Megatron-LM/tree/core_v0.16.1)，
 并加入 Gradient Decoupled DPO。已在 TeleAI 内部用于扩散模型的生产训练。
 
@@ -158,7 +158,7 @@ QUICKSTART 中给出了一个 30 行的模板。
 
 ---
 
-## 硬性要求
+## 硬件要求
 
 - **GPU**：推荐 SM 9.0（H100 / H200 / H800）；SM 8.0+ 可通过
   `--build-arg BUILD_FA3=0` 使用。
