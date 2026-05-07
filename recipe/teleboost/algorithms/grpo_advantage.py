@@ -70,6 +70,14 @@ def per_prompt_zscore_advantage(
     """
     if num_repeat <= 0:
         raise ValueError(f"num_repeat must be >= 1, got {num_repeat}")
+    if num_repeat == 1:
+        # Single-sample groups have no within-group variance — Bessel-
+        # corrected ``std()`` returns NaN, and the post-hoc ``+ eps``
+        # cannot rescue it.  Return zeros: under group-relative GRPO a
+        # group-of-one carries no relative signal anyway.  Production
+        # configs always set num_repeat >= 2, so this branch is a
+        # tripwire for misconfiguration, not a normal path.
+        return torch.zeros_like(rewards)
     n_total = rewards.numel()
     if n_total % num_repeat != 0:
         raise ValueError(

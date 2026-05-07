@@ -264,11 +264,19 @@ fi
 #   - worker (rank >0): join the Ray cluster and block; main_teleboost
 #                       runs only on master, but Ray schedules workers
 #                       across the joined nodes.
-node_rank="${NODE_RANK:-0}"
 master_addr="${MASTER_ADDR:-127.0.0.1}"
 master_port="${MASTER_PORT:-6379}"
 
 if [[ "${nnodes}" -gt 1 ]]; then
+  # Multi-node: NODE_RANK must be set explicitly on every node.  Falling
+  # back to 0 silently would make a misconfigured worker self-elect as
+  # master and start a second Ray head, which then races the real one.
+  if [[ -z "${NODE_RANK:-}" ]]; then
+    echo "[teleboost] ERROR: nnodes=${nnodes} but NODE_RANK is unset." >&2
+    echo "  Set NODE_RANK=0 on the master and NODE_RANK=1..N-1 on workers." >&2
+    exit 1
+  fi
+  node_rank="${NODE_RANK}"
   if [[ "${node_rank}" == "0" ]]; then
     echo "[teleboost] master (rank 0): starting Ray head on ${master_addr}:${master_port}"
     ray start --head --port="${master_port}" --num-gpus="${n_gpus}"

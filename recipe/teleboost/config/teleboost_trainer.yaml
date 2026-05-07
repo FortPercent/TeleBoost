@@ -187,8 +187,10 @@ reward_model:
         normalize: true
         model_path: ""
         extra_config:
-          clip_model_path: /root/models/aesthetic/ViT-L-14.pt
-          aes_model_path: /root/models/aesthetic/sa_0_4_vit_l_14_linear.pth
+          # Set these to local checkpoint paths before training, e.g. via
+          # ``+actor_rollout_ref.reward_model.joint.models.aesthetic.extra_config.clip_model_path=$REWARD_MODELS_DIR/aesthetic/ViT-L-14.pt``
+          clip_model_path: ""
+          aes_model_path: ""
 
       raft:
         enabled: true
@@ -197,7 +199,7 @@ reward_model:
         rank_offset: 0
         mps_percentage: 30
         normalize: true
-        model_path: /root/models/raft/raft-things.pth
+        model_path: ""           # e.g. $REWARD_MODELS_DIR/raft/raft-things.pth
         extra_config:
           stride: 1
           iters: 20
@@ -209,7 +211,7 @@ reward_model:
         rank_offset: 0
         mps_percentage: 25
         normalize: true
-        model_path: /root/models/VideoCLIP-XL/VideoCLIP-XL.bin
+        model_path: ""           # e.g. $REWARD_MODELS_DIR/VideoCLIP-XL/VideoCLIP-XL.bin
         extra_config:
           num_frames: 8
           target_size: 224
@@ -221,7 +223,7 @@ reward_model:
         rank_offset: 0
         mps_percentage: 25
         normalize: true
-        model_path: /root/models/videocon_physics
+        model_path: ""           # e.g. $REWARD_MODELS_DIR/videocon_physics
         extra_config:
           max_length: 256
 
@@ -232,7 +234,7 @@ reward_model:
       #   dp_fraction: 1.0
       #   rank_offset: 0
       #   mps_percentage: 15
-      #   model_path: /root/models/hps/hpsv2.pt
+      #   model_path: ""         # e.g. $REWARD_MODELS_DIR/hps/hpsv2.pt
       #   extra_config:
       #     model_type: ViT-H-14
 

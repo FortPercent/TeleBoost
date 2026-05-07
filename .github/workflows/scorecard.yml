@@ -13,8 +13,7 @@ on:
     - cron: "27 7 * * 1"
   push:
     branches:
-      - main
-      - v0.*
+      - master
 
 # Declare default permissions as read only.
 permissions: read-all

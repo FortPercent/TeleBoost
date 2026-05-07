@@ -42,7 +42,6 @@ preferred-citation:
     - family-names: Li
       given-names: Xuelong
   year: 2026
-  url: "https://arxiv.org/abs/2602.07595"
 references:
   - type: article
     title: "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models (GRPO)"

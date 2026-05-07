@@ -1,1 +1,57 @@
-Copyright 2023-2024 Bytedance Ltd. and/or its affiliates 
+TeleBoost
+Copyright 2025-2026 TeleAI and the TeleBoost contributors
+
+This product includes software developed by third parties, redistributed
+under their original licenses.  Each upstream project's LICENSE is
+preserved alongside its source where applicable (e.g. ``wan/LICENSE``).
+
+Upstream attributions
+---------------------
+
+* DanceGRPO — Bytedance Ltd. and/or its affiliates (Apache License 2.0).
+  Source: https://github.com/ByteDance-Seed/DanceGRPO
+  TeleBoost was originally forked from this project; the trainer, FSDP
+  worker, and rollout scaffolding derive from it.
+
+* verl — Bytedance Ltd. and/or its affiliates (Apache License 2.0).
+  Source: https://github.com/volcengine/verl
+  Imported as a hard pin (``requirements-verl.txt`` v0.4.0); the
+  ``teleboost/patches`` layer monkey-patches verl utilities to support
+  video-diffusion rollouts and Ulysses context parallelism.
+
+* Wan2.1 / Wan2.2 — Alibaba Group (Apache License 2.0).
+  Source: https://github.com/Wan-Video/Wan2.1
+  Vendored under ``wan/`` with the original ``wan/LICENSE`` retained.
+
+* HPSv2 — The Chinese University of Hong Kong (Apache License 2.0).
+  Source: https://github.com/tgxs002/HPSv2
+  Used as a reward model under ``recipe/teleboost/reward_models/hps.py``.
+
+* VideoCLIP-XL — Alibaba Group (Apache License 2.0).
+  Source: https://github.com/farewellthree/VideoCLIP-XL
+  Vendored under ``teleboost/models/VideoCLIP_XL/`` and used as a
+  reward model.
+
+* VideoPhy / Videocon-Physics — University of California, Los Angeles
+  (Apache License 2.0).
+  Source: https://github.com/Hritikbansal/videophy
+  Vendored under ``teleboost/models/Videophy/`` and used as a reward
+  model.
+
+* Aesthetic predictor (LAION CLIP+MLP) — LAION (MIT License).
+  Source: https://github.com/christophschuhmann/improved-aesthetic-predictor
+  Used as a reward model under
+  ``recipe/teleboost/reward_models/aesthetic.py``.
+
+* RAFT — Princeton Vision & Learning Lab (BSD-3-Clause License).
+  Source: https://github.com/princeton-vl/RAFT
+  Vendored under ``teleboost/models/raft/`` and used as a reward model
+  for optical-flow consistency.
+
+* VideoAlign — TencentARC (Apache License 2.0).
+  Source: https://github.com/TencentARC/VideoAlign
+  Vendored under ``models/videoalign/`` and used for reward training.
+
+This NOTICE is provided in accordance with Section 4(d) of the Apache
+License, Version 2.0, and is informational only.  See ``LICENSE`` and
+each vendored sub-tree's own LICENSE file for governing terms.

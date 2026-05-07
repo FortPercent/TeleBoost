@@ -1,4 +1,4 @@
-# Copyright 2024 PRIME team and/or its affiliates
+# Copyright 2025-2026 TeleAI and the TeleBoost contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ except ImportError:
     BICUBIC = Image.BICUBIC
     BILINEAR = Image.BILINEAR
     
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
