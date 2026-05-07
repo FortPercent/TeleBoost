@@ -17,8 +17,12 @@ import numpy as np
 import imageio.v3 as iio
 from PIL import Image
 from einops import repeat
-from teleai_data_tool.file.file_client import FileClient
-from teleai_data_tool.file.lmdb_client import LmdbClient
+# teleai_data_tool is an optional internal-only dependency. Only the
+# LoadVideoWithFileClient operator below uses it; everything else (including
+# WanDPODataset itself) works without it. Lazy-import inside that operator's
+# __init__ so the module imports cleanly on OSS installs that don't have
+# teleai_data_tool — otherwise WanDPODataset gets dropped from the registry
+# at module-load time even though most callers never instantiate the operator.
 import logging
 from megatron.core import mpu
 
@@ -140,6 +144,9 @@ class LoadVideoWithFileClient(DataProcessingOperator):
         """
         data_format: "file" or "lmdb"
         """
+        # Lazy import — see top-of-file note about teleai_data_tool being optional.
+        from teleai_data_tool.file.file_client import FileClient
+        from teleai_data_tool.file.lmdb_client import LmdbClient
         self.data_format = data_format
         self.file_client = FileClient()
         self.lmdb_client = LmdbClient()
