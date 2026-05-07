@@ -144,18 +144,27 @@ class LoadVideoWithFileClient(DataProcessingOperator):
         """
         data_format: "file" or "lmdb"
         """
-        # Lazy import — see top-of-file note about teleai_data_tool being optional.
-        from teleai_data_tool.file.file_client import FileClient
-        from teleai_data_tool.file.lmdb_client import LmdbClient
+        # Defer teleai_data_tool import to __call__ so this operator can be
+        # *constructed* (e.g. as part of WanDPODataset.special_operator_map)
+        # on OSS installs that don't have the package — only callers that
+        # actually invoke the operator pay the import.
         self.data_format = data_format
-        self.file_client = FileClient()
-        self.lmdb_client = LmdbClient()
+        self._file_client = None
+        self._lmdb_client = None
+
+    def _ensure_clients(self):
+        if self._file_client is None:
+            from teleai_data_tool.file.file_client import FileClient
+            from teleai_data_tool.file.lmdb_client import LmdbClient
+            self._file_client = FileClient()
+            self._lmdb_client = LmdbClient()
 
     def __call__(self, path: str):
+        self._ensure_clients()
         if self.data_format == "lmdb":
-            return self.lmdb_client.get(path)
+            return self._lmdb_client.get(path)
         else:
-            return self.file_client.get(path)
+            return self._file_client.get(path)
 
 
 class LoadVideo(DataProcessingOperator):
