@@ -114,7 +114,7 @@ illustration.
 
 | Dimension | Supported |
 |---|---|
-| Actor | Wan2.2-T2V-A14B, Wan2.1-T2V-1.3B |
+| Actor | Wan2.2-T2V-A14B, Wan2.1-T2V-14B, Wan2.1-T2V-1.3B |
 | Reward | HPSv2, Qwen2.5-VL-7B, joint reward (4 default models) |
 | Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
@@ -190,7 +190,7 @@ The prep script (`data_preprocess/prepare_wan_data.py`):
 
 | Env var | Source | Expected target |
 |---|---|---|
-| `WAN_MODEL_PATH` | [`Wan-AI/Wan2.1-T2V-1.3B`](https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B) or [`Wan-AI/Wan2.2-T2V-A14B`](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B) | repo root (contains `Wan2.1_VAE.pth`, umT5 files, transformer weights) |
+| `WAN_MODEL_PATH` | [`Wan-AI/Wan2.1-T2V-1.3B`](https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B), [`Wan-AI/Wan2.1-T2V-14B`](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B), or [`Wan-AI/Wan2.2-T2V-A14B`](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B) | repo root (contains `Wan2.1_VAE.pth`, umT5 files, transformer weights) |
 | `WAN_VAE_PATH` | same repo as above | `<WAN_MODEL_PATH>/Wan2.1_VAE.pth` |
 | `REWARD_MODEL_PATH` | [`xswu/HPSv2`](https://huggingface.co/xswu/HPSv2) | `HPS_v2.1_compressed.pt` |
 | `PIXEL_WEIGHT_MODEL_PATH` (VIPO) | [`facebook/dinov2-large`](https://huggingface.co/facebook/dinov2-large) | repo root (HF cache name also works) |
