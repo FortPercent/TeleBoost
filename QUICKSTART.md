@@ -143,10 +143,24 @@ export TELEAI_DATA_TOOL_DIR=/path/to/teleai_data_tool
 # - Image (CLIP): /path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth
 # Update paths in examples/teleai/config/wan_dpo.py to match your layout.
 
+# DiT weights — convert HF safetensors to a megatron 'release' checkpoint
+# directory once, then pass via --load:
+python tools/convert_wan_to_teletron.py \
+    --src '/path/to/Wan2.2-I2V-A14B/high_noise_model/*.safetensors' \
+    --dst /ckpts/Wan2.2-I2V-A14B-high-teletron \
+    --roundtrip-check       # verify rename rules are bijective; bit-exact
+export DIT_LOAD=/ckpts/Wan2.2-I2V-A14B-high-teletron
+
 # Launch on 8 GPUs (CP=8)
 export EXPR_NAME=my_first_dpo_run
-bash examples/teleai/train_dpo.sh
+bash examples/teleai/train_dpo.sh "" "" --load $DIT_LOAD
 ```
+
+> **DPO eval is not supported.** `pretrain_dpo_i2v.py`'s `forward_step`
+> returns a 5-element list of losses; megatron's eval reducer can't
+> divide that. `train_dpo.sh` ships with `--eval-iters 0`; the entry
+> script also asserts at startup if you override eval to a non-zero
+> value. Until a DPO-aware eval reducer lands, leave eval disabled.
 
 Key flags inside `train_dpo.sh` (override via env or command-line):
 
