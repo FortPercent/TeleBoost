@@ -872,12 +872,15 @@ def forward_step(data_iterator, model, time_step=None):
 
 if __name__ == "__main__":
     args = parse_args(extra_args=extra_args)
+    trainer = Trainer(args)
     # DPO forward_step returns a 5-element list (loss_reject_scaled,
     # loss_chosen_scaled, loss_reject, loss_chosen, dpo_loss). The training
     # path reduces it via dpo_loss_func; the eval path in megatron's
     # forward_step_calc_loss does `output_tensor /= num_microbatches` directly,
     # which fails with `unsupported operand type(s) for /=: 'list' and 'int'`.
     # Until eval has its own DPO-aware reducer, refuse eval up-front.
+    # (Asserted after Trainer(args) so initialize_megatron has registered args
+    # globally — set_config() reads args via get_args().)
     dpo_enabled = (
         set_config()
         .get("model_config", {})
@@ -886,15 +889,11 @@ if __name__ == "__main__":
         .get("dpo", {})
         .get("enable", False)
     )
-    if dpo_enabled and (
-        getattr(args, "eval_iters", 0) > 0 or getattr(args, "do_valid", False)
-    ):
+    if dpo_enabled and getattr(args, "eval_iters", 0) > 0:
         raise NotImplementedError(
             "pretrain_dpo_i2v.py: DPO eval is not supported. "
             "forward_step returns a list of 5 losses for DPO; megatron's eval path "
             "(forward_step_calc_loss) does scalar /= num_microbatches and crashes. "
-            "Run with --eval-iters 0 (and avoid --do-valid) until a DPO-aware eval "
-            "reducer is added."
+            "Run with --eval-iters 0 until a DPO-aware eval reducer is added."
         )
-    trainer = Trainer(args)
     trainer.pretrain(forward_step_func=forward_step)
