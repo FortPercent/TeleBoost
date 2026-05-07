@@ -9,6 +9,7 @@
 </h3>
 
 <p align="center">
+  <a href="https://tele-ai.github.io/TeleBoost/"><img alt="Project Page" src="https://img.shields.io/badge/Project-Page-4CAF50?labelColor=555555"></a>
   <a href="https://arxiv.org/abs/2602.07595"><img alt="TeleBoost arXiv" src="https://img.shields.io/badge/TeleBoost-arXiv%202602.07595-B31B1B?labelColor=555555"></a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-2196F3?labelColor=555555"></a>
 </p>
