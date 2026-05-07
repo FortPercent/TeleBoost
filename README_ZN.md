@@ -34,7 +34,7 @@ TeleAI 的长上下文多模态训练框架 —— 升级至
 并加入 Gradient Decoupled DPO。已在 TeleAI 内部用于扩散模型的生产训练。
 
 <p align="center">
-  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B DPO peak GPU memory across three configs at 32×H800 multi-node. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="820"/>
+  <img src="documents/figures/fig_memory_vs_layers.png" alt="Wan 14B DPO peak GPU memory across three configs at 32×H800 multi-node. Left: at standard's max-fit (25 f / 480p, ~11k tokens), Decoupled cuts peak memory by ~40% on identical workload (69.27 GB → 41.39 GB). Middle: at production default (49 f / 480p, ~20k tokens), standard OOMs while Decoupled finishes at 42.90 GB. Right: at Decoupled's max-fit (77 f / 1080p, ~163k tokens), standard would OOM while Decoupled finishes at 69.32 GB — supporting ~15× longer context than standard." width="720"/>
 </p>
 
 <p align="center"><sub><i>
