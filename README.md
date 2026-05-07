@@ -24,11 +24,9 @@ Wan2.2 text-to-video diffusion**, built as a recipe layer on top of
 * 🧩 **MPS-parallel multi-reward** — N rewards concurrent on one GPU; wall-time ≈ max(model), not sum
 * 🆕 **Day-0 BGPO + VIPO** — TeleAI papers, implemented on release
 
-verl is consumed as a plain pip dependency, **not vendored**. Wan-specific
-behavior that doesn't belong in upstream verl (model loader, FSDP wrap,
-Ulysses SP patches, checkpoint compatibility) lives under
-[`teleboost/`](teleboost/) and is applied at import time. Used internally
-at TeleAI for Wan-family alignment.
+Inspired by the GRPO recipe in [`volcengine/verl`](https://github.com/volcengine/verl),
+given a dedicated home to evolve around video-diffusion-specific constraints.
+Used internally at TeleAI for Wan-family alignment.
 
 <p align="center">
   <img src="docs/figures/colocate_mps.png" alt="Co-located reward + MPS-parallel multi-reward. Left: disaggregated layout — actor and reward models live on separate GPU groups, with rollout-idle and reward-idle stalls. Right: co-located + MPS — actor and four reward models share GPUs; reward forwards run concurrently via CUDA MPS, wall-time bounded by the slowest model rather than the sum." width="820"/>
@@ -72,41 +70,12 @@ are usable as the sole reward via `REWARD_MODEL_PATH`.
 
 | Dimension | Supported |
 |---|---|
-| Actor | Wan2.2-T2V-A14B (`wan_version=wan22`), Wan2.1-T2V-1.3B (`wan_version=wan21`) |
-| Reward | HPSv2, Qwen2.5-VL-7B, 4-reward joint (aesthetic + RAFT + VideoCLIP + VideoPhy) |
+| Actor | Wan2.2-T2V-A14B, Wan2.1-T2V-1.3B |
+| Reward | HPSv2, Qwen2.5-VL-7B, joint reward (4 default models) |
 | Algorithm | DanceGRPO (default), Flow-GRPO, GRPO-Guard, BGPO, VIPO |
 | Rollout | Diffusion (actor), vLLM (Qwen reward) |
 | Sequence parallel | sp ∈ {1, 2, 4, 8}; CP grad bit-exact at fp32 |
 | Hardware | H800 / H100 80 GB |
-
----
-
-## How it works
-
-TeleBoost layers on top of verl in three places, applied at `import` time:
-
-```
-upstream verl  ──►  teleboost/patches/   ──►  recipe/teleboost/
-(unchanged,         (Wan SP fwd, CP grad      (algorithm selector,
- v0.4.0 pinned)      reduce fix, save_compat,   reward registry,
-                     timer/ProfilerConfig       run_teleboost.sh
-                     backports)                 launcher)
-```
-
-1. **Patches** monkey-patch four narrow surfaces in verl (Wan Ulysses SP
-   forward, CP grad reduce on modulation params, FrozenDict save
-   compatibility, profiler/timer backports).
-2. **Recipe** subclasses `RayPPOTrainer` and the FSDP worker, plugs in
-   five paper-pinned algorithm modules and a reward registry, and routes
-   them via env vars.
-3. **Launcher** (`run_teleboost.sh`) is a single bash entry; every knob
-   is an env var, every algorithm is one switch.
-
-```python
-# teleboost/__init__.py
-from teleboost.patches import apply
-apply()   # any process that imports teleboost (or recipe.teleboost.*) is patched
-```
 
 ---
 
@@ -249,35 +218,6 @@ TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... REWARD_MODEL_PATH=... \
 bash recipe/teleboost/run_teleboost.sh
 ```
 
-### Multi-node
-
-Run the same command on every node — the launcher self-routes by
-`NODE_RANK`. Master (rank 0) starts a Ray head and proceeds to training;
-workers join the cluster and block on `ray start`.
-
-| Env var | Required | Notes |
-|---|---|---|
-| `NNODES` | yes (>1) | total node count |
-| `NODE_RANK` | yes | this node's rank; `0` = master |
-| `MASTER_ADDR` | yes | hostname / IP of the master, reachable from every worker |
-| `MASTER_PORT` | no | Ray head port; default `6379` |
-
-```bash
-# 4 nodes × 8 GPUs (32 GPUs total)
-# master:
-NNODES=4 NODE_RANK=0 MASTER_ADDR=node-0.example.com \
-TRAIN_FILE=... TEST_FILE=... WAN_MODEL_PATH=... \
-WAN_VAE_PATH=... REWARD_MODEL_PATH=... \
-bash recipe/teleboost/run_teleboost.sh
-
-# each worker (NODE_RANK=1, 2, 3):
-NNODES=4 NODE_RANK=1 MASTER_ADDR=node-0.example.com ...same env... \
-bash recipe/teleboost/run_teleboost.sh
-```
-
-`NNODES=1` (default) skips the Ray head/worker step entirely;
-`main_teleboost` calls `ray.init()` itself for single-node runs.
-
 ---
 
 ## Multi-reward joint (`TELEBOOST_METHOD=joint`)
@@ -298,34 +238,10 @@ See [`recipe/teleboost/config/teleboost_trainer.yaml`](recipe/teleboost/config/t
 one GPU would block the actor on the wall-clock sum of all four model
 forwards. CUDA MPS lets each reward model occupy a fixed thread
 percentage of the same GPU; the four compute concurrently, and the joint
-forward finishes in roughly `max(model)`, not `Σ(model)`.
-
-| Model | ≈ params | `mps_percentage` |
-|---|---|---|
-| `aesthetic` (LAION ViT-L/14 + linear head) | 5.3 M | 20 |
-| `raft` (RAFT optical flow) | 5.3 M | 30 |
-| `videoclip` (VideoCLIP-XL) | 0.42 B | 25 |
-| `videophy` (videocon_physics) | 7 B | 25 |
-
-Constraint: percentages should sum to ≤ 100. The loader does not enforce
-this, but CUDA MPS itself caps the total at 100% effective. Sums < 100
-leave the remainder unallocated (the kernel launcher uses whatever
-threads are free, with no guarantee).
-
-```bash
-# tune one model's share (rebalance the others so the sum stays ≤100)
-bash recipe/teleboost/run_teleboost.sh \
-  reward_model.joint.mps.model_percentages.videophy=40 \
-  reward_model.joint.mps.model_percentages.videoclip=15
-
-# disable MPS — falls back to within-GPU serial
-bash recipe/teleboost/run_teleboost.sh \
-  reward_model.joint.mps.enabled=false
-```
-
-Aggregation across rewards is configurable via
-`reward_model.joint.aggregation` (default `weighted_sum`); per-model
-weights live under `reward_model.joint.models.<name>.weight`.
+forward finishes in roughly `max(model)`, not `Σ(model)`. Per-model
+thread shares and aggregation weights are Hydra-configurable under
+`reward_model.joint.*` — see
+[`recipe/teleboost/config/teleboost_trainer.yaml`](recipe/teleboost/config/teleboost_trainer.yaml).
 
 ---
 
@@ -337,7 +253,7 @@ weights live under `reward_model.joint.models.<name>.weight`.
   cu12.
 - **Python**: 3.10 (NGC base).
 - **Pinned**: `verl@v0.4.0`, `transformers<5`, `vllm==0.8.4`,
-  `flash-attn==2.7.4.post1`, `deepspeed` not used (verl's FSDP path).
+  `flash-attn==2.7.4.post1`.
 
 The [`docker/Dockerfile.teleboost`](docker/Dockerfile.teleboost) bakes
 everything ABI-aligned (incl. the hpsv2 BPE-vocab fix and a tkinter shim
@@ -452,13 +368,9 @@ The two TeleAI algorithms shipped day-0 in this codebase:
 }
 ```
 
-For the upstream papers TeleBoost builds on (DanceGRPO, Flow-GRPO,
-GRPO-Guard, GRPO), see [`CITATION.cff`](CITATION.cff) — ready for
-`cffconvert` / GitHub's "Cite this repository" widget.
-
 ---
 
-## License & acknowledgments
+## License & Acknowledgments
 
 Apache 2.0 (see [`LICENSE`](LICENSE) and [`Notice.txt`](Notice.txt)).
 
@@ -480,22 +392,19 @@ The algorithm modules under
 [`recipe/teleboost/algorithms/`](recipe/teleboost/algorithms/) are
 paper-faithful translations of:
 
-* GRPO ([DeepSeekMath, arXiv 2402.03300](https://arxiv.org/abs/2402.03300)) — base objective; not a standalone training mode here
 * DanceGRPO ([arXiv 2505.07818](https://arxiv.org/abs/2505.07818))
 * Flow-GRPO ([arXiv 2505.05470](https://arxiv.org/abs/2505.05470))
 * GRPO-Guard ([arXiv 2510.22319](https://arxiv.org/abs/2510.22319))
 * BGPO ([arXiv 2511.18919](https://arxiv.org/abs/2511.18919))
 * VIPO ([arXiv 2511.18719](https://arxiv.org/abs/2511.18719))
 
-See each module's docstring for the equation pin.
-
 **Models — actor backbones**
 
 * [**Wan-Video/Wan2.1**](https://github.com/Wan-Video/Wan2.1) and
   [**Wan-Video/Wan2.2**](https://github.com/Wan-Video/Wan2.2) —
   text-to-video diffusion actor. The `wan/` directory bundles their
-  model code; the FSDP / Ulysses-SP wrap and CP-grad-reduce fix in
-  [`teleboost/patches/`](teleboost/patches/) are our additions.
+  model code; the FSDP / Ulysses-SP wrap in
+  [`teleboost/patches/`](teleboost/patches/) is our addition.
 
 **Reward models**
 
