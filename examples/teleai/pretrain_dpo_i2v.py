@@ -9,7 +9,6 @@ from teleboost.utils import get_timers, set_config
 import torch.nn.functional as F
 
 def dpo_loss_func(output_tensor):
-    print(f"[Rank {torch.distributed.get_rank()}] enter dpo_loss_func")
     # output_tensor: [loss_reject_scaled, loss_chosen_scaled, loss_reject, loss_chosen, dpo_loss]
     # The two scaled losses are kept as a list so backward_step can backprop each separately.
     if not isinstance(output_tensor, (list, tuple)):
@@ -40,7 +39,6 @@ def dpo_loss_func(output_tensor):
         averaged = average_losses_across_data_parallel_group([dpo_loss_mean.detach()])
         loss_dict = {"loss": averaged[0]}
 
-    print(f"[Rank {torch.distributed.get_rank()}] leave dpo_loss_func loss scaled = {loss_for_backward}")
     return loss_for_backward, loss_dict
 
 
@@ -58,7 +56,6 @@ def extra_args(parser):
     group.add_argument("--diffsynth_dump_root", type=str, default=None)
     group.add_argument("--save-dumps-interval", type=int, default=1)
     group.add_argument("--use-saved-inputs", action="store_true")
-    group.add_argument("--compare-saved-losses", action="store_true")
     group.add_argument("--compare-losses-rtol", type=float, default=1e-5)
     group.add_argument("--compare-losses-atol", type=float, default=1e-8)
     group.add_argument("--noise-seed", type=int, default=None)
@@ -205,13 +202,6 @@ def _broadcast_saved_payload(payload, device):
         ("rejected", "noise_pred"),
         ("rejected", "training_target"),
         ("rejected", "loss_weight"),
-        ("losses", "loss_chosen"),
-        ("losses", "loss_reject"),
-        ("losses", "dpo_loss"),
-        ("losses", "loss_wo_w_chosen"),
-        ("losses", "loss_wo_w_reject"),
-        ("losses", "first_frame_loss_chosen"),
-        ("losses", "first_frame_loss_reject"),
     ]
 
     out = {}
@@ -286,33 +276,6 @@ def _compute_single_loss_from_saved(
     first_frame_loss = loss_wo_w.new_zeros(())
 
     return loss, loss_wo_w, first_frame_loss
-
-
-def _compare_losses(saved_losses, current_losses, rtol, atol):
-    results = {}
-    for key, current in current_losses.items():
-        saved = saved_losses.get(key)
-        if saved is None:
-            results[key] = {"missing": True}
-            continue
-        if not torch.is_tensor(saved):
-            results[key] = {"missing": True}
-            continue
-        if saved.shape != current.shape:
-            results[key] = {
-                "shape_mismatch": True,
-                "saved_shape": list(saved.shape),
-                "current_shape": list(current.shape),
-            }
-            continue
-        diff = (current - saved).abs()
-        results[key] = {
-            "missing": False,
-            "allclose": bool(torch.allclose(current, saved, rtol=rtol, atol=atol)),
-            "max_abs": diff.max().item(),
-            "mean_abs": diff.mean().item(),
-        }
-    return results
 
 
 def _compare_input_tensor(
@@ -408,16 +371,6 @@ def _compare_input_tensor(
         out["actual_device"] = str(actual.device)
     return out
 
-
-
-def _check_payload_inputs(payload, inputs, rtol=1e-5, atol=1e-8):
-    mismatches = []
-    for name, pair in inputs.items():
-        expected, actual = pair
-        diff = _compare_input_tensor(name, expected, actual, rtol=rtol, atol=atol)
-        if diff is not None:
-            mismatches.append(diff)
-    return mismatches
 
 
 def _summarize_scheduler(scheduler, max_values=20):
@@ -673,13 +626,12 @@ def _generate_noise(chosen_latents, reject_latents, base_seed, curr_iter):
         # 计算当前的随机种子
         seed_chosen = int(base_seed) + curr_iter * 2
         seed_reject = int(base_seed) + curr_iter * 2 + 1
-        
-        # 打印日志 (如果你在多卡训练，建议加上 rank 区分)
-        print(
-            f"[Rank {torch.distributed.get_rank()}] noise seeds: "
-            f"chosen={seed_chosen}, reject={seed_reject}"
-        )
-        
+
+        if torch.distributed.get_rank() == 0:
+            print(
+                f"[Rank 0] noise seeds: chosen={seed_chosen}, reject={seed_reject}"
+            )
+
         # 创建 Generator
         gen_chosen = torch.Generator(device=chosen_latents.device).manual_seed(seed_chosen)
         gen_reject = torch.Generator(device=reject_latents.device).manual_seed(seed_reject)
@@ -720,7 +672,6 @@ def forward_step(data_iterator, model, time_step=None):
 
     use_saved_inputs = bool(getattr(args, "use_saved_inputs", False))
     save_dumps = bool(getattr(args, "save_dumps", False))
-    compare_saved_losses = bool(getattr(args, "compare_saved_losses", False))
 
     if use_saved_inputs:
         # from diffsynth dumps
@@ -805,38 +756,10 @@ def forward_step(data_iterator, model, time_step=None):
         reject_training_target = payload["rejected"]["training_target"]
         reject_loss_weight = payload["rejected"]["loss_weight"]
         reject_noise_pred = payload["rejected"].get("noise_pred")
-        input_checks = {
-            "chosen.timestep": (payload["chosen"]["timestep"], timestep_c),
-            "rejected.timestep": (payload["rejected"]["timestep"], timestep_r),
-            "context": (payload["context"], context),
-            "chosen.clip_feature": (payload["chosen"]["clip_feature"], chosen_clip_feature),
-            "chosen.y": (payload["chosen"]["y"], chosen_y),
-            "chosen.noisy_latents": (payload["chosen"]["noisy_latents"], chosen_noisy_latents),
-            "chosen.training_target": (payload["chosen"]["training_target"], chosen_training_target),
-            "chosen.loss_weight": (payload["chosen"]["loss_weight"], chosen_loss_weight),
-            "rejected.clip_feature": (payload["rejected"]["clip_feature"], reject_clip_feature),
-            "rejected.y": (payload["rejected"]["y"], reject_y),
-            "rejected.noisy_latents": (payload["rejected"]["noisy_latents"], reject_noisy_latents),
-            "rejected.training_target": (payload["rejected"]["training_target"], reject_training_target),
-            "rejected.loss_weight": (payload["rejected"]["loss_weight"], reject_loss_weight),
-        }
-        mismatches = _check_payload_inputs(
-            payload,
-            input_checks,
-            rtol=float(getattr(args, "compare_losses_rtol", 1e-5)),
-            atol=float(getattr(args, "compare_losses_atol", 1e-8)),
-        )
-        if mismatches:
-            print(
-                f"[DPO input-check] rank={dist.get_rank()} mismatches={mismatches}"
-            )
-        elif dist.get_rank() == mpu.get_tensor_context_parallel_src_rank():
-            print(f"[DPO input-check] rank={dist.get_rank()} ok")
 
     def _run_branch(tag, latents, clip_feature, y, timestep, noise,
                     saved_noisy_latents=None, saved_training_target=None,
                     saved_loss_weight=None, saved_noise_pred=None):
-        print(f"[Rank {torch.distributed.get_rank()}] enter {tag} compute_single_loss========")
         if use_saved_inputs:
             loss, loss_wo_w, first_frame = _compute_single_loss_from_saved(
                 saved_noisy_latents, saved_training_target, saved_loss_weight,
@@ -937,53 +860,6 @@ def forward_step(data_iterator, model, time_step=None):
                 save_dir, f"dpo_inputs_iter{curr_iter}_rank{dp_rank}.pt"
             )
             torch.save(_detach_to_cpu(payload), save_path)
-
-    if use_saved_inputs and compare_saved_losses:
-        saved_losses = payload.get("losses", {}) if isinstance(payload, dict) else {}
-        current_losses = {
-            "loss_chosen": loss_chosen.detach(),
-            "loss_reject": loss_reject.detach(),
-            "dpo_loss": dpo_loss_for_log.detach(),
-            "loss_wo_w_chosen": loss_wo_w_chosen.detach(),
-            "loss_wo_w_reject": loss_wo_w_reject.detach(),
-            "first_frame_loss_chosen": first_frame_loss_chosen.detach(),
-            "first_frame_loss_reject": first_frame_loss_reject.detach(),
-        }
-        compare = _compare_losses(
-            saved_losses,
-            current_losses,
-            float(getattr(args, "compare_losses_rtol", 1e-5)),
-            float(getattr(args, "compare_losses_atol", 1e-8)),
-        )
-        tp_cp_src_rank = mpu.get_tensor_context_parallel_src_rank()
-        if torch.distributed.get_rank() == tp_cp_src_rank:
-            curr_iter = int(getattr(args, "curr_iteration", 0))
-            dp_rank = int(mpu.get_data_parallel_rank())
-            print(f"[DPO compare] iter={curr_iter} dp_rank={dp_rank} results={compare}")
-            compare_dir = (
-                getattr(args, "save_dumps_dir", None)
-                or getattr(args, "save_inputs_dir", None)
-                or f"../test_data/saved_inputs_{args.test_resolution}"
-            )
-            os.makedirs(compare_dir, exist_ok=True)
-            compare_payload = {
-                "meta": {
-                    "iter": curr_iter,
-                    "rank": int(torch.distributed.get_rank()),
-                    "dp_rank": dp_rank,
-                },
-                "compare": compare,
-            }
-            for name, tensor in current_losses.items():
-                if torch.is_tensor(tensor):
-                    compare_payload[f"current_mean/{name}"] = float(tensor.float().mean().item())
-            for name, tensor in saved_losses.items():
-                if torch.is_tensor(tensor):
-                    compare_payload[f"saved_mean/{name}"] = float(tensor.float().mean().item())
-            compare_path = os.path.join(
-                compare_dir, f"dpo_loss_compare_iter{curr_iter}_rank{dp_rank}.pt"
-            )
-            torch.save(compare_payload, compare_path)
 
     return [
         loss_reject_scaled,
