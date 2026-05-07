@@ -308,9 +308,6 @@ class RayDanceGRPOTrainer(BGPOMixin, VIPOMixin, JointRewardMixin, RayPPOTrainer)
 
                 # collect metrics
                 metrics.update(compute_timing_metrics(batch=new_batch, timing_raw=timing_raw))
-                print("metrics", metrics)
-                print("=" * 100)
-
                 logger.log(data=metrics, step=self.global_steps)
                 timing_raw = defaultdict(float)
 

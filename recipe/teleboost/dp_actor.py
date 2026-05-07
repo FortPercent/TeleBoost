@@ -223,9 +223,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
             self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
         )
 
-        print("gradient_accumulation", self.gradient_accumulation)
-        print("=" * 100)
-
         dataloader = data.select(select_keys, non_tensor_select_keys).chunk(data.batch.batch_size[0])
 
         device = torch.device(f"cuda:{get_device_id()}")
@@ -330,8 +327,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                     # 2. new_log_probs is already the current step's log_prob (shape: Batch)
                     new_log_probs_step = new_log_probs.flatten()
 
-                print(f"Step {step_idx}: New shape {new_log_probs_step.shape}, Old shape {old_log_probs_step.shape}")
-
                 if ratio_norm:
                     prev_sample_mean_step = prev_sample_mean
                     prev_sample_mean_old = batch_on_device.batch["prev_sample_mean"][:, step_idx]
@@ -347,8 +342,6 @@ class DiffusionDataParallelPPOActor(DataParallelPPOActor):
                         std_dev_t,
                         eps=ratio_norm_eps,
                     )
-
-                    print(f"Step {step_idx}: ratio_mean_bias {ratio_mean_bias.shape}, scale {scale}")
 
                     # VIPO: broadcast the per-sample bias scalar over the
                     # dense spatial dims when the actor is running in
