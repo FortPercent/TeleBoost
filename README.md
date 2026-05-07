@@ -16,18 +16,18 @@ GRPO post-training for video diffusion models.
   <a href="https://arxiv.org/abs/2511.18719"><img alt="VIPO arXiv" src="https://img.shields.io/badge/VIPO-arXiv%202511.18719-B31B1B?labelColor=555555"></a>
 </p>
 
-TeleBoost (GRPO branch) is a **production RL training stack for Wan2.1 /
-Wan2.2 text-to-video diffusion**, built as a recipe layer on top of
+TeleBoost (GRPO branch) is a **production RL training stack for
+text-to-video diffusion models**, built as a recipe layer on top of
 [`volcengine/verl`](https://github.com/volcengine/verl).
 
 * 🎛️ **Five algorithms** — DanceGRPO, Flow-GRPO, GRPO-Guard, BGPO, VIPO
-* 🎬 **Drop-in sequence parallel** — Wan Ulysses CP for long-video training
+* 🎬 **Drop-in sequence parallel** — Ulysses CP for long-video training
 * 🧩 **MPS-parallel multi-reward** — N rewards concurrent on one GPU; wall-time ≈ max(model), not sum
 * 🆕 **Day-0 BGPO + VIPO** — TeleAI papers, implemented on release
 
-Inspired by the GRPO recipe in [`volcengine/verl`](https://github.com/volcengine/verl),
-given a dedicated home to evolve around video-diffusion-specific constraints.
-Used internally at TeleAI for Wan-family alignment.
+Inspired by [verl](https://github.com/volcengine/verl), given a
+dedicated home to evolve around video-diffusion-specific constraints.
+Used internally at TeleAI for diffusion model alignment.
 
 <p align="center">
   <img src="docs/figures/colocate_mps.png" alt="Two independent throughput optimizations. Left: co-located reward — reward workers share the actor GPUs, eliminating the dedicated reward-rank's rollout-idle and training-idle gaps. Right: MPS-parallel multi-reward — N reward models compute concurrently on the same GPU via CUDA MPS, with wall-time bounded by the slowest model rather than the sum." width="820"/>

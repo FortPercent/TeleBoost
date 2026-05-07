@@ -813,11 +813,8 @@ class QwenRewardModelWorker(RewardModelWorker):
         
         log_gpu_memory_usage(f"After building {rollout_name} rollout", logger=logger)
         full_params = torch.distributed.get_world_size() == 1
-        #TODO
         rollout_sharding_manager = RewardVLLMManager(
-            # module=self.actor_module_fsdp,
             inference_engine=rollout.inference_engine,
-            # model_config=self.actor_model_config,
             full_params=full_params,
             device_mesh=rollout_device_mesh,
             # offload_param=self._is_offload_param,

@@ -192,7 +192,6 @@ class DiffusionRollout(BaseRollout):
                 all_prev_sample_mean.append(batch_prev_sample_mean.unsqueeze(0))
            
             
-            # autocast_dtype = torch.float32 #TODO
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 # Cast final_latents to fp32 for the VAE decoder
                 final_latents_vae = final_latents.to(dtype=torch.float32)
